@@ -8,7 +8,7 @@ Treat releases as three separate deliverables:
 2. **Desktop binary**: Flutter plus Python, dependencies, FFmpeg/FFprobe, and a model.
 3. **Android sideload test build**: ONNX model, Rust Runtime, and ONNX Runtime Android library.
 
-After a `v*` tag is pushed, GitHub Actions builds Intel macOS, Apple Silicon macOS, Windows x64, and Android `arm64-v8a` packages and uploads them to the matching GitHub Release. Desktop packages include portable Python, dependencies, FFmpeg/FFprobe, and `models/bball_model.pt`; the Android job exports the ONNX model, compiles the Rust runtime, and downloads the official ONNX Runtime Android library.
+After a normal `v*` tag is pushed, GitHub Actions builds Intel macOS, Apple Silicon macOS, Windows x64, and Android `arm64-v8a` packages. Platform-suffixed hotfix tags build only that platform; see section 4. Packages are uploaded to the matching GitHub Release. Desktop packages include portable Python, dependencies, FFmpeg/FFprobe, and `models/bball_model.pt`; the Android job exports the ONNX model, compiles the Rust runtime, and downloads the official ONNX Runtime Android library.
 
 ## 1. Source-publication checklist
 
@@ -191,6 +191,8 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows_release.ps1 `
 The script creates `dist\BHE-windows-x64-v0.1.0-alpha.3.zip` and its `.sha256` checksum. Once a `v*` tag is pushed, GitHub Actions builds Windows x64, Intel macOS, and Apple Silicon macOS packages on hosted runners and uploads them to the GitHub Release; an Intel Mac is not needed locally.
 
 Windows remains a compatibility path. Validate the Flutter toolchain, Python/Torch/OpenCV/Ultralytics, FFmpeg DLLs, and installation flow; these scripts are not a formal installer or signing process.
+
+The Windows package uses LGPL FFmpeg without `libx264`. Export tries `libx264`, `libopenh264`, and then `mpeg4`, switching only when an encoder fails. The last option uses high-quality MPEG-4 Part 2 inside MP4; players that only support H.264 may not play it. Both individual clips and re-encoding after a failed merge use this policy. Packaging runs `scripts/check_media_pipeline.py --root <runtime>` to generate a real proxy, clips, and merged video, and stops on failure. Regular Python CI also runs this check on Windows using the same LGPL FFmpeg variant as the release package.
 
 ### Automated release modes and hotfix tags
 

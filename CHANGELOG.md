@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复 Windows 随包 FFmpeg 不含 `libx264` 时的片段导出与合并重新编码失败，依次尝试可用的 H.264 编码器和高质量 MPEG-4；
+- 修复 Windows 引擎未直接查找运行时目录中 `ffmpeg.exe`、`ffprobe.exe` 的问题，打包前增加真实代理与导出检查；
+- 更换返回 HTTP 410 的 macOS Intel FFmpeg 下载地址，并校验下载二进制的摘要、架构与可执行性；
+- 移除两个视频制作脚本中的开发机绝对路径，支持通过环境变量指定素材与剪映草稿目录。
+
 ### Added
 
 - 增加中英文根 README、入门、FAQ、开发和发布入口；

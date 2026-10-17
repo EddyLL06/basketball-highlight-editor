@@ -8,7 +8,7 @@
 2. **桌面二进制版**：额外携带 Python、依赖、FFmpeg/FFprobe、模型和 Flutter 应用。
 3. **Android 侧载测试版**：额外携带 ONNX 模型、Rust Runtime 和 ONNX Runtime Android 库。
 
-推送 `v*` tag 后，GitHub Actions 会自动构建 macOS Intel、macOS Apple Silicon、Windows x64 和 Android `arm64-v8a` 包，并将产物上传到对应 GitHub Release。桌面包会携带便携 Python、依赖、FFmpeg/FFprobe 和 `models/bball_model.pt`；Android 包在 CI 中导出 ONNX 模型、编译 Rust Runtime 并下载官方 ONNX Runtime Android 库。
+推送普通 `v*` tag 后，GitHub Actions 会自动构建 macOS Intel、macOS Apple Silicon、Windows x64 和 Android `arm64-v8a` 包；带平台后缀的热修复 tag 只构建该平台，规则见第 4 节。产物上传到对应 GitHub Release。桌面包会携带便携 Python、依赖、FFmpeg/FFprobe 和 `models/bball_model.pt`；Android 包在 CI 中导出 ONNX 模型、编译 Rust Runtime 并下载官方 ONNX Runtime Android 库。
 
 ## 1. 源码公开前检查
 
@@ -191,6 +191,8 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows_release.ps1 `
 脚本会生成 `dist\BHE-windows-x64-v0.1.0-alpha.3.zip` 和对应的 `.sha256` 校验文件。推送 `v*` tag 后，GitHub Actions 会在 Windows x64、macOS Intel 和 macOS Apple Silicon runner 上自动构建并把这些产物上传到 Release；本地没有 Intel Mac 也不影响 Intel 包构建。
 
 Windows 当前属于兼容路径，仍需验证 Flutter 工具链、Python/Torch/OpenCV/Ultralytics、FFmpeg DLL 和安装流程；它不能替代正式安装器、签名和用户验收。
+
+Windows 发布包采用不含 `libx264` 的 LGPL FFmpeg。导出依次尝试 `libx264`、`libopenh264` 和 `mpeg4`，仅在前一种编码失败时切换；最后一种使用高质量 MPEG-4 Part 2，仍封装为 MP4，但不保证所有仅支持 H.264 的播放器都能播放。逐片导出与合并失败后的重新编码采用同一规则。打包前运行 `scripts/check_media_pipeline.py --root <runtime>`，实际生成代理、片段和合并视频；检查失败时停止打包。常规 Python CI 也会在 Windows 上用发布包同款 LGPL FFmpeg 执行该检查。
 
 ### 自动发布模式与热修复 tag
 

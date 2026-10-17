@@ -15,6 +15,30 @@ def preferred_video_codec() -> str:
     return "h264_videotoolbox" if platform.system() == "Darwin" else "libx264"
 
 
+def video_codec_options(codec: str) -> list[str]:
+    options = ["-c:v", codec]
+    if codec == "libx264":
+        options += ["-preset", "veryfast", "-crf", "22"]
+    elif codec == "libopenh264":
+        options += ["-b:v", "8M"]
+    elif codec == "mpeg4":
+        options += ["-q:v", "2"]
+    return options
+
+
+def run_encoded_ffmpeg(command_builder, output_path: Path, **kwargs) -> None:
+    # The bundled Windows LGPL FFmpeg has no libx264. Keep H.264 when
+    # available, then use high-quality MPEG-4 rather than failing the export.
+    codecs = list(dict.fromkeys((preferred_video_codec(), "libx264", "libopenh264", "mpeg4")))
+    for index, codec in enumerate(codecs):
+        try:
+            run_atomic_ffmpeg(command_builder(codec), output_path, **kwargs)
+            return
+        except subprocess.CalledProcessError:
+            if index == len(codecs) - 1:
+                raise
+
+
 def concat_manifest_entry(path: Path) -> str:
     """Render a path safely for the ffmpeg concat demuxer on macOS and Windows."""
     normalized = path.resolve().as_posix().replace("'", "'\\''")
@@ -42,9 +66,7 @@ def build_clip_command(
         raise ValueError("INVALID_CLIP_RANGE")
     duration = (end_ms - start_ms) / 1000
     codec = video_codec or preferred_video_codec()
-    codec_options = ["-c:v", codec]
-    if codec == "libx264":
-        codec_options = ["-c:v", codec, "-preset", "veryfast", "-crf", "22"]
+    codec_options = video_codec_options(codec)
     command = [
         resolve_media_tool("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
         "-ss", f"{start_ms / 1000:.3f}", "-i", str(source_video),
@@ -140,35 +162,18 @@ def export_goal_clips(
             path = available_output_path(
                 output_dir / f"goal_{index:03d}_{candidate['event_time_ms'] / 1000:.2f}s.mp4"
             )
-            codec = preferred_video_codec()
-            try:
-                run_atomic_ffmpeg(
-                    build_clip_command(
-                        source_video,
-                        int(candidate["review_start_ms"]),
-                        int(candidate["review_end_ms"]),
-                        path,
-                        codec,
-                    ),
+            run_encoded_ffmpeg(
+                lambda codec: build_clip_command(
+                    source_video,
+                    int(candidate["review_start_ms"]),
+                    int(candidate["review_end_ms"]),
                     path,
-                    cancel_check=cancel_check,
-                    process_callback=process_callback,
-                )
-            except subprocess.CalledProcessError:
-                if codec == "libx264":
-                    raise
-                run_atomic_ffmpeg(
-                    build_clip_command(
-                        source_video,
-                        int(candidate["review_start_ms"]),
-                        int(candidate["review_end_ms"]),
-                        path,
-                        "libx264",
-                    ),
-                    path,
-                    cancel_check=cancel_check,
-                    process_callback=process_callback,
-                )
+                    codec,
+                ),
+                path,
+                cancel_check=cancel_check,
+                process_callback=process_callback,
+            )
             created_files.append(path)
             files.append(path)
             if progress_callback:
@@ -198,11 +203,11 @@ def export_goal_clips(
                 # Separate clips use a common encoder, so stream-copy is the
                 # fast path. Re-encode only when timestamps/codecs prevent a
                 # valid concat output.
-                run_atomic_ffmpeg(
-                    [
+                run_encoded_ffmpeg(
+                    lambda codec: [
                         resolve_media_tool("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
                         "-f", "concat", "-safe", "0", "-i", str(concat_file),
-                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                        *video_codec_options(codec),
                         "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
                         str(merged_path),
                     ],

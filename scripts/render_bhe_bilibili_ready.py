@@ -14,9 +14,13 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 
-ROOT = Path("/Users/macmima1234/basketball-highlight-editor")
-CAPTURE = ROOT / "capture"
+ROOT = Path(__file__).resolve().parents[1]
+CAPTURE = Path(os.getenv("BHE_CAPTURE_DIR", str(ROOT / "capture"))).expanduser()
 OUTPUT = CAPTURE / "bilibili-ready"
+DRAFTS_ROOT = Path(os.getenv(
+    "JY_DRAFTS_ROOT",
+    str(Path.home() / "Movies/JianyingPro/User Data/Projects/com.lveditor.draft"),
+)).expanduser()
 
 
 def ass_time(seconds: float) -> str:
@@ -173,7 +177,7 @@ def main() -> None:
         width=1436,
         height=896,
         title="BHE｜电脑端剪辑流程",
-        audio_dir=Path("/Users/macmima1234/Movies/JianyingPro/User Data/Projects/com.lveditor.draft/BHE_9月8日_PC介绍版/temp_assets"),
+        audio_dir=DRAFTS_ROOT / "BHE_9月8日_PC介绍版/temp_assets",
         audio_files=[
             "tts_4687e46f.ogg", "tts_1ca659ee.ogg", "tts_a332431e.ogg", "tts_52078d2e.ogg",
             "tts_6bbdb536.ogg", "tts_436d5e62.ogg", "tts_53b6927e.ogg",
@@ -197,7 +201,7 @@ def main() -> None:
         width=1176,
         height=2560,
         title="BHE｜Android 版操作演示",
-        audio_dir=Path("/Users/macmima1234/Movies/JianyingPro/User Data/Projects/com.lveditor.draft/BHE_9月9日_Android介绍版/temp_assets"),
+        audio_dir=DRAFTS_ROOT / "BHE_9月9日_Android介绍版/temp_assets",
         audio_files=[
             "tts_8be38404.ogg", "tts_1e079451.ogg", "tts_a2de49c4.ogg", "tts_7ae9781e.ogg",
             "tts_3d78f7cc.ogg", "tts_a0728abc.ogg", "tts_6ca02147.ogg",

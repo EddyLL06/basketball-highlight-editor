@@ -5,10 +5,11 @@ The script intentionally creates drafts only. It never publishes to a platform.
 
 import os
 import sys
+from pathlib import Path
 
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-SKILL_ROOT = os.getenv("JY_SKILL_ROOT", "/Users/macmima1234/.agents/skills/jianying-editor")
+SKILL_ROOT = os.getenv("JY_SKILL_ROOT", str(Path.home() / ".agents/skills/jianying-editor"))
 SKILL_SCRIPTS = os.path.join(SKILL_ROOT, "scripts")
 if SKILL_SCRIPTS not in sys.path:
     sys.path.insert(0, SKILL_SCRIPTS)
@@ -21,8 +22,11 @@ import pyJianYingDraft as draft
 from jy_wrapper import JyProject
 
 
-PROJECT_ROOT = "/Users/macmima1234/Movies/JianyingPro/User Data/Projects/com.lveditor.draft"
-CAPTURE_DIR = "/Users/macmima1234/basketball-highlight-editor/capture"
+PROJECT_ROOT = os.getenv(
+    "JY_DRAFTS_ROOT",
+    str(Path.home() / "Movies/JianyingPro/User Data/Projects/com.lveditor.draft"),
+)
+CAPTURE_DIR = os.getenv("BHE_CAPTURE_DIR", str(Path(__file__).resolve().parents[1] / "capture"))
 
 
 def build_project(

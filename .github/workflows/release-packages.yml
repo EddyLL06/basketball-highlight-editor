@@ -130,8 +130,10 @@ jobs:
           - runner: macos-15-intel
             arch: x86_64
             python_target: x86_64-apple-darwin
-            ffmpeg_url: https://evermeet.cx/ffmpeg/get/zip
-            ffprobe_url: https://evermeet.cx/ffmpeg/get/ffprobe/zip
+            ffmpeg_url: https://www.osxexperts.net/ffmpeg80intel.zip
+            ffprobe_url: https://www.osxexperts.net/ffprobe80intel.zip
+            ffmpeg_sha256: df3f1e3facdc1ae0ad0bd898cdfb072fbc9641bf47b11f172844525a05db8d11
+            ffprobe_sha256: 5228e651e2bd67bb55819b27f6138351587b16d2b87446007bf35b7cf930d891
           - runner: macos-15
             arch: arm64
             python_target: aarch64-apple-darwin
@@ -191,6 +193,9 @@ jobs:
         env:
           FFMPEG_URL: ${{ matrix.ffmpeg_url }}
           FFPROBE_URL: ${{ matrix.ffprobe_url }}
+          FFMPEG_SHA256: ${{ matrix.ffmpeg_sha256 }}
+          FFPROBE_SHA256: ${{ matrix.ffprobe_sha256 }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/bhe-ffmpeg" "$RUNNER_TEMP/bhe-ffprobe"
@@ -201,8 +206,16 @@ jobs:
           ffmpeg_path="$(find "$RUNNER_TEMP/bhe-ffmpeg" -type f -name ffmpeg -print -quit)"
           ffprobe_path="$(find "$RUNNER_TEMP/bhe-ffprobe" -type f -name ffprobe -print -quit)"
           test -n "$ffmpeg_path" && test -n "$ffprobe_path"
+          if [[ -n "$FFMPEG_SHA256" ]]; then
+            printf '%s  %s\n' "$FFMPEG_SHA256" "$ffmpeg_path" | shasum -a 256 --check
+            printf '%s  %s\n' "$FFPROBE_SHA256" "$ffprobe_path" | shasum -a 256 --check
+          fi
           chmod +x "$ffmpeg_path" "$ffprobe_path"
           file "$ffmpeg_path" "$ffprobe_path"
+          lipo "$ffmpeg_path" -verify_arch "$ARCH"
+          lipo "$ffprobe_path" -verify_arch "$ARCH"
+          "$ffmpeg_path" -version
+          "$ffprobe_path" -version
           echo "ffmpeg=$ffmpeg_path" >> "$GITHUB_OUTPUT"
           echo "ffprobe=$ffprobe_path" >> "$GITHUB_OUTPUT"
 

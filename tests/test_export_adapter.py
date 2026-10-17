@@ -1,9 +1,11 @@
 from pathlib import Path
+import subprocess
 
 import pytest
 
 from engine.python.basketball_engine.adapters.analysis import PipelineCancelled
 from engine.python.basketball_engine.adapters.export import build_clip_command, run_atomic_ffmpeg
+from engine.python.basketball_engine.adapters import export
 
 
 def test_libx264_clip_command_contains_one_video_codec():
@@ -15,6 +17,71 @@ def test_libx264_clip_command_contains_one_video_codec():
 def test_clip_command_rejects_invalid_range():
     with pytest.raises(ValueError, match="INVALID_CLIP_RANGE"):
         build_clip_command(Path("source.mp4"), 1000, 1000, Path("out.mp4"))
+
+
+@pytest.mark.parametrize("mode", ["separate", "merge"])
+def test_export_without_h264_encoders_falls_back_for_clips_and_merge(tmp_path, monkeypatch, mode):
+    monkeypatch.setattr(export, "preferred_video_codec", lambda: "libx264")
+    attempts = []
+
+    def fake_ffmpeg(command, output_path, **kwargs):
+        if "-c:v" not in command:
+            attempts.append("copy")
+            raise subprocess.CalledProcessError(1, command)
+        codec = command[command.index("-c:v") + 1]
+        attempts.append(codec)
+        if codec != "mpeg4":
+            raise subprocess.CalledProcessError(1, command)
+        assert command[command.index("-q:v") + 1] == "2"
+        output_path.write_bytes(b"video")
+
+    monkeypatch.setattr(export, "run_atomic_ffmpeg", fake_ffmpeg)
+    result = export.export_goal_clips(
+        tmp_path / "source.mp4",
+        [{"event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
+        tmp_path / "export", mode,
+    )
+    expected = ["libx264", "libopenh264", "mpeg4"]
+    if mode == "merge":
+        expected += ["copy", "libx264", "libopenh264", "mpeg4"]
+    assert attempts == expected
+    assert all(Path(path).is_file() for path in result["files"])
+
+
+def test_export_does_not_retry_cancelled_encoding(tmp_path, monkeypatch):
+    attempts = []
+
+    def cancel(command, output_path, **kwargs):
+        attempts.append(command)
+        raise PipelineCancelled("JOB_CANCELLED")
+
+    monkeypatch.setattr(export, "run_atomic_ffmpeg", cancel)
+    with pytest.raises(PipelineCancelled):
+        export.export_goal_clips(
+            tmp_path / "source.mp4",
+            [{"event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
+            tmp_path / "export", "separate",
+        )
+    assert len(attempts) == 1
+
+
+def test_export_surfaces_error_when_all_encoders_fail(tmp_path, monkeypatch):
+    monkeypatch.setattr(export, "preferred_video_codec", lambda: "libx264")
+    attempts = []
+
+    def fail(command, output_path, **kwargs):
+        attempts.append(command[command.index("-c:v") + 1])
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(export, "run_atomic_ffmpeg", fail)
+    with pytest.raises(subprocess.CalledProcessError):
+        export.export_goal_clips(
+            tmp_path / "source.mp4",
+            [{"event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
+            tmp_path / "export", "separate",
+        )
+    assert attempts == ["libx264", "libopenh264", "mpeg4"]
+    assert not list((tmp_path / "export").glob("*.mp4"))
 
 
 def test_run_atomic_ffmpeg_validates_and_renames_output(tmp_path: Path, monkeypatch):

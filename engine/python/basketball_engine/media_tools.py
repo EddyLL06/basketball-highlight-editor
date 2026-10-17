@@ -35,10 +35,12 @@ def resolve_media_tool(name: str) -> str:
         raise ValueError(f"unsupported media tool: {name}")
     seen: set[Path] = set()
     for root in _runtime_roots():
-        candidate = (root / "bin" / name).resolve()
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
+        names = (f"{name}.exe", name) if sys.platform == "win32" else (name,)
+        for filename in names:
+            candidate = (root / "bin" / filename).resolve()
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
     return shutil.which(name) or name

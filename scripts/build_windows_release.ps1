@@ -50,6 +50,9 @@ Copy-Item -Recurse -Force "$RuntimeOut" $AppRuntime
     --model "$AppRuntime\models\bball_model.pt"
 if ($LASTEXITCODE -ne 0) { Write-Error "runtime check failed" }
 
+& "$AppRuntime\python\python.exe" "$AppRuntime\scripts\check_media_pipeline.py" --root "$AppRuntime"
+if ($LASTEXITCODE -ne 0) { Write-Error "media pipeline check failed" }
+
 if ($Zip -or $PackageOut) {
     $Dist = "$Root\dist"
     New-Item -ItemType Directory -Force -Path $Dist | Out-Null
