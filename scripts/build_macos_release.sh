@@ -91,8 +91,7 @@ if [[ "${BHE_SKIP_PACKAGE:-0}" != "1" ]]; then
     codesign --sign - "$dmg_staging/BHE-首次打开修复.command" >/dev/null 2>&1 || true
     ln -s /Applications "$dmg_staging/Applications"
     rm -f "$DMG_OUT"
-    hdiutil create -volname "BHE" -srcfolder "$dmg_staging" \
-      -ov -format UDZO "$DMG_OUT"
+    bash "$ROOT/scripts/create_macos_dmg.sh" "$dmg_staging" "$DMG_OUT"
     write_sha256 "$DMG_OUT"
     echo "Packaged macOS installer: $DMG_OUT"
   fi

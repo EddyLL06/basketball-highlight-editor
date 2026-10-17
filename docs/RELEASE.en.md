@@ -88,6 +88,8 @@ It must import `cv2`, `numpy`, `ultralytics`, and `torch`. Do not copy a develop
 
 Use a self-contained or static FFmpeg/FFprobe build. Homebrew-dependent binaries are for local testing only; `BHE_ALLOW_EXTERNAL_FFMPEG=1` can be used explicitly for that purpose, but it is not a distribution solution.
 
+Ephemeral GitHub macOS runners disable Spotlight indexing to reduce contention during DMG creation. `scripts/create_macos_dmg.sh` uses HFS+ and attempts `Resource busy` failures at most five times; other errors fail immediately. It runs `hdiutil verify` before checksumming and uploading the image. See the [reported GitHub runner issue](https://github.com/actions/runner-images/issues/7522).
+
 ### 3.3 Prepare the runtime directory
 
 Place an authorized model at:

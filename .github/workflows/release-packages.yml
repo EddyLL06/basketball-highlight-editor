@@ -219,6 +219,12 @@ jobs:
           echo "ffmpeg=$ffmpeg_path" >> "$GITHUB_OUTPUT"
           echo "ffprobe=$ffprobe_path" >> "$GITHUB_OUTPUT"
 
+      - name: Disable indexing on the ephemeral macOS runner
+        run: |
+          if ! sudo mdutil -a -i off; then
+            echo "::warning::Some volumes could not disable indexing; DMG creation retries Resource busy errors."
+          fi
+
       - name: Build macOS package
         shell: bash
         env:

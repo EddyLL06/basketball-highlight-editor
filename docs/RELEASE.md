@@ -88,6 +88,8 @@ portable-python/
 
 FFmpeg 和 FFprobe 应使用自包含或静态构建。依赖 Homebrew 的版本只适合本机临时验证，可显式设置 `BHE_ALLOW_EXTERNAL_FFMPEG=1`，但这不代表可分发。
 
+GitHub 临时 macOS 构建机会关闭 Spotlight 索引，以减少制作 DMG 时的资源占用。`scripts/create_macos_dmg.sh` 使用 HFS+，仅对 `Resource busy` 最多尝试 5 次；其他错误立即失败。镜像创建后执行 `hdiutil verify`，验证通过才生成摘要并上传。该策略对应 [GitHub runner 的已报告问题](https://github.com/actions/runner-images/issues/7522)。
+
 ### 3.3 准备运行时目录
 
 把已授权模型放在：
