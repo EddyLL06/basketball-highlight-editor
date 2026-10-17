@@ -38,25 +38,38 @@ else
 fi
 
 case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64) NDK_HOST_TAG="darwin-arm64" ;;
-  Darwin-x86_64) NDK_HOST_TAG="darwin-x86_64" ;;
-  Linux-x86_64) NDK_HOST_TAG="linux-x86_64" ;;
+  Darwin-arm64) NDK_HOST_TAGS=(darwin-arm64 darwin-x86_64) ;;
+  Darwin-x86_64) NDK_HOST_TAGS=(darwin-x86_64) ;;
+  Linux-x86_64) NDK_HOST_TAGS=(linux-x86_64) ;;
   *) die "不支持当前主机上的 Android NDK：$(uname -s)-$(uname -m)" ;;
 esac
 
-CLANG="$NDK/toolchains/llvm/prebuilt/$NDK_HOST_TAG/bin/aarch64-linux-android21-clang"
-[[ -x "$CLANG" ]] || die "NDK 中未找到 aarch64-linux-android21-clang。"
+CLANG=""
+for host_tag in "${NDK_HOST_TAGS[@]}"; do
+  candidate="$NDK/toolchains/llvm/prebuilt/$host_tag/bin/aarch64-linux-android21-clang"
+  if [[ -x "$candidate" ]]; then
+    CLANG="$candidate"
+    break
+  fi
+done
+[[ -n "$CLANG" ]] || die "NDK 中未找到可用的 aarch64-linux-android21-clang。"
 
 echo "构建 Rust Android Runtime: $TARGET"
 RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-soname,libbhe_runtime.so" \
 CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CLANG" \
 RUSTC="$RUSTC_BIN" \
-  "$CARGO_BIN" build --manifest-path "$PACKAGE/Cargo.toml" --release --target "$TARGET" --features dynamic-onnx
+  "$CARGO_BIN" build --manifest-path "$PACKAGE/Cargo.toml" --release --target "$TARGET" --features dynamic-onnx,android-ep
 
 DEST="$OUT/$ABI"
 mkdir -p "$DEST"
-cp "$PACKAGE/target/$TARGET/release/libbhe_runtime.so" "$DEST/libbhe_runtime.so"
-cp "$ORT_DIR/$ABI/libonnxruntime.so" "$DEST/libonnxruntime.so"
+RUNTIME_SOURCE="$PACKAGE/target/$TARGET/release/libbhe_runtime.so"
+ORT_SOURCE="$ORT_DIR/$ABI/libonnxruntime.so"
+if ! cmp -s "$RUNTIME_SOURCE" "$DEST/libbhe_runtime.so" 2>/dev/null; then
+  cp "$RUNTIME_SOURCE" "$DEST/libbhe_runtime.so"
+fi
+if ! cmp -s "$ORT_SOURCE" "$DEST/libonnxruntime.so" 2>/dev/null; then
+  cp "$ORT_SOURCE" "$DEST/libonnxruntime.so"
+fi
 
 echo "Android Runtime 已生成：$DEST"
 echo "下一步：cd apps/mobile && flutter build apk --release"

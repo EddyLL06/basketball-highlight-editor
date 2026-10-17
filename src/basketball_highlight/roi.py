@@ -15,7 +15,7 @@ def expand_hoop_bbox_to_roi(
     frame_width: int,
     frame_height: int,
     *,
-    min_width_ratio: float = 0.14,
+    min_width_ratio: float = 0.18,
     min_height_ratio: float = 0.28,
     max_width_ratio: float = 0.65,
     max_height_ratio: float = 0.75,
@@ -37,7 +37,7 @@ def expand_hoop_bbox_to_roi(
     center_x = (x1 + x2) / 2.0
     center_y = (y1 + y2) / 2.0
 
-    roi_width = max(rim_width * 12.0, frame_width * min_width_ratio)
+    roi_width = max(rim_width * 15.0, frame_width * min_width_ratio)
     roi_height = max(rim_height * 20.0, frame_height * min_height_ratio)
     roi_width = min(roi_width, frame_width * max_width_ratio)
     roi_height = min(roi_height, frame_height * max_height_ratio)
@@ -62,6 +62,36 @@ def expand_hoop_bbox_to_roi(
         "y1": int(round(top)),
         "x2": int(round(max(left + 1.0, right))),
         "y2": int(round(max(top + 1.0, bottom))),
+    }
+
+
+def hoop_bbox_to_rim_roi(
+    bbox: Iterable[float],
+    frame_width: int,
+    frame_height: int,
+) -> dict[str, float]:
+    """Convert a detector hoop box to the normalized rim-plane ROI.
+
+    This is the same calibration used by the desktop refiner's
+    ``scale_rim(..., correct_plane=True)``. Mobile auto-ROI consumers use this
+    value directly so they do not invent a second rim geometry formula.
+    """
+    values = [float(value) for value in bbox]
+    if len(values) != 4 or frame_width <= 0 or frame_height <= 0:
+        raise ValueError("ROI_INPUT_INVALID")
+    x1, y1, x2, y2 = values
+    if x2 <= x1 or y2 <= y1:
+        raise ValueError("ROI_INPUT_INVALID")
+    box_width = max(1.0, x2 - x1)
+    box_height = max(1.0, y2 - y1)
+    center_x = (x1 + x2) / 2.0
+    rim_y = (y1 + y2) / 2.0 - box_height * 0.28
+    rim_height = box_height * 0.45
+    return {
+        "left": max(0.0, min(1.0, (center_x - box_width / 2.0) / frame_width)),
+        "top": max(0.0, min(1.0, (rim_y - rim_height / 2.0) / frame_height)),
+        "right": max(0.0, min(1.0, (center_x + box_width / 2.0) / frame_width)),
+        "bottom": max(0.0, min(1.0, (rim_y + rim_height / 2.0) / frame_height)),
     }
 
 

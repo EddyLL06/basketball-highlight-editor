@@ -4,9 +4,21 @@
 >
 > Basketball Highlight Editor 会先帮你把整场比赛里可能的进球片段找出来，你只需要快速看一遍、删掉误检，再导出自己的集锦。
 
+[English](README.en.md) · **简体中文**
+
+[![Python Tests](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/python-tests.yml?branch=main&style=flat-square&label=Python%20tests)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/python-tests.yml)
+[![Flutter Checks](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/flutter-check.yml?branch=main&style=flat-square&label=Flutter%20checks)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/flutter-check.yml)
+[![Latest tag](https://img.shields.io/github/v/tag/fly7632785/basketball-highlight-editor?include_prereleases&style=flat-square&label=latest%20tag)](https://github.com/fly7632785/basketball-highlight-editor/tags)
+[![License](https://img.shields.io/github/license/fly7632785/basketball-highlight-editor?style=flat-square)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Android%20%7C%20iOS-4c6ef5?style=flat-square)
+![Local first](https://img.shields.io/badge/运行方式-完全本地-2ea44f?style=flat-square)
+![Free](https://img.shields.io/badge/费用-免费-f97316?style=flat-square)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
+[![Linux DO](https://img.shields.io/badge/Linux%20DO-社区交流-00a67d?style=flat-square)](https://linux.do/)
+
 **完全本地运行 · 免费使用 · 自动找片段 · 人工可控**
 
-[开始使用](#开始使用) · [功能介绍](#它能帮你省下什么) · [文档](#文档)
+[🏠 官网 bhe.jafir.top](https://bhe.jafir.top) · [⬇ 下载最新版](https://bhe.jafir.top/#download) · [开始使用](#开始使用) · [功能介绍](#它能帮你省下什么) · [文档](#文档)
 
 ## 先说它解决什么问题
 
@@ -99,6 +111,10 @@
 
 点击封面即可打开 OSS 上的操作录屏。仓库不保存大体积演示视频，避免下载项目时额外占用 Git 空间。
 
+下面是一个适合快速了解操作流程的短版演示：
+
+https://github.com/user-attachments/assets/43bfed76-bbc6-42c2-bbaa-ea2bf0604292
+
 排除的候选不会被删除，之后仍然可以恢复或复核：
 
 ![标签和候选管理](capture/screenshot-20260813-150302.png)
@@ -119,9 +135,34 @@
 
 更多页面、按钮、快捷键和白色主题截图见 [`docs/USER_FLOW_V1.md`](docs/USER_FLOW_V1.md) 以及 [`docs/README.md`](docs/README.md)。
 
+## Android / iOS 移动端
+
+BHE 现在也提供 Android 和 iOS 移动端版本。移动端适合在手机上导入比赛视频、查看项目、审核候选片段，并把保留的片段分别导出或合并导出；Android 当前还接入了本地原生分析路径，iOS 的本地分析能力取决于 Rust Runtime 和 ONNX Runtime 是否完成构建链接。
+
+移动端界面保持和桌面端相同的核心流程：先准备项目，再查看视频和候选，最后进入导出页。手机上审核时可以在竖屏查看候选，也可以横屏获得更大的视频画面。
+
+<p align="center">
+  <img src="capture/mobile-ios-project.png" alt="iOS 项目工作台" width="280">
+  <img src="capture/mobile-ios-review.png" alt="iOS 候选审核" width="280">
+</p>
+
+横屏审核会把视频、候选列表和审核操作集中到同一工作区：
+
+<p align="center">
+  <img src="capture/mobile-ios-review-landscape.png" alt="iOS 横屏审核" width="560">
+</p>
+
+审核完成后，可以分别导出所有保留片段，也可以合并成一条集锦：
+
+<p align="center">
+  <img src="capture/mobile-ios-export.png" alt="iOS 导出集锦" width="280">
+</p>
+
+移动端构建、真机测试和原生推理依赖见 [`apps/mobile/README.md`](apps/mobile/README.md)；跨端能力边界见 [`docs/MOBILE_PC_FEATURE_MATRIX.md`](docs/MOBILE_PC_FEATURE_MATRIX.md)。
+
 ## 开始使用
 
-你可以直接从 GitHub Releases 下载桌面包或 Android `arm64-v8a` 测试包；每次推送 `v*` tag 后，GitHub Actions 会自动生成 macOS Intel、macOS Apple Silicon、Windows x64 和 Android `arm64-v8a` 版本。Android 包为 `debug-signed` 侧载测试包，不是 Google Play 正式签名包。想参与开发或自己构建时，再按下面的源码部署步骤准备环境。
+你可以从[官网下载安装包](https://bhe.jafir.top/#download)，GitHub Releases 作为备用下载入口；每次推送 `v*` tag 后，GitHub Actions 会自动生成 macOS Intel、macOS Apple Silicon、Windows x64 和 Android `arm64-v8a` 版本。Android 包为 `debug-signed` 侧载测试包，不是 Google Play 正式签名包。想参与开发或自己构建时，再按下面的源码部署步骤准备环境。
 
 ### macOS
 

@@ -22,7 +22,7 @@ class MobileAppState extends ChangeNotifier {
   }
 
   final MobileAnalysisEngine analysisEngine;
-  final MobileExportEngine exportEngine = const NativeMediaExportEngine();
+  final MobileExportEngine exportEngine = NativeMediaExportEngine();
 
   ProjectSnapshot project = ProjectSnapshot(
     id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -38,11 +38,14 @@ class MobileAppState extends ChangeNotifier {
   Duration? eta;
   String? errorMessage;
   bool loading = true;
+  bool preparingVideo = false;
+  String preparingVideoMessage = '';
   bool analysing = false;
   bool exporting = false;
   List<String> exportedPaths = const [];
   Future<void> _saveChain = Future<void>.value();
   int _analysisGeneration = 0;
+  int _videoPreparationGeneration = 0;
   DateTime? analysisStartedAt;
 
   bool get hasVideo => project.video != null;
@@ -63,6 +66,47 @@ class MobileAppState extends ChangeNotifier {
     final directory = Directory('${(await _dataDirectory()).path}/projects');
     await directory.create(recursive: true);
     return directory;
+  }
+
+  Future<String> _materializeVideoPath(String path, String projectId) async {
+    if (!Platform.isIOS) return path;
+    final source = File(path);
+    final directory = Directory(
+      '${(await _dataDirectory()).path}/videos/$projectId',
+    );
+    await directory.create(recursive: true);
+    final extension = path.contains('.')
+        ? path.substring(path.lastIndexOf('.')).toLowerCase()
+        : '.mp4';
+    final target = File('${directory.path}/source$extension');
+    // A project can outlive its iOS container path after a reinstall. In
+    // that case keep the already materialized copy instead of trying to copy
+    // from the stale temporary path.
+    if (!await source.exists()) {
+      final existing = await _existingMaterializedVideo(directory);
+      if (existing != null) return existing.path;
+      return target.path;
+    }
+    if (source.path != target.path) {
+      if (await target.exists()) await target.delete();
+      await source.copy(target.path);
+    }
+    await for (final entry in directory.list()) {
+      if (entry.path == target.path) continue;
+      await entry.delete(recursive: true);
+    }
+    return target.path;
+  }
+
+  Future<File?> _existingMaterializedVideo(Directory directory) async {
+    if (!await directory.exists()) return null;
+    await for (final entry in directory.list()) {
+      if (entry is File &&
+          entry.path.split(Platform.pathSeparator).last.startsWith('source.')) {
+        return entry;
+      }
+    }
+    return null;
   }
 
   Future<File> _projectFile(String id) async {
@@ -125,9 +169,34 @@ class MobileAppState extends ChangeNotifier {
   }
 
   Future<void> _validateImportedVideoIfPresent() async {
-    if (project.video == null || !sourceVideoExists) {
+    if (project.video == null) {
       errorMessage = '项目已打开，请重新选择原视频后继续。';
       return;
+    }
+    final video = project.video!;
+    final directory = Directory(
+      '${(await _dataDirectory()).path}/videos/${project.id}',
+    );
+    final existing = await _existingMaterializedVideo(directory);
+    final persistentPath =
+        existing?.path ?? await _materializeVideoPath(video.path, project.id);
+    if (!await File(persistentPath).exists()) {
+      errorMessage = '项目已打开，请重新选择原视频后继续。';
+      return;
+    }
+    if (persistentPath != video.path) {
+      project = project.copyWith(
+        video: VideoInfo(
+          path: persistentPath,
+          name: video.name,
+          sizeBytes: video.sizeBytes,
+          durationMs: video.durationMs,
+          width: video.width,
+          height: video.height,
+          sha256: video.sha256,
+        ),
+      );
+      await _queueSave();
     }
     if (!await _matchesProjectVideo()) {
       errorMessage = '项目已打开，但当前原视频与项目记录不一致，请重新选择原视频。';
@@ -143,17 +212,29 @@ class MobileAppState extends ChangeNotifier {
         final ids =
             (jsonDecode(await indexFile.readAsString()) as List?)
                 ?.whereType<String>()
+                .toSet()
                 .toList() ??
             const <String>[];
+        final loadedProjects = <ProjectSnapshot>[];
         for (final id in ids) {
           final file = await _projectFile(id);
           if (!await file.exists()) continue;
-          recentProjects = [
-            ...recentProjects,
-            const ProjectPackageCodec().decode(await file.readAsString()),
-          ];
+          try {
+            loadedProjects.add(
+              const ProjectPackageCodec().decode(await file.readAsString()),
+            );
+          } on Object catch (error, stack) {
+            developer.log(
+              'skipping invalid project $id: $error',
+              name: 'BHE-Project',
+              error: error,
+              stackTrace: stack,
+            );
+          }
         }
+        recentProjects = loadedProjects;
         if (recentProjects.isNotEmpty) project = recentProjects.first;
+        await _persistProjects();
       } else if (await legacyFile.exists()) {
         project = const ProjectPackageCodec().decode(
           await legacyFile.readAsString(),
@@ -161,17 +242,81 @@ class MobileAppState extends ChangeNotifier {
         recentProjects = [project];
         await _persistProjects();
       }
+      if (project.video != null) await _validateImportedVideoIfPresent();
       if (project.lastAnalysisStatus == 'running') {
-        project = project.copyWith(
-          lastAnalysisStatus: 'interrupted',
-          lastAnalysisMessage: '应用上次退出时分析未完成，可重新分析。',
-        );
-        await _queueSave();
+        unawaited(_recoverRunningAnalysis());
       }
     } on Object catch (error) {
       errorMessage = '读取本地项目失败：$error';
     } finally {
       loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _recoverRunningAnalysis() async {
+    var receivedState = false;
+    try {
+      await for (final update in analysisEngine.recoverAnalysis()) {
+        receivedState = true;
+        stage = update.stage;
+        progress = update.progress.clamp(0, 1);
+        progressMessage = update.message;
+        processedFrames = update.processedFrames;
+        totalFrames = update.totalFrames;
+        analysing =
+            update.stage != AnalysisStage.completed &&
+            update.stage != AnalysisStage.cancelled &&
+            update.stage != AnalysisStage.failed;
+        analysisStartedAt ??= DateTime.now();
+        if (update.stage == AnalysisStage.completed) {
+          project = project.copyWith(
+            candidates: update.candidates,
+            lastAnalysisStatus: 'completed',
+            lastAnalysisProgressPercent: 100,
+            lastAnalysisMessage: '分析完成',
+            lastAnalysisAt: DateTime.now(),
+          );
+          analysing = false;
+          analysisStartedAt = null;
+          await _queueSave();
+        } else if (update.stage == AnalysisStage.cancelled ||
+            update.stage == AnalysisStage.failed) {
+          project = project.copyWith(
+            lastAnalysisStatus: update.stage == AnalysisStage.cancelled
+                ? 'cancelled'
+                : 'failed',
+            lastAnalysisMessage: update.message,
+          );
+          analysing = false;
+          analysisStartedAt = null;
+          await _queueSave();
+        } else {
+          project = project.copyWith(
+            lastAnalysisStatus: 'running',
+            lastAnalysisProgressPercent: (progress * 100).round(),
+            lastAnalysisMessage: update.message,
+          );
+          unawaited(_queueSave());
+        }
+        notifyListeners();
+      }
+      if (!receivedState && project.lastAnalysisStatus == 'running') {
+        project = project.copyWith(
+          lastAnalysisStatus: 'interrupted',
+          lastAnalysisMessage: '未找到仍在运行的原生分析任务，可重新分析。',
+        );
+        await _queueSave();
+        notifyListeners();
+      }
+    } on Object catch (error) {
+      project = project.copyWith(
+        lastAnalysisStatus: 'interrupted',
+        lastAnalysisMessage: '无法恢复原生分析任务：$error',
+      );
+      analysing = false;
+      analysisStartedAt = null;
+      unawaited(_queueSave());
       notifyListeners();
     }
   }
@@ -196,9 +341,12 @@ class MobileAppState extends ChangeNotifier {
 
   Future<void> openProject(String id) async {
     if (analysing) await cancelAnalysis();
+    _invalidateVideoPreparation();
+    await _saveChain;
     final file = await _projectFile(id);
     if (!await file.exists()) return;
     project = const ProjectPackageCodec().decode(await file.readAsString());
+    _resetTransientState();
     errorMessage = null;
     exportedPaths = const [];
     await _validateImportedVideoIfPresent();
@@ -212,20 +360,33 @@ class MobileAppState extends ChangeNotifier {
 
   Future<void> createNewProject() async {
     if (analysing) await cancelAnalysis();
-    project = ProjectSnapshot(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      name: '新项目',
-      video: null,
-    );
-    stage = AnalysisStage.idle;
-    errorMessage = null;
-    exportedPaths = const [];
+    _invalidateVideoPreparation();
+    if (project.video != null) await _queueSave();
+    project = _newProject();
+    _resetTransientState();
     notifyListeners();
   }
 
+  ProjectSnapshot _newProject() =>
+      ProjectSnapshot(id: _newProjectId(), name: '新项目', video: null);
+
+  String _newProjectId() {
+    var id = DateTime.now().microsecondsSinceEpoch.toString();
+    final usedIds = {project.id, ...recentProjects.map((item) => item.id)};
+    var suffix = 0;
+    while (usedIds.contains(id)) {
+      id = '${DateTime.now().microsecondsSinceEpoch}_${suffix++}';
+    }
+    return id;
+  }
+
   Future<void> createNewProjectAndPickVideo() async {
+    if (analysing) await cancelAnalysis();
+    _invalidateVideoPreparation();
+    final picked = await _pickVideo();
+    if (picked == null) return;
     await createNewProject();
-    await pickVideo();
+    await _prepareVideo(picked.path, name: picked.name);
   }
 
   Future<void> _queueSave() {
@@ -239,47 +400,183 @@ class MobileAppState extends ChangeNotifier {
 
   Future<void> pickVideo() async {
     if (analysing) await cancelAnalysis();
+    _invalidateVideoPreparation();
+    final picked = await _pickVideo();
+    if (picked == null) return;
+    await _prepareVideo(picked.path, name: picked.name);
+  }
+
+  Future<({String path, String name})?> _pickVideo() async {
     final result = await FilePicker.platform.pickFiles(type: FileType.video);
-    final path = result?.files.single.path;
-    if (path == null) return;
-    final file = File(path);
-    final controller = VideoPlayerController.file(file);
+    final file = result?.files.single;
+    final path = file?.path;
+    if (path == null) return null;
+    final pathName = path.split(Platform.pathSeparator).last;
+    return (
+      path: path,
+      name: file?.name.trim().isNotEmpty == true ? file!.name : pathName,
+    );
+  }
+
+  Future<void> _prepareVideo(String path, {String? name}) async {
+    final projectId = project.id;
+    final preparationGeneration = ++_videoPreparationGeneration;
+    preparingVideo = true;
+    preparingVideoMessage = '正在读取视频信息';
+    errorMessage = null;
+    notifyListeners();
+    VideoPlayerController? controller;
     try {
-      await controller.initialize();
-      final value = controller.value;
-      final name = path.split(Platform.pathSeparator).last;
+      preparingVideoMessage = '正在保存视频到本机';
+      notifyListeners();
+      final localPath = await _materializeVideoPath(path, projectId);
+      if (!_isCurrentVideoPreparation(preparationGeneration, projectId)) return;
+      final file = File(localPath);
+      final player = VideoPlayerController.file(file);
+      controller = player;
+      await player.initialize();
+      final value = player.value;
+      final sourceName = name?.trim().isNotEmpty == true
+          ? name!.trim()
+          : path.split(Platform.pathSeparator).last;
+      preparingVideoMessage = '正在读取文件大小';
+      notifyListeners();
       final sizeBytes = await file.length();
+      if (!_isCurrentVideoPreparation(preparationGeneration, projectId)) return;
       project = project.copyWith(
-        name: name.replaceFirst(RegExp(r'\.[^.]+$'), ''),
+        name: sourceName.replaceFirst(RegExp(r'\.[^.]+$'), ''),
         video: VideoInfo(
-          path: path,
-          name: name,
+          path: localPath,
+          name: sourceName,
           sizeBytes: sizeBytes,
           durationMs: value.duration.inMilliseconds,
           width: value.size.width.round(),
           height: value.size.height.round(),
         ),
         clearHoopRoi: true,
+        clearRimRoi: true,
         clearNetRoi: true,
         candidates: const [],
         clearLastAnalysis: true,
       );
       errorMessage = null;
-      await _queueSave();
+      preparingVideoMessage = '正在保存项目';
       notifyListeners();
-      unawaited(_finishVideoHash(path, sizeBytes, value));
+      await _queueSave();
+      if (!_isCurrentVideoPreparation(preparationGeneration, projectId)) {
+        return;
+      }
+      preparingVideoMessage = '正在识别篮筐区域';
+      notifyListeners();
+      try {
+        final suggestion = await analysisEngine.suggestRoi(
+          video: project.video!,
+          startMs: project.settings.startMs,
+          modelSize: project.settings.modelInputSize,
+        );
+        if (!_isCurrentVideoPreparation(preparationGeneration, projectId)) {
+          return;
+        }
+        final rawRoi = suggestion?['roi'];
+        if (rawRoi is Map) {
+          final analysisRoi = Roi.fromJson(
+            rawRoi.map((key, value) => MapEntry(key.toString(), value)),
+          );
+          final rawNet = suggestion?['net_roi'];
+          final rawRim = suggestion?['rim_roi'];
+          final rimRoi = rawRim is Map
+              ? Roi.fromJson(
+                  rawRim.map((key, value) => MapEntry(key.toString(), value)),
+                )
+              : null;
+          final netRoi = rawNet is Map
+              ? Roi.fromJson(
+                  rawNet.map((key, value) => MapEntry(key.toString(), value)),
+                )
+              : rimRoi != null
+              ? netRoiFromRim(analysisRoi, rimRoi)
+              : Roi(
+                  left: analysisRoi.left,
+                  top: (analysisRoi.top + .06).clamp(0, 1),
+                  right: analysisRoi.right,
+                  bottom: (analysisRoi.bottom + .18).clamp(0, 1),
+                );
+          project = project.copyWith(
+            hoopRoi: analysisRoi,
+            rimRoi: rimRoi,
+            netRoi: netRoi,
+          );
+          await _queueSave();
+        }
+      } on Object catch (error, stack) {
+        developer.log(
+          'automatic ROI suggestion failed: $error',
+          name: 'BHE-Project',
+          error: error,
+          stackTrace: stack,
+        );
+      }
+      unawaited(
+        _finishVideoHash(
+          projectId,
+          preparationGeneration,
+          localPath,
+          sizeBytes,
+          value,
+        ),
+      );
+    } on Object catch (error, stack) {
+      developer.log(
+        'video preparation failed: $error',
+        name: 'BHE-Project',
+        error: error,
+        stackTrace: stack,
+      );
+      errorMessage = '无法读取该视频，请换一个视频重试。';
     } finally {
-      await controller.dispose();
+      if (preparationGeneration == _videoPreparationGeneration) {
+        preparingVideo = false;
+        preparingVideoMessage = '';
+        notifyListeners();
+      }
+      await controller?.dispose();
     }
   }
 
+  bool _isCurrentVideoPreparation(int generation, String projectId) =>
+      generation == _videoPreparationGeneration && project.id == projectId;
+
+  void _invalidateVideoPreparation() {
+    _videoPreparationGeneration++;
+    preparingVideo = false;
+    preparingVideoMessage = '';
+  }
+
+  void _resetTransientState() {
+    stage = AnalysisStage.idle;
+    progress = 0;
+    progressMessage = '';
+    processedFrames = null;
+    totalFrames = null;
+    eta = null;
+    analysing = false;
+    exporting = false;
+    exportedPaths = const [];
+    analysisStartedAt = null;
+  }
+
   Future<void> _finishVideoHash(
+    String projectId,
+    int preparationGeneration,
     String path,
     int sizeBytes,
     VideoPlayerValue metadata,
   ) async {
     final hash = await _sha256(File(path));
-    if (project.video?.path != path) return;
+    if (!_isCurrentVideoPreparation(preparationGeneration, projectId) ||
+        project.video?.path != path) {
+      return;
+    }
     project = project.copyWith(
       video: VideoInfo(
         path: path,
@@ -297,18 +594,28 @@ class MobileAppState extends ChangeNotifier {
 
   Future<void> importProject() async {
     if (analysing) await cancelAnalysis();
+    _invalidateVideoPreparation();
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['bhe', 'json'],
     );
-    final path = result?.files.single.path;
+    final file = result?.files.single;
+    final path = file?.path;
     if (path == null) return;
     try {
+      if (project.video != null) await _queueSave();
       final file = File(path);
       final content = path.toLowerCase().endsWith('.bhe')
           ? _readProjectFromArchive(await file.readAsBytes())
           : await file.readAsString();
-      project = const ProjectPackageCodec().decode(content);
+      final imported = const ProjectPackageCodec().decode(content);
+      final importedId =
+          project.id == imported.id ||
+              recentProjects.any((item) => item.id == imported.id)
+          ? _newProjectId()
+          : imported.id;
+      project = imported.copyWith(id: importedId);
+      _resetTransientState();
       errorMessage = null;
       await _validateImportedVideoIfPresent();
       await _queueSave();
@@ -322,10 +629,11 @@ class MobileAppState extends ChangeNotifier {
   Future<void> relinkVideo() async {
     if (analysing) await cancelAnalysis();
     final result = await FilePicker.platform.pickFiles(type: FileType.video);
-    final path = result?.files.single.path;
+    final file = result?.files.single;
+    final path = file?.path;
     if (path == null) return;
-    final file = File(path);
-    final controller = VideoPlayerController.file(file);
+    final sourceFile = File(path);
+    final controller = VideoPlayerController.file(sourceFile);
     try {
       await controller.initialize();
       final value = controller.value;
@@ -339,18 +647,23 @@ class MobileAppState extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      final fileHash = await _sha256(file);
+      final fileHash = await _sha256(sourceFile);
       if (previous?.sha256 != null && previous!.sha256 != fileHash) {
         errorMessage = '所选视频文件与项目记录不一致，请选择原始视频。';
         notifyListeners();
         return;
       }
-      final name = path.split(Platform.pathSeparator).last;
+      final localPath = await _materializeVideoPath(path, project.id);
+      final localFile = File(localPath);
+      final fallbackName = path.split(Platform.pathSeparator).last;
+      final name = file?.name.trim().isNotEmpty == true
+          ? file!.name
+          : fallbackName;
       project = project.copyWith(
         video: VideoInfo(
-          path: path,
+          path: localPath,
           name: name,
-          sizeBytes: await file.length(),
+          sizeBytes: await localFile.length(),
           durationMs: value.duration.inMilliseconds,
           width: value.size.width.round(),
           height: value.size.height.round(),
@@ -384,28 +697,37 @@ class MobileAppState extends ChangeNotifier {
   }
 
   void updateRois({required Roi hoop, required Roi net}) {
-    project = project.copyWith(hoopRoi: hoop, netRoi: net);
+    project = project.copyWith(
+      hoopRoi: hoop,
+      // `hoopRoi` is the large ball-search/analysis area. Keep the separately
+      // calibrated physical rim when that broad area is adjusted.
+      netRoi: net,
+    );
     unawaited(_queueSave());
     notifyListeners();
   }
 
   Future<void> clearProject() async {
     if (analysing) await cancelAnalysis();
+    _invalidateVideoPreparation();
     await _saveChain;
     final deletedId = project.id;
-    project = ProjectSnapshot(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      name: '新项目',
-      video: null,
-    );
     stage = AnalysisStage.idle;
     errorMessage = null;
+    _resetTransientState();
     final file = await _projectFile(deletedId);
     if (await file.exists()) await file.delete();
     recentProjects = recentProjects
         .where((item) => item.id != deletedId)
         .toList();
     await _persistProjects();
+    if (recentProjects.isEmpty) {
+      project = _newProject();
+    } else {
+      project = recentProjects.first;
+      exportedPaths = const [];
+      await _validateImportedVideoIfPresent();
+    }
     final directory = await _dataDirectory();
     for (final name in ['project.bhe.json', 'project.bhe']) {
       final legacy = File('${directory.path}/$name');
@@ -416,6 +738,10 @@ class MobileAppState extends ChangeNotifier {
       if (await artifactDirectory.exists()) {
         await artifactDirectory.delete(recursive: true);
       }
+    }
+    final videoDirectory = Directory('${directory.path}/videos/$deletedId');
+    if (await videoDirectory.exists()) {
+      await videoDirectory.delete(recursive: true);
     }
     notifyListeners();
   }
@@ -516,6 +842,10 @@ class MobileAppState extends ChangeNotifier {
     await exportClipsForPlayer(null);
   }
 
+  Future<void> mergeClips() async {
+    await mergeClipsForPlayer(null);
+  }
+
   Future<void> exportClipsForPlayer(String? player) async {
     if (exporting) return;
     if (!await _matchesProjectVideo()) {
@@ -566,6 +896,71 @@ class MobileAppState extends ChangeNotifier {
     }
   }
 
+  Future<void> mergeClipsForPlayer(String? player) async {
+    if (exporting) return;
+    if (!await _matchesProjectVideo()) {
+      errorMessage = '请先重新选择原视频。';
+      notifyListeners();
+      return;
+    }
+    final candidates =
+        project.candidates
+            .where(
+              (candidate) => candidate.selection == CandidateSelection.included,
+            )
+            .where((candidate) => player == null || candidate.player == player)
+            .toList()
+          ..sort((a, b) => a.startMs.compareTo(b.startMs));
+    if (candidates.isEmpty) {
+      errorMessage = '没有符合条件的保留片段。';
+      notifyListeners();
+      return;
+    }
+    exporting = true;
+    exportedPaths = const [];
+    final stopwatch = Stopwatch()..start();
+    errorMessage = null;
+    try {
+      final directory = await _dataDirectory();
+      final outputPath =
+          '${directory.path}/exports/${project.id}/${project.id}_merged.mp4';
+      await for (final update in exportEngine.mergeClips(
+        video: project.video!,
+        candidates: candidates,
+        outputPath: outputPath,
+      )) {
+        progress = update.progress;
+        progressMessage = update.message;
+        if (update.outputPath != null) {
+          exportedPaths = [update.outputPath!];
+        }
+        notifyListeners();
+      }
+      project = project.copyWith(
+        lastExportDurationMs: stopwatch.elapsedMilliseconds,
+      );
+      await _queueSave();
+    } on Object catch (error) {
+      errorMessage = error.toString();
+      notifyListeners();
+    } finally {
+      stopwatch.stop();
+      exporting = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> cancelExport() async {
+    if (!exporting) return;
+    try {
+      await exportEngine.cancel();
+      progressMessage = '导出已取消';
+    } on Object catch (error) {
+      errorMessage = error.toString();
+    }
+    notifyListeners();
+  }
+
   Future<void> shareExportedFiles() async {
     if (exportedPaths.isEmpty) return;
     await SharePlus.instance.share(
@@ -597,7 +992,7 @@ class MobileAppState extends ChangeNotifier {
   Future<void> startAnalysis() async {
     if (analysing) return;
     if (!hasVideo || project.hoopRoi == null || project.netRoi == null) {
-      errorMessage = '请先选择视频并设置篮筐、篮网检测区域。';
+      errorMessage = '请先选择视频并设置投篮分析区、篮网检测区。';
       notifyListeners();
       return;
     }
@@ -632,6 +1027,7 @@ class MobileAppState extends ChangeNotifier {
       await for (final update in analysisEngine.analyze(
         video: project.video!,
         hoopRoi: project.hoopRoi!,
+        rimRoi: project.rimRoi,
         netRoi: project.netRoi!,
         settings: project.settings,
       )) {
@@ -708,6 +1104,40 @@ class MobileAppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Applies an event-centered clip range to all or selected candidates.
+  /// Manually edited ranges are preserved unless explicitly overwritten.
+  int applyBatchClipRange({
+    required int beforeSeconds,
+    required int afterSeconds,
+    Iterable<String>? candidateIds,
+    bool overwriteManual = false,
+  }) {
+    final video = project.video;
+    if (video == null) return 0;
+    final ids = candidateIds?.toSet();
+    var updated = 0;
+    final beforeMs = beforeSeconds.clamp(0, 3600) * 1000;
+    final afterMs = afterSeconds.clamp(0, 3600) * 1000;
+    final candidates = project.candidates.map((candidate) {
+      if (ids != null && !ids.contains(candidate.id)) return candidate;
+      if (candidate.rangeEdited && !overwriteManual) return candidate;
+      final start = (candidate.eventMs - beforeMs)
+          .clamp(0, video.durationMs)
+          .toInt();
+      final end = (candidate.eventMs + afterMs)
+          .clamp(0, video.durationMs)
+          .toInt();
+      if (end <= start) return candidate;
+      updated++;
+      return candidate.copyWith(startMs: start, endMs: end, rangeEdited: false);
+    }).toList();
+    if (updated == 0) return 0;
+    project = project.copyWith(candidates: candidates);
+    unawaited(_queueSave());
+    notifyListeners();
+    return updated;
+  }
+
   void updateCandidateNote(String id, String? note) {
     project = project.copyWith(
       candidates: project.candidates
@@ -724,6 +1154,36 @@ class MobileAppState extends ChangeNotifier {
     unawaited(_queueSave());
     notifyListeners();
   }
+}
+
+Roi netRoiFromRim(Roi analysisRoi, Roi rimRoi) {
+  final centerX = (rimRoi.left + rimRoi.right) / 2;
+  final rimWidth = (rimRoi.right - rimRoi.left).clamp(0.004, 1.0).toDouble();
+  final rimHeight = (rimRoi.bottom - rimRoi.top).clamp(0.008, 1.0).toDouble();
+  final analysisWidth = analysisRoi.right - analysisRoi.left;
+  final width = (rimWidth * 1.5)
+      .clamp(analysisWidth * 0.08, analysisWidth * 0.34)
+      .toDouble();
+  final left = (centerX - width / 2).clamp(
+    analysisRoi.left,
+    analysisRoi.right - width,
+  );
+  final right = left + width;
+  // The net starts below the physical rim, not at the top edge of the rim
+  // detection box. Using rimRoi.top makes the net overlay appear vertically
+  // flipped and includes the backboard/upper hoop area.
+  final top = rimRoi.bottom
+      .clamp(analysisRoi.top, analysisRoi.bottom)
+      .toDouble();
+  final bottom = analysisRoi.bottom < top + 4.5 * rimHeight
+      ? analysisRoi.bottom
+      : top + 4.5 * rimHeight;
+  return Roi(
+    left: left.clamp(0.0, 1.0).toDouble(),
+    top: top.clamp(0.0, 1.0).toDouble(),
+    right: right.clamp(0.0, 1.0).toDouble(),
+    bottom: bottom.clamp(0.0, 1.0).toDouble(),
+  );
 }
 
 String _readProjectFromArchive(List<int> bytes) {

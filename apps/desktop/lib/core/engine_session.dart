@@ -162,6 +162,7 @@ class EngineSession {
     required String projectRoot,
     required String videoId,
     String? modelPath,
+    int? startMs,
     double? sampleFps,
     double? duration,
     int? maxSamples,
@@ -171,6 +172,7 @@ class EngineSession {
       'project_root': projectRoot,
       'video_id': videoId,
       ...?_optionalEntry('model_path', modelPath),
+      ...?_optionalEntry('start_ms', startMs),
       ...?_optionalEntry('sample_fps', sampleFps),
       ...?_optionalEntry('duration', duration),
       ...?_optionalEntry('max_samples', maxSamples),
@@ -463,6 +465,22 @@ class EngineSession {
       'candidate_id': candidateId,
       'start_ms': startMs,
       'end_ms': endMs,
+    });
+  }
+
+  Future<JsonMap> updateClipRanges({
+    required String projectRoot,
+    required List<String> candidateIds,
+    required int beforeMs,
+    required int afterMs,
+    bool overwriteManual = false,
+  }) {
+    return client.request('update_clip_ranges', <String, dynamic>{
+      'project_root': projectRoot,
+      'candidate_ids': candidateIds,
+      'before_ms': beforeMs,
+      'after_ms': afterMs,
+      'overwrite_manual': overwriteManual,
     });
   }
 

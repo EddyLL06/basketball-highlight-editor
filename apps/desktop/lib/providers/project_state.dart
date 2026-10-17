@@ -348,9 +348,10 @@ class ProjectNotifier extends Notifier<ProjectState> {
         double? roiConfidence;
         try {
           final suggestion = await session.suggestRoi(
-            duration: 12,
+            startMs: (linkedVideo?['analysis_start_ms'] as num?)?.toInt() ?? 0,
+            duration: 20,
             sampleFps: 1,
-            maxSamples: 8,
+            maxSamples: 12,
             confidence: 0.05,
           );
           final roi = (suggestion['roi'] as Map?)?.cast<String, dynamic>();
@@ -565,10 +566,20 @@ class ProjectNotifier extends Notifier<ProjectState> {
   }
 
   /// 等价 app.dart:_chooseOpenProject(297)。
-  Future<bool> chooseOpenProject() async {
-    final root = await getDirectoryPath(confirmButtonText: '打开项目');
+  Future<bool> chooseOpenProject({
+    String? openProjectButtonLabel,
+    String? relinkVideoButtonLabel,
+    String? videoTypeLabel,
+  }) async {
+    final root = await getDirectoryPath(
+      confirmButtonText: openProjectButtonLabel ?? '打开项目',
+    );
     if (root == null) return false;
-    return openProject(root);
+    return openProject(
+      root,
+      relinkVideoButtonLabel: relinkVideoButtonLabel,
+      videoTypeLabel: videoTypeLabel,
+    );
   }
 
   Future<bool> relinkCurrentVideo(String path) async {
@@ -772,7 +783,11 @@ class ProjectNotifier extends Notifier<ProjectState> {
   }
 
   /// 等价 app.dart:_openProject(302)。
-  Future<bool> openProject(String root) async {
+  Future<bool> openProject(
+    String root, {
+    String? relinkVideoButtonLabel,
+    String? videoTypeLabel,
+  }) async {
     var opened = false;
     await flushReviewQueue();
     await _runBusy(() async {
@@ -800,10 +815,10 @@ class ProjectNotifier extends Notifier<ProjectState> {
             !File(sourcePath).existsSync();
         if (sourceMissing) {
           final replacementFile = await openFile(
-            confirmButtonText: '重新定位视频',
-            acceptedTypeGroups: const [
+            confirmButtonText: relinkVideoButtonLabel ?? '重新定位视频',
+            acceptedTypeGroups: [
               XTypeGroup(
-                label: '视频',
+                label: videoTypeLabel ?? '视频',
                 extensions: ['mp4', 'mov', 'm4v', 'avi', 'mkv'],
               ),
             ],
@@ -1644,6 +1659,28 @@ class ProjectNotifier extends Notifier<ProjectState> {
           .updateClipRange(candidateId: id, startMs: startMs, endMs: endMs);
       await refreshCandidates();
     }, successMessage: '片段范围已更新');
+  }
+
+  Future<JsonMap?> updateClipRanges({
+    required List<String> candidateIds,
+    required int beforeMs,
+    required int afterMs,
+    bool overwriteManual = false,
+  }) async {
+    if (candidateIds.isEmpty) return null;
+    JsonMap? result;
+    await _runBusy(() async {
+      result = await ref
+          .read(projectSessionProvider)
+          .updateClipRanges(
+            candidateIds: candidateIds,
+            beforeMs: beforeMs,
+            afterMs: afterMs,
+            overwriteManual: overwriteManual,
+          );
+      await refreshCandidates();
+    }, successMessage: '已更新片段时长');
+    return result;
   }
 
   Future<JsonMap?> createManualCandidate({
