@@ -3566,12 +3566,16 @@ class _EvidenceCell extends StatelessWidget {
             tooltip == null
                 ? Text(
                     label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(color: c.textTertiary, fontSize: 9),
                   )
                 : Tooltip(
                     message: tooltip,
                     child: Text(
                       label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(color: c.textTertiary, fontSize: 9),
                     ),
                   ),

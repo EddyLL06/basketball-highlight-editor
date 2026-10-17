@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -38,6 +39,29 @@ def probe_duration(ffprobe, video):
         timeout=15,
     )
     return float(result.stdout.strip())
+
+
+def resolve_media_tool(name):
+    """Prefer the media binary shipped beside the packaged runtime.
+
+    Windows release builds start the engine from a bundled Python runtime.
+    Relying only on PATH can therefore select a missing or unrelated system
+    binary even though runtime/bin contains the required executable.
+    """
+    candidates = []
+    runtime_root = os.environ.get("BHE_RUNTIME_ROOT")
+    if runtime_root:
+        candidates.append(Path(runtime_root) / "bin" / name)
+    # Packaged layout: <runtime>/scripts/create_proxy.py.
+    candidates.append(Path(__file__).resolve().parents[1] / "bin" / name)
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+        if platform.system() == "Windows" and candidate.suffix.lower() != ".exe":
+            windows_candidate = candidate.with_suffix(".exe")
+            if windows_candidate.is_file():
+                return str(windows_candidate)
+    return shutil.which(name) or shutil.which(f"{name}.exe")
 
 
 def parse_args():
@@ -97,10 +121,10 @@ def main(args):
     video = Path(args.video).resolve()
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = resolve_media_tool("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("ffmpeg is required to create a proxy video")
-    ffprobe = shutil.which("ffprobe")
+    ffprobe = resolve_media_tool("ffprobe")
     source_duration = args.duration
     if source_duration is None and ffprobe:
         try:
