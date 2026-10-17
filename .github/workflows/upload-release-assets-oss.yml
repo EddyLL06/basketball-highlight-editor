@@ -7,6 +7,16 @@ on:
         description: "Existing GitHub Release tag, for example v0.1.0-alpha.6"
         required: true
         type: string
+      platform:
+        description: "Release assets and latest aliases to upload"
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - macos
+          - windows
+          - android
 
 permissions:
   contents: read
@@ -47,12 +57,39 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ inputs.tag }}
+          RELEASE_PLATFORM: ${{ inputs.platform }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/bhe-release-assets"
-          gh release download "$TAG_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
+          common_args=(
+            "$TAG_NAME"
+            --repo "$GITHUB_REPOSITORY"
             --dir "$RUNNER_TEMP/bhe-release-assets"
+          )
+          case "$RELEASE_PLATFORM" in
+            all)
+              gh release download "${common_args[@]}"
+              ;;
+            macos)
+              gh release download "${common_args[@]}" \
+                --pattern 'BHE-macos-*-v*.dmg' \
+                --pattern 'BHE-macos-*-v*.dmg.sha256'
+              ;;
+            windows)
+              gh release download "${common_args[@]}" \
+                --pattern 'BHE-windows-x64-v*.zip' \
+                --pattern 'BHE-windows-x64-v*.zip.sha256'
+              ;;
+            android)
+              gh release download "${common_args[@]}" \
+                --pattern 'BHE-android-arm64-v*.apk' \
+                --pattern 'BHE-android-arm64-v*.apk.sha256'
+              ;;
+            *)
+              echo "Unsupported release platform: $RELEASE_PLATFORM" >&2
+              exit 1
+              ;;
+          esac
           test -n "$(find "$RUNNER_TEMP/bhe-release-assets" -type f -print -quit)"
 
       - name: Configure temporary ossutil credentials

@@ -192,6 +192,21 @@ The script creates `dist\BHE-windows-x64-v0.1.0-alpha.3.zip` and its `.sha256` c
 
 Windows remains a compatibility path. Validate the Flutter toolchain, Python/Torch/OpenCV/Ultralytics, FFmpeg DLLs, and installation flow; these scripts are not a formal installer or signing process.
 
+### Automated release modes and hotfix tags
+
+`.github/workflows/release-packages.yml` selects the build scope from the tag name:
+
+| Example tag | Build and publish scope | Use case |
+| --- | --- | --- |
+| `v1.2.0`, `v1.2.0-alpha.1` | macOS (Intel and Apple Silicon), Windows, and Android | Normal cross-platform release |
+| `v1.2.0-macos.1` | Both macOS architectures only | Fix a macOS packaging or runtime issue |
+| `v1.2.0-windows.1` | Windows x64 only | Fix a Windows packaging or runtime issue |
+| `v1.2.0-android.1` | Android `arm64-v8a` only | Fix an Android packaging or runtime issue |
+
+A single-platform tag downloads, uploads, and updates only that platform's OSS (object storage) versioned files and `latest` download aliases. It does not republish the other platforms' packages.
+
+When manually running **BHE release packages** in Actions, choose `platform`. The workflow always checks out `refs/tags/<tag>` for a manual run, which is appropriate for retrying that tag's build; an existing tag cannot include new code. After code changes, create and push a new tag so that tag triggers the build. Turn off `publish` to create Actions artifacts only, without changing the GitHub Release or OSS. The separate **Upload existing release assets to OSS** workflow also requires `platform`; use its default `all` only when intentionally republishing the whole asset set.
+
 ## 5. Mobile release boundary
 
 Android currently publishes an `arm64-v8a` APK only. The release workflow signs it with the debug certificate, so the filename includes `debug-signed`: it is suitable for sideloaded device testing but not for Google Play submission. Users must allow installation from the relevant unknown source. iOS project, media, and export paths can build, but local analysis still needs the Rust static library, the ONNX Runtime XCFramework, and Runner linking. Do not publish a build without these artifacts as a full AI-analysis release.
