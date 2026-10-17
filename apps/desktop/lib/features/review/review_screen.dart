@@ -1819,34 +1819,55 @@ class _VideoPaneState extends State<_VideoPane> {
                             : null,
                       )
                     else
-                      Center(
-                        child: AspectRatio(
-                          aspectRatio: _videoAspectRatio(widget.frameSize),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              IgnorePointer(
-                                child: Video(
-                                  controller: controller,
-                                  controls: NoVideoControls,
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          // 铺满(cover)模式:视频按原生比例缩放至覆盖整个
+                          // 面板,超出部分裁剪。视频与标注层同处一个
+                          // SizedBox(即视频内容的精确尺寸),归一化坐标
+                          // 始终对齐,不受裁剪影响。
+                          final aspect = _videoAspectRatio(widget.frameSize);
+                          double width = constraints.maxWidth;
+                          double height = width / aspect;
+                          if (height < constraints.maxHeight) {
+                            height = constraints.maxHeight;
+                            width = height * aspect;
+                          }
+                          return ClipRect(
+                            child: Center(
+                              child: SizedBox(
+                                width: width,
+                                height: height,
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    IgnorePointer(
+                                      child: Video(
+                                        controller: controller,
+                                        controls: NoVideoControls,
+                                      ),
+                                    ),
+                                    if (_showAnnotations &&
+                                        widget.candidate != null)
+                                      StreamBuilder<Duration>(
+                                        stream: player?.stream.position,
+                                        initialData:
+                                            player?.state.position ??
+                                            Duration.zero,
+                                        builder: (context, snapshot) =>
+                                            _CandidateAnnotationLayer(
+                                              candidate: widget.candidate!,
+                                              frameSize: widget.frameSize,
+                                              positionMs:
+                                                  snapshot.data?.inMilliseconds ??
+                                                  0,
+                                            ),
+                                      ),
+                                  ],
                                 ),
                               ),
-                              if (_showAnnotations && widget.candidate != null)
-                                StreamBuilder<Duration>(
-                                  stream: player?.stream.position,
-                                  initialData:
-                                      player?.state.position ?? Duration.zero,
-                                  builder: (context, snapshot) =>
-                                      _CandidateAnnotationLayer(
-                                        candidate: widget.candidate!,
-                                        frameSize: widget.frameSize,
-                                        positionMs:
-                                            snapshot.data?.inMilliseconds ?? 0,
-                                      ),
-                                ),
-                            ],
-                          ),
-                        ),
+                            ),
+                          );
+                        },
                       ),
                     if (_ready && _error == null && player != null)
                       Center(
