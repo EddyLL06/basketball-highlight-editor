@@ -125,6 +125,12 @@ def main(args):
         attempts = [(codec, hwaccel)]
         if args.codec == "auto" and codec != "libx264":
             attempts.append(("libx264", "none"))
+        # Windows 发布包随附的 FFmpeg 可能是 LGPL 构建(BtbN 等),不含
+        # GPL 的 libx264。追加 mpeg4(MPEG-4 Part 2)作为最终回退——
+        # 它内置于所有 FFmpeg 构建且无需外部库;画质略低但代理视频
+        # 仅用于分析,不影响最终导出质量。
+        if args.codec == "auto":
+            attempts.append(("mpeg4", "none"))
         last_command = None
         for attempt_codec, attempt_hwaccel in attempts:
             temporary.unlink(missing_ok=True)
