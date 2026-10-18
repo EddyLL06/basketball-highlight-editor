@@ -17,6 +17,7 @@ import '../../providers/project_state.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
 import 'media_readiness.dart';
+import 'review_video_viewport.dart';
 
 bool _annotationHintSeen = false;
 
@@ -1819,55 +1820,33 @@ class _VideoPaneState extends State<_VideoPane> {
                             : null,
                       )
                     else
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          // 铺满(cover)模式:视频按原生比例缩放至覆盖整个
-                          // 面板,超出部分裁剪。视频与标注层同处一个
-                          // SizedBox(即视频内容的精确尺寸),归一化坐标
-                          // 始终对齐,不受裁剪影响。
-                          final aspect = _videoAspectRatio(widget.frameSize);
-                          double width = constraints.maxWidth;
-                          double height = width / aspect;
-                          if (height < constraints.maxHeight) {
-                            height = constraints.maxHeight;
-                            width = height * aspect;
-                          }
-                          return ClipRect(
-                            child: Center(
-                              child: SizedBox(
-                                width: width,
-                                height: height,
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    IgnorePointer(
-                                      child: Video(
-                                        controller: controller,
-                                        controls: NoVideoControls,
-                                      ),
-                                    ),
-                                    if (_showAnnotations &&
-                                        widget.candidate != null)
-                                      StreamBuilder<Duration>(
-                                        stream: player?.stream.position,
-                                        initialData:
-                                            player?.state.position ??
-                                            Duration.zero,
-                                        builder: (context, snapshot) =>
-                                            _CandidateAnnotationLayer(
-                                              candidate: widget.candidate!,
-                                              frameSize: widget.frameSize,
-                                              positionMs:
-                                                  snapshot.data?.inMilliseconds ??
-                                                  0,
-                                            ),
-                                      ),
-                                  ],
-                                ),
+                      ReviewVideoViewport(
+                        frameSize: widget.frameSize,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            IgnorePointer(
+                              child: Video(
+                                controller: controller,
+                                fit: BoxFit.cover,
+                                controls: NoVideoControls,
                               ),
                             ),
-                          );
-                        },
+                            if (_showAnnotations && widget.candidate != null)
+                              StreamBuilder<Duration>(
+                                stream: player?.stream.position,
+                                initialData:
+                                    player?.state.position ?? Duration.zero,
+                                builder: (context, snapshot) =>
+                                    _CandidateAnnotationLayer(
+                                      candidate: widget.candidate!,
+                                      frameSize: widget.frameSize,
+                                      positionMs:
+                                          snapshot.data?.inMilliseconds ?? 0,
+                                    ),
+                              ),
+                          ],
+                        ),
                       ),
                     if (_ready && _error == null && player != null)
                       Center(
@@ -4812,11 +4791,6 @@ Size _videoFrameSize(Map<String, dynamic>? video) {
   if (width <= 0 || height <= 0) return const Size(16, 9);
   return Size(width, height);
 }
-
-double _videoAspectRatio(Size frameSize) =>
-    frameSize.width > 0 && frameSize.height > 0
-    ? frameSize.width / frameSize.height
-    : 16 / 9;
 
 dynamic _candidateEvidenceValue(
   Map<String, dynamic> candidate,
