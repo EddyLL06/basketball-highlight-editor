@@ -1,5 +1,7 @@
 import json
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from .protocol import ProtocolError, error_response, parse_request, response
 from .service import EngineService
@@ -7,6 +9,28 @@ from .service import EngineService
 
 def main() -> int:
     service = EngineService()
+    output_lock = threading.Lock()
+    # Preview extraction can spend 20 seconds in FFmpeg. Keep it off the
+    # interactive command loop; mutations still run serially in request order.
+    previews = ThreadPoolExecutor(max_workers=1, thread_name_prefix="preview")
+
+    def write_output(output):
+        line = json.dumps(output, ensure_ascii=False, separators=(",", ":")) + "\n"
+        with output_lock:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+
+    def handle_request(request):
+        request_id = request.get("request_id")
+        try:
+            result = service.handle(request["command"], request.get("payload", {}))
+            output = response(request_id, result)
+        except ProtocolError as exc:
+            output = error_response(request_id, exc.code, exc.message, exc.details)
+        except Exception as exc:
+            output = error_response(request_id, "ENGINE_ERROR", str(exc))
+        write_output(output)
+
     try:
         for raw_line in sys.stdin:
             line = raw_line.strip()
@@ -16,15 +40,16 @@ def main() -> int:
             try:
                 request = parse_request(line)
                 request_id = request.get("request_id")
-                result = service.handle(request["command"], request.get("payload", {}))
-                output = response(request_id, result)
+                if request["command"] == "extract_preview":
+                    previews.submit(handle_request, request)
+                else:
+                    handle_request(request)
             except ProtocolError as exc:
-                output = error_response(request_id, exc.code, exc.message, exc.details)
+                write_output(error_response(request_id, exc.code, exc.message, exc.details))
             except Exception as exc:
-                output = error_response(request_id, "ENGINE_ERROR", str(exc))
-            sys.stdout.write(json.dumps(output, ensure_ascii=False, separators=(",", ":")) + "\n")
-            sys.stdout.flush()
+                write_output(error_response(request_id, "ENGINE_ERROR", str(exc)))
     finally:
+        previews.shutdown(wait=True)
         service.shutdown()
     return 0
 

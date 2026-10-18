@@ -10,6 +10,17 @@ import 'package:desktop/providers/project_state.dart';
 import 'package:desktop/theme/tokens.dart';
 
 void main() {
+  testWidgets('shows saving feedback while player changes are pending', (
+    tester,
+  ) async {
+    await _pumpReview(
+      tester,
+      const ProjectState(busy: true, busyMessage: '正在保存球员标签…'),
+    );
+    expect(find.text('正在保存球员标签…'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+  });
+
   test('does not autoplay the review video after opening', () {
     expect(reviewVideoAutoPlayAfterOpen, isFalse);
   });

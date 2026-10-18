@@ -14,11 +14,7 @@ String _resolvePython() {
     if (Platform.isWindows) ...<String>[
       'python',
       '$cwd\\..\\..\\.venv\\Scripts\\python.exe',
-    ] else ...<String>[
-      'python3',
-      'python',
-      '$cwd/../../.venv/bin/python',
-    ],
+    ] else ...<String>['python3', 'python', '$cwd/../../.venv/bin/python'],
   ];
   for (final candidate in candidates) {
     try {
@@ -43,6 +39,36 @@ void _writeFakeEngine(Directory directory, String mainSource) {
 }
 
 void main() {
+  test(
+    'matches out-of-order preview and player responses by request id',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('bhe-engine-');
+      addTearDown(() => directory.delete(recursive: true));
+      _writeFakeEngine(directory, '''
+import json, sys
+pending = []
+for line in sys.stdin:
+    pending.append(json.loads(line))
+    if len(pending) == 2:
+        for request in reversed(pending):
+            print(json.dumps({"request_id": request["request_id"], "ok": True,
+                              "payload": {"command": request["command"]}}), flush=True)
+        pending.clear()
+''');
+      final client = EngineClient();
+      addTearDown(client.dispose);
+      await client.start(
+        workingDirectory: directory.path,
+        enginePythonPath: directory.path,
+        pythonExecutable: _resolvePython(),
+      );
+      final preview = client.request('extract_preview', {});
+      final player = client.request('create_player', {});
+      expect((await player)['command'], 'create_player');
+      expect((await preview)['command'], 'extract_preview');
+    },
+  );
+
   test('clears running state when the engine process exits', () async {
     final directory = await Directory.systemTemp.createTemp('bhe-engine-');
     addTearDown(() => directory.delete(recursive: true));

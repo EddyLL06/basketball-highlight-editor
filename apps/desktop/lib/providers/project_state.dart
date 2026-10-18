@@ -250,7 +250,9 @@ class ProjectNotifier extends Notifier<ProjectState> {
   final Set<String> _pollingJobIds = <String>{};
   final Set<String> _pollingExportJobIds = <String>{};
   Future<void> _reviewQueue = Future<void>.value();
+  Future<void> _playerQueue = Future<void>.value();
   Future<void> _busyOperation = Future<void>.value();
+  bool _closingProject = false;
   final Map<String, int> _reviewRevisions = <String, int>{};
   bool _disposed = false;
   int _projectLoadGeneration = 0;
@@ -678,14 +680,32 @@ class ProjectNotifier extends Notifier<ProjectState> {
     );
   }
 
-  Future<void> flushReviewQueue() => _reviewQueue;
+  Future<void> flushReviewQueue() async {
+    await _playerQueue;
+    await _reviewQueue;
+  }
 
   Future<bool> closeProjectSafely() async {
-    if (state.busy) return false;
-    await flushReviewQueue();
-    if (_disposed) return false;
-    closeProject();
-    return true;
+    if (_closingProject || _disposed) return false;
+    _closingProject = true;
+    final generation = _projectLoadGeneration;
+    _pushNotice('正在保存修改并关闭项目…', NoticeSeverity.info);
+    try {
+      await _busyOperation.timeout(const Duration(seconds: 30));
+      await flushReviewQueue().timeout(const Duration(seconds: 30));
+      if (_disposed || generation != _projectLoadGeneration) return false;
+      if (state.busy) {
+        _pushNotice('请先等待当前操作结束或取消正在运行的任务', NoticeSeverity.info);
+        return false;
+      }
+      closeProject();
+      return true;
+    } catch (error) {
+      if (!_disposed) _pushNotice('关闭项目失败：$error', NoticeSeverity.error);
+      return false;
+    } finally {
+      _closingProject = false;
+    }
   }
 
   Future<bool> startNewProject() async {
@@ -706,23 +726,26 @@ class ProjectNotifier extends Notifier<ProjectState> {
   }
 
   Future<bool> cancelTasksAndCloseProject() async {
-    if (state.busy) return false;
+    if (_closingProject || _disposed) return false;
+    _closingProject = true;
     final generation = _projectLoadGeneration;
-    final session = ref.read(projectSessionProvider);
-    final scope = session.snapshot();
-    final jobIds = <String>{
-      if (_isActiveJob(state.job) && state.job?['id'] is String)
-        state.job!['id'] as String,
-      if (_isActiveJob(state.exportJob) && state.exportJob?['id'] is String)
-        state.exportJob!['id'] as String,
-    };
-    if (jobIds.isEmpty) {
-      return closeProjectSafely();
-    }
-    state = state.copyWith(busy: true);
     _pushNotice('正在取消任务并关闭项目…', NoticeSeverity.info);
     try {
-      await flushReviewQueue();
+      await _busyOperation.timeout(const Duration(seconds: 30));
+      await flushReviewQueue().timeout(const Duration(seconds: 30));
+      if (_disposed || generation != _projectLoadGeneration) return false;
+      if (state.busy) {
+        _pushNotice('请先等待当前操作结束或取消正在运行的任务', NoticeSeverity.info);
+        return false;
+      }
+      final scope = ref.read(projectSessionProvider).snapshot();
+      final jobIds = <String>{
+        if (_isActiveJob(state.job) && state.job?['id'] is String)
+          state.job!['id'] as String,
+        if (_isActiveJob(state.exportJob) && state.exportJob?['id'] is String)
+          state.exportJob!['id'] as String,
+      };
+      state = state.copyWith(busy: true);
       for (final jobId in jobIds) {
         await scope.cancelJob(jobId: jobId);
       }
@@ -741,6 +764,8 @@ class ProjectNotifier extends Notifier<ProjectState> {
         _pushNotice('关闭项目失败：$error', NoticeSeverity.error);
       }
       return false;
+    } finally {
+      _closingProject = false;
     }
   }
 
@@ -1704,36 +1729,68 @@ class ProjectNotifier extends Notifier<ProjectState> {
     return created;
   }
 
-  Future<String?> createPlayer(String name) async {
+  Future<String?> createPlayer(
+    String name, {
+    List<String> candidateIds = const <String>[],
+  }) async {
     String? playerId;
-    await _runBusy(() async {
-      final created = await ref.read(projectSessionProvider).createPlayer(name);
-      playerId = (created['player'] as Map?)?['id']?.toString();
-      final payload = await ref.read(projectSessionProvider).listPlayers();
-      state = state.copyWith(players: _jsonList(payload['players']));
-    }, successMessage: '球员已添加');
+    await _runPlayerChange(
+      (generation) async {
+        final session = ref.read(projectSessionProvider);
+        final created = await session.createPlayer(name);
+        if (_disposed || generation != _projectLoadGeneration) return;
+        final player = Map<String, dynamic>.from(created['player'] as Map);
+        final id = player['id'] as String;
+        state = state.copyWith(players: [...state.players, player]);
+        if (candidateIds.isNotEmpty) {
+          await session.setCandidatesPlayer(
+            candidateIds: candidateIds,
+            playerId: id,
+          );
+          if (_disposed || generation != _projectLoadGeneration) return;
+          _setLocalCandidatePlayer(candidateIds, id);
+        }
+        playerId = id;
+      },
+      successMessage: '球员已添加',
+      busyMessage: '正在添加球员…',
+    );
     return playerId;
   }
 
   Future<bool> deletePlayer(String playerId) async {
     var deleted = false;
-    await _runBusy(() async {
-      await ref.read(projectSessionProvider).deletePlayer(playerId);
-      final payload = await ref.read(projectSessionProvider).listPlayers();
-      state = state.copyWith(players: _jsonList(payload['players']));
-      await refreshCandidates();
-      deleted = true;
-    }, successMessage: '球员已删除');
+    await _runPlayerChange(
+      (generation) async {
+        await ref.read(projectSessionProvider).deletePlayer(playerId);
+        if (_disposed || generation != _projectLoadGeneration) return;
+        _setLocalCandidatePlayer([
+          for (final candidate in state.candidates)
+            if (candidate['player_id']?.toString() == playerId)
+              candidate['id'].toString(),
+        ], null);
+        state = state.copyWith(
+          players: [
+            for (final player in state.players)
+              if (player['id']?.toString() != playerId) player,
+          ],
+        );
+        deleted = true;
+      },
+      successMessage: '球员已删除',
+      busyMessage: '正在删除球员…',
+    );
     return deleted;
   }
 
   Future<void> setCandidatePlayer(String candidateId, String? playerId) async {
-    await _runBusy(() async {
+    await _runPlayerChange((generation) async {
       await ref
           .read(projectSessionProvider)
           .setCandidatePlayer(candidateId: candidateId, playerId: playerId);
-      await refreshCandidates();
-    });
+      if (_disposed || generation != _projectLoadGeneration) return;
+      _setLocalCandidatePlayer([candidateId], playerId);
+    }, busyMessage: '正在保存球员标签…');
   }
 
   Future<void> setCandidatesPlayer(
@@ -1741,12 +1798,48 @@ class ProjectNotifier extends Notifier<ProjectState> {
     String? playerId,
   ) async {
     if (candidateIds.isEmpty) return;
-    await _runBusy(() async {
-      await ref
-          .read(projectSessionProvider)
-          .setCandidatesPlayer(candidateIds: candidateIds, playerId: playerId);
-      _setLocalCandidatePlayer(candidateIds, playerId);
-    }, successMessage: '已更新 ${candidateIds.length} 个片段的球员标签');
+    await _runPlayerChange(
+      (generation) async {
+        await ref
+            .read(projectSessionProvider)
+            .setCandidatesPlayer(
+              candidateIds: candidateIds,
+              playerId: playerId,
+            );
+        if (_disposed || generation != _projectLoadGeneration) return;
+        _setLocalCandidatePlayer(candidateIds, playerId);
+      },
+      successMessage: '已更新 ${candidateIds.length} 个片段的球员标签',
+      busyMessage: '正在保存球员标签…',
+    );
+  }
+
+  Future<void> _runPlayerChange(
+    Future<void> Function(int generation) action, {
+    String? successMessage,
+    required String busyMessage,
+  }) {
+    if (_disposed) return Future<void>.value();
+    if (_closingProject) {
+      _pushNotice('正在保存修改并关闭项目…', NoticeSeverity.info);
+      return Future<void>.value();
+    }
+    final generation = _projectLoadGeneration;
+    // Serialize tag writes instead of silently dropping clicks while the
+    // previous player operation owns the global busy flag.
+    _playerQueue = _playerQueue.then((_) async {
+      if (_disposed || generation != _projectLoadGeneration) return;
+      if (state.busy) {
+        _pushNotice('请先等待当前操作结束或取消正在运行的任务', NoticeSeverity.info);
+        return;
+      }
+      await _runBusy(
+        () => action(generation),
+        successMessage: successMessage,
+        busyMessage: busyMessage,
+      );
+    });
+    return _playerQueue;
   }
 
   void _setLocalCandidatePlayer(List<String> candidateIds, String? playerId) {
@@ -2099,11 +2192,3 @@ final NotifierProvider<ProjectNotifier, ProjectState> projectProvider =
     NotifierProvider<ProjectNotifier, ProjectState>(ProjectNotifier.new);
 
 String? _playbackVideoPath(JsonMap? video) => video?['source_path']?.toString();
-
-List<JsonMap> _jsonList(Object? raw) {
-  if (raw is! List) return <JsonMap>[];
-  return raw
-      .whereType<Map>()
-      .map((item) => Map<String, dynamic>.from(item))
-      .toList();
-}

@@ -1,4 +1,5 @@
 // test/providers/project_state_test.dart
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart' show Rect;
@@ -647,6 +648,193 @@ void main() {
     });
   });
 
+  group('ProjectNotifier player changes', () {
+    ProviderContainer playerContainer(
+      _FakeProjectSession session, {
+      ProjectNotifier? notifier,
+    }) {
+      final container = ProviderContainer(
+        overrides: [
+          if (notifier != null) projectProvider.overrideWith(() => notifier),
+          projectSessionProvider.overrideWithValue(session),
+          engineBootstrapProvider.overrideWith(_StubEngineBootstrap.new),
+        ],
+      );
+      addTearDown(container.dispose);
+      return container;
+    }
+
+    test('连续创建十二个球员并绑定，不丢弃忙碌期间提交的操作', () async {
+      final session = _FakeProjectSession()
+        ..playerDelay = const Duration(milliseconds: 2)
+        ..seedCandidates([
+          for (var i = 0; i < 12; i++) {'id': 'c$i'},
+        ]);
+      final container = playerContainer(session);
+      final notifier = container.read(projectProvider.notifier);
+      await notifier.refreshCandidates();
+      final ids = await Future.wait([
+        for (var index = 0; index < 12; index++)
+          notifier.createPlayer('球员$index', candidateIds: ['c$index']),
+      ]);
+      expect(ids.toSet(), hasLength(12));
+      expect(ids, isNot(contains(null)));
+      expect(container.read(projectProvider).players, hasLength(12));
+      expect(session.setCandidatesPlayerCalls, hasLength(12));
+      expect(session.listPlayersCalls, 0);
+      expect(session.listCandidatesCalls, 1);
+      for (var i = 0; i < 12; i++) {
+        expect(
+          container.read(projectProvider).candidates[i]['player_id'],
+          ids[i],
+        );
+      }
+      expect(container.read(projectProvider).busy, isFalse);
+    });
+
+    test('单个标签仅局部更新，保留片段及缩略图信息', () async {
+      final session = _FakeProjectSession()
+        ..seedCandidates([
+          {
+            'id': 'c1',
+            'preview_path': '/tmp/cover.jpg',
+            'review_status': 'goal',
+          },
+          {'id': 'c2', 'review_status': 'pending'},
+        ])
+        ..players = [
+          {'id': 'p1', 'name': '科比'},
+        ];
+      final container = playerContainer(session);
+      final notifier = container.read(projectProvider.notifier);
+      await notifier.refreshCandidates();
+      await notifier.setCandidatePlayer('c1', 'p1');
+      final candidates = container.read(projectProvider).candidates;
+      expect(session.listCandidatesCalls, 1);
+      expect(candidates.first['player_name'], '科比');
+      expect(candidates.first['review_status'], 'goal');
+      expect(candidates.first['preview_path'], '/tmp/cover.jpg');
+      expect(candidates.last.containsKey('player_id'), isFalse);
+      await notifier.setCandidatePlayer('c1', null);
+      expect(
+        container.read(projectProvider).candidates.first['player_id'],
+        isNull,
+      );
+      expect(session.listCandidatesCalls, 1);
+    });
+
+    test('保存失败不更新本地标签，后续保存仍能完成', () async {
+      final session = _FakeProjectSession()
+        ..seedCandidates([
+          {'id': 'c1'},
+        ])
+        ..players = [
+          {'id': 'p1', 'name': '科比'},
+        ]
+        ..throwOnPlayerChange = true;
+      final container = playerContainer(session);
+      final notifier = container.read(projectProvider.notifier);
+      await notifier.refreshCandidates();
+      await notifier.setCandidatePlayer('c1', 'p1');
+      expect(
+        container.read(projectProvider).candidates.first['player_id'],
+        isNull,
+      );
+      expect(
+        container.read(noticeProvider).last.severity,
+        NoticeSeverity.error,
+      );
+      session.throwOnPlayerChange = false;
+      await notifier.setCandidatePlayer('c1', 'p1');
+      expect(
+        container.read(projectProvider).candidates.first['player_name'],
+        '科比',
+      );
+      expect(container.read(projectProvider).busy, isFalse);
+    });
+
+    test('关闭项目等待正在创建及已排队的标签保存，而不是直接返回', () async {
+      final session = _FakeProjectSession()..playerGate = Completer<void>();
+      final container = playerContainer(session);
+      final notifier = container.read(projectProvider.notifier);
+      final first = notifier.createPlayer('第一位', candidateIds: ['c1']);
+      final second = notifier.createPlayer('第二位', candidateIds: ['c2']);
+      await Future<void>.delayed(Duration.zero);
+      expect(container.read(projectProvider).busy, isTrue);
+      final closing = notifier.closeProjectSafely();
+      expect(session.resetCalls, 0);
+      session.playerGate!.complete();
+      expect(await first, isNotNull);
+      expect(await second, isNotNull);
+      expect(await closing, isTrue);
+      expect(session.setCandidatesPlayerCalls, [
+        ['c1'],
+        ['c2'],
+      ]);
+      expect(session.resetCalls, 1);
+      expect(container.read(projectProvider).players, isEmpty);
+    });
+
+    test('关闭项目不等待未完成的缩略图', () async {
+      final session = _FakeProjectSession()..previewGate = Completer<void>();
+      final container = playerContainer(session);
+      final notifier = container.read(projectProvider.notifier);
+      final preview = notifier.loadCandidatePreview('c1', 0);
+      expect(await notifier.closeProjectSafely(), isTrue);
+      expect(session.previewGate!.isCompleted, isFalse);
+      session.previewGate!.complete();
+      await preview;
+      expect(container.read(projectProvider).candidates, isEmpty);
+    });
+
+    test('取消任务并关闭也等待已提交标签，之后才取消任务', () async {
+      final session = _FakeProjectSession()..playerGate = Completer<void>();
+      final scope = _ClosingScope(session);
+      session.testScope = scope;
+      final container = playerContainer(
+        session,
+        notifier: _ActiveJobNotifier(),
+      );
+      final notifier = container.read(projectProvider.notifier);
+      final save = notifier.createPlayer('第三位', candidateIds: ['c1']);
+      await Future<void>.delayed(Duration.zero);
+      final closing = notifier.cancelTasksAndCloseProject();
+      expect(scope.cancelled, isEmpty);
+      session.playerGate!.complete();
+      expect(await save, isNotNull);
+      expect(await closing, isTrue);
+      expect(scope.cancelled, ['job-1']);
+      expect(session.resetCalls, 1);
+    });
+
+    test('删除标签只清除关联标签，不重新拉取全部候选', () async {
+      final session = _FakeProjectSession()
+        ..players = [
+          {'id': 'p1', 'name': '科比'},
+          {'id': 'p2', 'name': '罗斯'},
+        ]
+        ..seedCandidates([
+          {'id': 'c1', 'player_id': 'p1', 'player_name': '科比'},
+          {'id': 'c2', 'player_id': 'p2', 'player_name': '罗斯'},
+        ]);
+      final container = playerContainer(session);
+      final notifier = container.read(projectProvider.notifier);
+      await notifier.refreshCandidates();
+      expect(await notifier.deletePlayer('p1'), isTrue);
+      expect(container.read(projectProvider).players.single['id'], 'p2');
+      expect(
+        container.read(projectProvider).candidates.first['player_id'],
+        isNull,
+      );
+      expect(
+        container.read(projectProvider).candidates.last['player_id'],
+        'p2',
+      );
+      expect(session.listCandidatesCalls, 1);
+      expect(session.listPlayersCalls, 0);
+    });
+  });
+
   group('ProjectNotifier.setCandidatesPlayer', () {
     test('批量设置球员标签后直接更新本地候选，不重复刷新列表', () async {
       final fakeSession = _FakeProjectSession()
@@ -724,6 +912,39 @@ class _StubEngineBootstrap extends EngineBootstrapNotifier {
   }) async {}
 }
 
+class _ActiveJobNotifier extends ProjectNotifier {
+  @override
+  ProjectState build() {
+    super.build();
+    return const ProjectState(job: {'id': 'job-1', 'state': 'running'});
+  }
+}
+
+class _ClosingScope extends ProjectSessionScope {
+  _ClosingScope(this.session)
+    : super(
+        engine: EngineSession(_NeverTransport()),
+        projectRoot: '/tmp/project',
+      );
+  final _FakeProjectSession session;
+  final List<String> cancelled = [];
+
+  @override
+  Future<JsonMap> cancelJob({required String jobId}) async {
+    expect(session.setCandidatesPlayerCalls, [
+      ['c1'],
+    ]);
+    cancelled.add(jobId);
+    return {};
+  }
+
+  @override
+  Future<JsonMap> waitForJob({
+    required String jobId,
+    Duration interval = const Duration(milliseconds: 200),
+  }) async => {};
+}
+
 /// 子类化 ProjectSession(方案 A)。重写所有被 ProjectNotifier 调用的高层方法,
 /// 返回预设 JsonMap;底层 engine.client 永不触达(_NeverTransport 兜底)。
 class _FakeProjectSession extends ProjectSession {
@@ -732,6 +953,56 @@ class _FakeProjectSession extends ProjectSession {
 
   final Duration reviewDelay;
   Duration previewDelay = Duration.zero;
+  Duration playerDelay = Duration.zero;
+  Completer<void>? playerGate;
+  Completer<void>? previewGate;
+  bool throwOnPlayerChange = false;
+  int listPlayersCalls = 0;
+  int resetCalls = 0;
+  ProjectSessionScope? testScope;
+
+  @override
+  ProjectSessionScope snapshot({bool requireVideo = false}) =>
+      testScope ?? super.snapshot(requireVideo: requireVideo);
+
+  @override
+  void reset() {
+    resetCalls++;
+    super.reset();
+  }
+
+  @override
+  Future<JsonMap> createPlayer(String name) async {
+    await playerGate?.future;
+    await Future<void>.delayed(playerDelay);
+    final player = <String, dynamic>{
+      'id': 'p${players.length + 1}',
+      'name': name,
+    };
+    players.add(player);
+    return {'player': player};
+  }
+
+  @override
+  Future<JsonMap> listPlayers() async {
+    listPlayersCalls++;
+    return {'players': players};
+  }
+
+  @override
+  Future<JsonMap> deletePlayer(String id) async {
+    players.removeWhere((player) => player['id'] == id);
+    return {'deleted': true};
+  }
+
+  @override
+  Future<JsonMap> setCandidatePlayer({
+    required String candidateId,
+    String? playerId,
+  }) async {
+    if (throwOnPlayerChange) throw StateError('tag save failed');
+    return {'updated': true};
+  }
 
   final List<JsonMap> _candidates = <JsonMap>[];
   List<JsonMap> players = <JsonMap>[];
@@ -817,6 +1088,7 @@ class _FakeProjectSession extends ProjectSession {
 
   @override
   Future<JsonMap> extractPreview({int timeMs = 1000}) async {
+    await previewGate?.future;
     if (previewDelay > Duration.zero) await Future<void>.delayed(previewDelay);
     return <String, dynamic>{'path': '/tmp/preview.jpg'};
   }

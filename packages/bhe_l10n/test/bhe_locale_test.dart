@@ -36,6 +36,13 @@ void main() {
       ),
     );
     expect(english.text('视频解码不完整'), 'Video decoding was incomplete');
+    expect(english.text('正在添加球员…'), 'Adding player…');
+    expect(english.text('正在保存球员标签…'), 'Saving player tags…');
+    expect(english.text('正在删除球员…'), 'Deleting player…');
+    expect(
+      english.text('正在保存修改并关闭项目…'),
+      'Saving changes and closing the project…',
+    );
     expect(english.text('审核 2/25'), 'Review 2/25');
     expect(english.text('正在导出 3-4/25'), 'Exporting 3-4/25');
     expect(english.text('“demo”及其审核记录会从本机移除。'), contains('demo'));
@@ -95,10 +102,7 @@ void main() {
       startsWith('Editing the orange shot analysis region:'),
     );
     expect(english.text('新建项目'), 'New project');
-    expect(
-      english.text('全部候选 · 12 个'),
-      'All candidates · 12',
-    );
+    expect(english.text('全部候选 · 12 个'), 'All candidates · 12');
     expect(
       english.text('标准分析 · 13 个候选 · 用时 10 秒'),
       'Standard analysis · 13 candidates · Elapsed 10 sec',
@@ -111,10 +115,7 @@ void main() {
       english.text('将覆盖全部 15 个片段，其中 15 个曾手动调整。'),
       'Overwrite all 15 clips; 15 were manually adjusted.',
     );
-    expect(
-      english.text('当前区域 0.40 × 0.30'),
-      'Current region 0.40 × 0.30',
-    );
+    expect(english.text('当前区域 0.40 × 0.30'), 'Current region 0.40 × 0.30');
     expect(english.text('当前 00:18'), 'Current 00:18');
     expect(english.text('投篮区'), 'Shot area');
     expect(english.text('篮网'), 'Net');
@@ -151,5 +152,4 @@ void main() {
       startsWith('Python runtime not found.'),
     );
   });
-
 }

@@ -148,9 +148,10 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   ) async {
     final name = await _promptPlayerName();
     if (!mounted || name == null) return;
-    final playerId = await notifier.createPlayer(name);
-    if (!mounted || playerId == null) return;
-    await notifier.setCandidatePlayer(candidate['id'].toString(), playerId);
+    await notifier.createPlayer(
+      name,
+      candidateIds: [candidate['id'].toString()],
+    );
   }
 
   void _toggleBatchMode() {
@@ -327,9 +328,12 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     if (_selectedForBatch.isEmpty) return;
     final name = await _promptPlayerName();
     if (!mounted || name == null) return;
-    final playerId = await notifier.createPlayer(name);
+    final playerId = await notifier.createPlayer(
+      name,
+      candidateIds: _selectedForBatch.toList(),
+    );
     if (!mounted || playerId == null) return;
-    await _setPlayerForBatch(notifier, playerId);
+    setState(() => _selectedForBatch.clear());
   }
 
   Future<void> _deletePlayer(String playerId, String playerName) async {
@@ -661,6 +665,29 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                   finishedAt: job?['finished_at']?.toString(),
                   mode: state.analysisMode,
                   checkpoint: _decodeJobCheckpoint(job),
+                ),
+              ),
+            if (state.busy && state.busyMessage != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: Spacing.md,
+                  vertical: Spacing.sm,
+                ),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: Spacing.sm),
+                    Expanded(
+                      child: Text(
+                        context.bheText(state.busyMessage!),
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             Expanded(

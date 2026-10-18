@@ -8,6 +8,7 @@ import 'package:desktop/components/cs_sidebar_shell.dart';
 import 'package:desktop/core/engine_client.dart';
 import 'package:desktop/providers/session_provider.dart';
 import 'package:desktop/providers/theme_provider.dart';
+import 'package:desktop/providers/project_state.dart';
 import 'package:desktop/router/app_router.dart';
 
 void main() {
@@ -37,6 +38,36 @@ void main() {
   });
 
   group('CsScaffold responsive', () {
+    testWidgets('close project remains clickable while a save is pending', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final notifier = _BusyProjectNotifier();
+      await _pumpHarness(tester, notifier: notifier);
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(_RouterHost)),
+      );
+      container.read(appRouterProvider).go('/import');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('关闭当前项目'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.tap(find.text('关闭项目'));
+      await tester.pumpAndSettle();
+      expect(notifier.closeCalls, 1);
+      expect(
+        container
+            .read(appRouterProvider)
+            .routeInformationProvider
+            .value
+            .uri
+            .path,
+        '/home',
+      );
+    });
+
     testWidgets('wide window renders CsSidebarShell', (tester) async {
       tester.view.physicalSize = const Size(1200, 800);
       tester.view.devicePixelRatio = 1.0;
@@ -63,10 +94,14 @@ void main() {
   });
 }
 
-Future<void> _pumpHarness(WidgetTester tester) async {
+Future<void> _pumpHarness(
+  WidgetTester tester, {
+  ProjectNotifier? notifier,
+}) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: <Override>[
+        if (notifier != null) projectProvider.overrideWith(() => notifier),
         engineBootstrapProvider.overrideWith(() => _StubEngine()),
         engineClientProvider.overrideWithValue(_StubClient()),
         themeModeProvider.overrideWith(() => _StubTheme()),
@@ -75,6 +110,24 @@ Future<void> _pumpHarness(WidgetTester tester) async {
     ),
   );
   await tester.pumpAndSettle();
+}
+
+class _BusyProjectNotifier extends ProjectNotifier {
+  int closeCalls = 0;
+
+  @override
+  ProjectState build() =>
+      const ProjectState(busy: true, video: {'id': 'video-1'});
+
+  @override
+  Future<void> loadRecentProjects() async {}
+
+  @override
+  Future<bool> closeProjectSafely() async {
+    closeCalls++;
+    state = const ProjectState();
+    return true;
+  }
 }
 
 class _StubEngine extends EngineBootstrapNotifier {

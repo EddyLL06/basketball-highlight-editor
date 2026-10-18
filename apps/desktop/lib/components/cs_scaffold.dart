@@ -98,7 +98,6 @@ class CsTopBar extends ConsumerWidget {
     };
     final engineAsync = ref.watch(engineBootstrapProvider);
     final themeMode = ref.watch(themeModeProvider);
-    final projectState = ref.watch(projectProvider);
 
     return Container(
       height: 40,
@@ -123,9 +122,7 @@ class CsTopBar extends ConsumerWidget {
             IconButton(
               tooltip: l10n?.confirmCloseProject ?? '关闭当前项目',
               icon: Icon(LucideIcons.folderX, size: 17, color: c.textSecondary),
-              onPressed: projectState.busy
-                  ? null
-                  : () => _confirmCloseProject(context, ref, shell),
+              onPressed: () => _confirmCloseProject(context, ref, shell),
             ),
           if (!compact) ...<Widget>[
             Icon(LucideIcons.shield, size: 12, color: c.textSecondary),
@@ -236,7 +233,6 @@ Future<void> _confirmCloseProject(
   final state = ref.read(projectProvider);
   final session = ref.read(projectSessionProvider);
   final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
-  if (state.busy) return;
   if (session.projectRoot == null && state.video == null) {
     shell.goBranch(0);
     return;
