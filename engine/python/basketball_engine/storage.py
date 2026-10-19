@@ -665,23 +665,24 @@ class ProjectStore:
                         _, old_id, old_candidate = candidates[0]
                         review = existing_reviews[old_id]
                         used_old.add(old_id)
-                        event_delta = int(row["event_time_ms"]) - int(old_candidate["event_time_ms"])
-                        old_default_start = int(old_candidate["default_start_ms"])
-                        old_default_end = int(old_candidate["default_end_ms"])
-                        if (
-                            int(old_candidate["review_start_ms"]) != old_default_start
-                            or int(old_candidate["review_end_ms"]) != old_default_end
-                        ):
-                            shifted_start = int(old_candidate["review_start_ms"]) + event_delta
-                            shifted_end = int(old_candidate["review_end_ms"]) + event_delta
-                            if duration_ms is not None and duration_ms > 0:
-                                shifted_start = max(0, min(shifted_start, duration_ms - 1))
-                                shifted_end = max(shifted_start + 1, min(shifted_end, duration_ms))
-                            else:
-                                shifted_start = max(0, shifted_start)
-                                shifted_end = max(shifted_start + 1, shifted_end)
-                            row["review_start_ms"] = shifted_start
-                            row["review_end_ms"] = shifted_end
+                if old_candidate is not None:
+                    event_delta = int(row["event_time_ms"]) - int(old_candidate["event_time_ms"])
+                    old_default_start = int(old_candidate["default_start_ms"])
+                    old_default_end = int(old_candidate["default_end_ms"])
+                    if (
+                        int(old_candidate["review_start_ms"]) != old_default_start
+                        or int(old_candidate["review_end_ms"]) != old_default_end
+                    ):
+                        shifted_start = int(old_candidate["review_start_ms"]) + event_delta
+                        shifted_end = int(old_candidate["review_end_ms"]) + event_delta
+                        if duration_ms is not None and duration_ms > 0:
+                            shifted_start = max(0, min(shifted_start, duration_ms - 1))
+                            shifted_end = max(shifted_start + 1, min(shifted_end, duration_ms))
+                        else:
+                            shifted_start = max(0, shifted_start)
+                            shifted_end = max(shifted_start + 1, shifted_end)
+                        row["review_start_ms"] = shifted_start
+                        row["review_end_ms"] = shifted_end
                 if review is not None:
                     matches[candidate_id] = review
             connection.execute("DELETE FROM candidates WHERE video_id = ?", (video_id,))

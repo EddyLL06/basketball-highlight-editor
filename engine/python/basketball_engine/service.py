@@ -1074,6 +1074,9 @@ class EngineService:
             retry_payload["output_dir"] = checkpoint["output_dir"]
         if checkpoint.get("output_path") is not None:
             retry_payload["output_path"] = checkpoint["output_path"]
+        for key in ("player_ids", "include_unassigned"):
+            if key in checkpoint:
+                retry_payload[key] = checkpoint[key]
         return self.start_export(retry_payload)
 
     @staticmethod
