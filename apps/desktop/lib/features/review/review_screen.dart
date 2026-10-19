@@ -48,7 +48,8 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     debugLabel: 'review-shortcut-focus',
   );
   final Map<String, Future<String?>> _coverCache = <String, Future<String?>>{};
-  final Map<String, GlobalKey> _candidateRowKeys = <String, GlobalKey>{};
+  final Map<String, BuildContext> _candidateRowContexts =
+      <String, BuildContext>{};
   final ScrollController _candidateScrollController = ScrollController();
   final List<Future<void> Function()> _previewQueue =
       <Future<void> Function()>[];
@@ -830,7 +831,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     analysisMode: state.analysisMode,
                     analysisCompleted: jobState == 'completed',
                     onSelect: _selectCandidate,
-                    candidateRowKeys: _candidateRowKeys,
+                    candidateRowContexts: _candidateRowContexts,
                     candidateScrollController: _candidateScrollController,
                     onSetPlayer: (candidate, playerId) =>
                         _setPlayerForCandidate(candidate, notifier, playerId),
@@ -946,8 +947,8 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   }
 
   void _ensureCandidateVisible(String id) {
-    final targetContext = _candidateRowKeys[id]?.currentContext;
-    if (targetContext != null) {
+    final targetContext = _candidateRowContexts[id];
+    if (targetContext != null && targetContext.mounted) {
       unawaited(
         Scrollable.ensureVisible(
           targetContext,
@@ -4581,7 +4582,7 @@ class _CandidatePanel extends StatelessWidget {
     required this.analysisMode,
     required this.analysisCompleted,
     required this.onSelect,
-    required this.candidateRowKeys,
+    required this.candidateRowContexts,
     required this.candidateScrollController,
     required this.onSetPlayer,
     required this.onCreatePlayer,
@@ -4619,7 +4620,7 @@ class _CandidatePanel extends StatelessWidget {
   final String analysisMode;
   final bool analysisCompleted;
   final ValueChanged<Map<String, dynamic>> onSelect;
-  final Map<String, GlobalKey> candidateRowKeys;
+  final Map<String, BuildContext> candidateRowContexts;
   final ScrollController candidateScrollController;
   final Future<void> Function(Map<String, dynamic>, String?) onSetPlayer;
   final Future<void> Function(Map<String, dynamic>) onCreatePlayer;
@@ -4822,8 +4823,11 @@ class _CandidatePanel extends StatelessWidget {
                       final coverFuture = onLoadCover == null
                           ? null
                           : onLoadCover!(id, _candidateTime(candidate));
-                      return _CandidateRow(
-                        key: candidateRowKeys.putIfAbsent(id, GlobalKey.new),
+                      return _RowContextAnchor(
+                        key: ValueKey('candidate-row-$id'),
+                        id: id,
+                        contexts: candidateRowContexts,
+                        child: _CandidateRow(
                         candidate: candidate,
                         index: index,
                         selected: id == selectedId,
@@ -4843,6 +4847,7 @@ class _CandidatePanel extends StatelessWidget {
                         onInclude: () => unawaited(onSetStatus(id, 'included')),
                         onExclude: () => unawaited(onSetStatus(id, 'excluded')),
                         coverFuture: coverFuture,
+                      ),
                       );
                     },
                   ),
@@ -4987,6 +4992,54 @@ class _StatusSegments extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Records a row's context for scrolling it into view. Rows use value keys:
+/// a global key would reparent a row whose tooltip is open when the list
+/// reorders, which corrupts the overlay layout and breaks mouse tracking.
+class _RowContextAnchor extends StatefulWidget {
+  const _RowContextAnchor({
+    required this.id,
+    required this.contexts,
+    required this.child,
+    super.key,
+  });
+
+  final String id;
+  final Map<String, BuildContext> contexts;
+  final Widget child;
+
+  @override
+  State<_RowContextAnchor> createState() => _RowContextAnchorState();
+}
+
+class _RowContextAnchorState extends State<_RowContextAnchor> {
+  @override
+  void initState() {
+    super.initState();
+    widget.contexts[widget.id] = context;
+  }
+
+  @override
+  void didUpdateWidget(covariant _RowContextAnchor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.id != widget.id &&
+        identical(oldWidget.contexts[oldWidget.id], context)) {
+      oldWidget.contexts.remove(oldWidget.id);
+    }
+    widget.contexts[widget.id] = context;
+  }
+
+  @override
+  void dispose() {
+    if (identical(widget.contexts[widget.id], context)) {
+      widget.contexts.remove(widget.id);
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class _PlayerTagChips extends StatelessWidget {
@@ -5421,7 +5474,6 @@ class _CandidateRow extends StatelessWidget {
     required this.onInclude,
     required this.onExclude,
     required this.coverFuture,
-    super.key,
   });
 
   final Map<String, dynamic> candidate;
