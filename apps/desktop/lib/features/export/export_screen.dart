@@ -32,12 +32,14 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   final Set<String> _selectedPlayerIds = <String>{};
   bool _includeUnassigned = true;
   bool _playerFilterActive = false;
+  (String?, String?)? _playerFilterScope;
   bool _showFastRisk = true;
   bool _choosingOutput = false;
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(projectProvider);
+    _syncPlayerFilter(state);
     final notifier = ref.read(projectProvider.notifier);
     final theme = Theme.of(context);
     final c = AppColors.of(context);
@@ -107,7 +109,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                       value: l10n?.processingValue ?? '硬件编码优先，软件回退',
                       icon: LucideIcons.cpu,
                     ),
-                    if (state.players.isNotEmpty) ...[
+                    if (state.players.isNotEmpty || _playerFilterActive) ...[
                       const SizedBox(height: Spacing.md),
                       Text(
                         l10n?.exportScope ?? '导出范围',
@@ -121,11 +123,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                           FilterChip(
                             label: Text(l10n?.allPlayers ?? '全部球员'),
                             selected: !_playerFilterActive,
-                            onSelected: (_) => setState(() {
-                              _playerFilterActive = false;
-                              _selectedPlayerIds.clear();
-                              _includeUnassigned = true;
-                            }),
+                            onSelected: (_) => setState(_resetPlayerFilter),
                           ),
                           for (final player in state.players)
                             FilterChip(
@@ -134,12 +132,14 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                                 player['id']?.toString(),
                               ),
                               onSelected: (value) => setState(() {
-                                _playerFilterActive = true;
                                 final id = player['id']?.toString();
                                 if (id == null) return;
+                                if (!_playerFilterActive) {
+                                  _includeUnassigned = false;
+                                }
+                                _playerFilterActive = true;
                                 if (value) {
                                   _selectedPlayerIds.add(id);
-                                  _includeUnassigned = false;
                                 } else {
                                   _selectedPlayerIds.remove(id);
                                 }
@@ -368,6 +368,27 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     await _chooseOutput(notifier, merge: true);
   }
 
+  void _resetPlayerFilter() {
+    _playerFilterActive = false;
+    _selectedPlayerIds.clear();
+    _includeUnassigned = true;
+  }
+
+  void _syncPlayerFilter(ProjectState state) {
+    final scope = (state.video?['id']?.toString(), state.videoPath);
+    if (_playerFilterScope != scope) {
+      _playerFilterScope = scope;
+      _resetPlayerFilter();
+    }
+    // The player list can be incomplete while the project is loading.
+    if (state.hydrating) return;
+    final playerIds = state.players
+        .map((player) => player['id']?.toString())
+        .whereType<String>()
+        .toSet();
+    _selectedPlayerIds.removeWhere((id) => !playerIds.contains(id));
+  }
+
   List<Map<String, dynamic>> _filteredCandidates(ProjectState state) {
     return state.candidates.where(_isIncluded).where((item) {
       if (!_playerFilterActive) return true;
@@ -391,6 +412,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     if (_choosingOutput) return;
     setState(() => _choosingOutput = true);
     final videoId = ref.read(projectProvider).video?['id'];
+    final playerIds = _playerFilterActive ? _selectedPlayerIds.toList() : null;
+    final includeUnassigned = _playerFilterActive ? _includeUnassigned : null;
     try {
       final picker = ref.read(exportOutputPickerProvider);
       final path = await ref
@@ -413,8 +436,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
         merge ? 'merge' : 'separate',
         outputPath: merge ? path : null,
         outputDir: merge ? null : path,
-        playerIds: _playerFilterActive ? _selectedPlayerIds.toList() : null,
-        includeUnassigned: _playerFilterActive ? _includeUnassigned : null,
+        playerIds: playerIds,
+        includeUnassigned: includeUnassigned,
       );
     } catch (error) {
       if (mounted) {
@@ -574,9 +597,11 @@ Future<void> _openDirectory(
         ? null
         : targetPath;
     if (Platform.isMacOS) {
-      await Process.start('open', <String>[
-        directory,
-      ], mode: ProcessStartMode.detached);
+      await Process.start(
+        'open',
+        target == null ? <String>[directory] : <String>['-R', target],
+        mode: ProcessStartMode.detached,
+      );
     } else if (Platform.isWindows) {
       await Process.start(
         'explorer.exe',

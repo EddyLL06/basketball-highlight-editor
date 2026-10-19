@@ -11,6 +11,155 @@ import 'package:desktop/providers/export_output_picker.dart';
 import 'package:desktop/theme/app_theme.dart';
 
 void main() {
+  testWidgets('cached export resets player filters when the video changes', (
+    tester,
+  ) async {
+    final notifier = _FilterExportNotifier(_filterState());
+    await _pumpFilterExport(tester, notifier);
+    await _pickFilter(tester, 'Alice');
+    notifier.replace(
+      const ProjectState(
+        video: {'id': 'B'},
+        candidates: [
+          {'id': 'new-clip', 'default_start_ms': 0, 'default_end_ms': 4000},
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('1 个'), findsOneWidget);
+    expect(_mergeButton(tester).onPressed, isNotNull);
+  });
+
+  testWidgets('cached export resets filters when the source path changes', (
+    tester,
+  ) async {
+    final initial = _filterState().copyWith(videoPath: '/tmp/source-A.mp4');
+    final notifier = _FilterExportNotifier(initial);
+    await _pumpFilterExport(tester, notifier);
+    await _pickFilter(tester, 'Alice');
+    notifier.replace(initial.copyWith(videoPath: '/tmp/source-B.mp4'));
+    await tester.pumpAndSettle();
+    expect(_filterChip(tester, '全部球员').selected, isTrue);
+    expect(find.text('3 个'), findsOneWidget);
+  });
+
+  testWidgets('same-scope hydration and refresh preserve a valid filter', (
+    tester,
+  ) async {
+    final initial = _filterState();
+    final notifier = _FilterExportNotifier(initial);
+    await _pumpFilterExport(tester, notifier);
+    await _pickFilter(tester, 'Alice');
+    notifier.replace(initial.copyWith(hydrating: true, players: []));
+    await tester.pump();
+    expect(_mergeButton(tester).onPressed, isNull);
+    notifier.replace(initial);
+    await tester.pumpAndSettle();
+    expect(_filterChip(tester, 'Alice').selected, isTrue);
+    expect(_filterChip(tester, '全部球员').selected, isFalse);
+    expect(find.text('1 个'), findsOneWidget);
+  });
+
+  testWidgets('adding a player retains explicitly included unassigned clips', (
+    tester,
+  ) async {
+    final notifier = _FilterExportNotifier(_filterState());
+    final picker = _TestOutputPicker();
+    await _pumpFilterExport(tester, notifier, picker: picker);
+    await _pickFilter(tester, 'Alice');
+    expect(_filterChip(tester, '未标记').selected, isFalse);
+    expect(find.text('1 个'), findsOneWidget);
+    await _pickFilter(tester, '未标记');
+    await _pickFilter(tester, 'Bob');
+    expect(_filterChip(tester, '未标记').selected, isTrue);
+    expect(find.text('3 个'), findsOneWidget);
+    await _exportFiltered(tester, picker);
+    expect(notifier.exportedPlayerIds, unorderedEquals(['p1', 'p2']));
+    expect(notifier.exportedIncludeUnassigned, isTrue);
+  });
+
+  testWidgets('selecting unassigned first survives adding a player', (
+    tester,
+  ) async {
+    final notifier = _FilterExportNotifier(_filterState());
+    await _pumpFilterExport(tester, notifier);
+    await _pickFilter(tester, '未标记');
+    await _pickFilter(tester, 'Alice');
+    expect(_filterChip(tester, '未标记').selected, isTrue);
+    expect(find.text('2 个'), findsOneWidget);
+    await _pickFilter(tester, '全部球员');
+    await _pickFilter(tester, 'Bob');
+    expect(_filterChip(tester, '未标记').selected, isFalse);
+    expect(find.text('1 个'), findsOneWidget);
+  });
+
+  testWidgets('deleting one selected player prunes only its export ID', (
+    tester,
+  ) async {
+    final initial = _filterState();
+    final notifier = _FilterExportNotifier(initial);
+    final picker = _TestOutputPicker();
+    await _pumpFilterExport(tester, notifier, picker: picker);
+    await _pickFilter(tester, 'Alice');
+    await _pickFilter(tester, 'Bob');
+    notifier.replace(
+      initial.copyWith(
+        players: [initial.players.last],
+        candidates: [
+          {...initial.candidates.first, 'player_id': null},
+          ...initial.candidates.skip(1),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(_filterChip(tester, 'Bob').selected, isTrue);
+    expect(find.text('1 个'), findsOneWidget);
+    await _exportFiltered(tester, picker);
+    expect(notifier.exportedPlayerIds, ['p2']);
+    expect(notifier.exportedIncludeUnassigned, isFalse);
+  });
+
+  testWidgets('deleting all tags leaves a visible reset for the empty filter', (
+    tester,
+  ) async {
+    final initial = _filterState();
+    final notifier = _FilterExportNotifier(initial);
+    await _pumpFilterExport(tester, notifier);
+    await _pickFilter(tester, 'Alice');
+    notifier.replace(
+      initial.copyWith(
+        players: [],
+        candidates: [
+          for (final candidate in initial.candidates)
+            {...candidate, 'player_id': null},
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('0 个'), findsOneWidget);
+    expect(_mergeButton(tester).onPressed, isNull);
+    expect(_filterChip(tester, '全部球员').selected, isFalse);
+    await _pickFilter(tester, '全部球员');
+    expect(find.text('3 个'), findsOneWidget);
+    expect(_mergeButton(tester).onPressed, isNotNull);
+  });
+
+  testWidgets('refresh does not broaden an intentionally empty filter', (
+    tester,
+  ) async {
+    final initial = _filterState();
+    final notifier = _FilterExportNotifier(initial);
+    await _pumpFilterExport(tester, notifier);
+    await _pickFilter(tester, 'Alice');
+    await _pickFilter(tester, 'Alice');
+    expect(find.text('0 个'), findsOneWidget);
+    notifier.replace(initial.copyWith(players: []));
+    await tester.pumpAndSettle();
+    expect(find.text('0 个'), findsOneWidget);
+    expect(_filterChip(tester, '全部球员').selected, isFalse);
+    expect(_mergeButton(tester).onPressed, isNull);
+  });
+
   testWidgets(
     'export waits for paused previews and prevents duplicate native dialogs',
     (tester) async {
@@ -168,11 +317,98 @@ class _ExportNotifier extends ProjectNotifier {
   ProjectState build() => initialState;
 }
 
+ProjectState _filterState() => const ProjectState(
+  video: {'id': 'A'},
+  players: [
+    {'id': 'p1', 'name': 'Alice'},
+    {'id': 'p2', 'name': 'Bob'},
+  ],
+  candidates: [
+    {
+      'id': 'c1',
+      'default_start_ms': 0,
+      'default_end_ms': 4000,
+      'player_id': 'p1',
+    },
+    {
+      'id': 'c2',
+      'default_start_ms': 5000,
+      'default_end_ms': 9000,
+      'player_id': 'p2',
+    },
+    {'id': 'c3', 'default_start_ms': 10000, 'default_end_ms': 14000},
+  ],
+);
+
+class _FilterExportNotifier extends _ExportNotifier {
+  _FilterExportNotifier(super.initialState);
+
+  List<String>? exportedPlayerIds;
+  bool? exportedIncludeUnassigned;
+
+  void replace(ProjectState value) => state = value;
+
+  @override
+  Future<void> export(
+    String mode, {
+    String? outputDir,
+    String? outputPath,
+    List<String>? playerIds,
+    bool? includeUnassigned,
+  }) async {
+    exportedPlayerIds = playerIds;
+    exportedIncludeUnassigned = includeUnassigned;
+  }
+}
+
+Future<void> _pumpFilterExport(
+  WidgetTester tester,
+  _FilterExportNotifier notifier, {
+  _TestOutputPicker? picker,
+}) async {
+  tester.view.physicalSize = const Size(1200, 1000);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  await _pumpExport(
+    tester,
+    PlaybackCoordinator(),
+    picker ?? _TestOutputPicker(),
+    notifier,
+  );
+}
+
+FilterChip _filterChip(WidgetTester tester, String label) =>
+    tester.widget<FilterChip>(find.widgetWithText(FilterChip, label));
+
+CsButton _mergeButton(WidgetTester tester) =>
+    tester.widget<CsButton>(find.widgetWithText(CsButton, '合并导出'));
+
+Future<void> _pickFilter(WidgetTester tester, String label) async {
+  final chip = find.widgetWithText(FilterChip, label);
+  await tester.ensureVisible(chip);
+  await tester.tap(chip);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _exportFiltered(
+  WidgetTester tester,
+  _TestOutputPicker picker,
+) async {
+  final merge = find.widgetWithText(CsButton, '合并导出');
+  await tester.ensureVisible(merge);
+  await tester.tap(merge);
+  await tester.pump();
+  await tester.pump();
+  expect(picker.calls, 1);
+  picker.result.complete('/tmp/filter-regression.mp4');
+  await tester.pumpAndSettle();
+}
+
 Future<void> _pumpExport(
   WidgetTester tester,
   PlaybackCoordinator coordinator,
   _TestOutputPicker picker,
-  _TrackingExportNotifier notifier,
+  ProjectNotifier notifier,
 ) async {
   await tester.pumpWidget(
     ProviderScope(
