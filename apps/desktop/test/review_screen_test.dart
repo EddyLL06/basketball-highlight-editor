@@ -150,6 +150,36 @@ void main() {
     expect(find.text('没有匹配的候选'), findsOneWidget);
   });
 
+  testWidgets('progress counts reviewed clips and marks the rest', (
+    tester,
+  ) async {
+    await _pumpReview(
+      tester,
+      const ProjectState(
+        job: {'state': 'completed'},
+        candidates: [
+          {
+            'id': 'seen',
+            'event_time_ms': 3000,
+            'default_start_ms': 0,
+            'default_end_ms': 6000,
+            'review_status': 'goal',
+          },
+          {
+            'id': 'new',
+            'event_time_ms': 9000,
+            'default_start_ms': 6000,
+            'default_end_ms': 12000,
+            'review_status': 'pending',
+          },
+        ],
+      ),
+    );
+    expect(find.text('已审核 1 / 2'), findsOneWidget);
+    expect(find.byKey(const ValueKey('unreviewed-new')), findsOneWidget);
+    expect(find.byKey(const ValueKey('unreviewed-seen')), findsNothing);
+  });
+
   testWidgets('number keys tag the selected clip in player menu order', (
     tester,
   ) async {

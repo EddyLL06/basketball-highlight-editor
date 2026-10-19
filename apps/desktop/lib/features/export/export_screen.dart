@@ -9,7 +9,6 @@ import 'package:bhe_l10n/bhe_l10n.dart';
 import '../../components/cs_button.dart';
 import '../../components/cs_card.dart';
 import '../../components/cs_empty_state.dart';
-import '../../components/cs_metric_tile.dart';
 import '../../components/cs_progress_track.dart';
 import '../../providers/project_state.dart';
 import '../../providers/playback_coordinator.dart';
@@ -35,6 +34,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   (String?, String?)? _playerFilterScope;
   bool _showFastRisk = true;
   bool _choosingOutput = false;
+  bool _mergeMode = true;
 
   @override
   Widget build(BuildContext context) {
@@ -51,12 +51,6 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     final exportRunning = state.exportRunning;
     final exportRecoverable =
         state.exportJob?['recoverable'] == true && !exportRunning;
-    final exportProgress =
-        ((state.exportJob?['progress'] as num?)?.toDouble() ?? 0).clamp(
-          0.0,
-          1.0,
-        );
-    final exportStage = state.exportJob?['stage']?.toString() ?? '';
     final busy =
         _choosingOutput ||
         state.busy ||
@@ -64,309 +58,322 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
         state.analysisRunning ||
         state.hydrating;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(Spacing.xl),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 900),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final settings = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n?.exportHighlights ?? '导出集锦',
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: Spacing.xs),
+                  Text(
+                    l10n?.exportDescription ?? '分析结果默认保留，导出时只排除你打叉的片段。',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: c.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            CsButton(
+              label: Text(l10n?.text('返回审核') ?? '返回审核'),
+              icon: LucideIcons.arrowLeft,
+              variant: CsButtonVariant.ghost,
+              size: CsButtonSize.sm,
+              onPressed: () => context.go('/review'),
+            ),
+          ],
+        ),
+        const SizedBox(height: Spacing.lg),
+        if (state.players.isNotEmpty || _playerFilterActive) ...[
+          _ExportSection(
+            title: l10n?.exportScope ?? '导出范围',
+            hint: l10n?.exportScopeHint ?? '可多选球员',
+            child: Wrap(
+              spacing: Spacing.xs,
+              runSpacing: Spacing.xs,
+              children: [
+                _ScopeChip(
+                  label: l10n?.allPlayers ?? '全部球员',
+                  count: state.candidates.where(_isIncluded).length,
+                  selected: !_playerFilterActive,
+                  onSelected: (_) => setState(_resetPlayerFilter),
+                ),
+                for (var index = 0; index < state.players.length; index++)
+                  _ScopeChip(
+                    label: state.players[index]['name']?.toString() ?? '',
+                    count: _playerCount(
+                      state,
+                      state.players[index]['id']?.toString(),
+                    ),
+                    dot: c.player(index),
+                    selected: _selectedPlayerIds.contains(
+                      state.players[index]['id']?.toString(),
+                    ),
+                    onSelected: (value) => setState(() {
+                      final id = state.players[index]['id']?.toString();
+                      if (id == null) return;
+                      if (!_playerFilterActive) {
+                        _includeUnassigned = false;
+                      }
+                      _playerFilterActive = true;
+                      if (value) {
+                        _selectedPlayerIds.add(id);
+                      } else {
+                        _selectedPlayerIds.remove(id);
+                      }
+                    }),
+                  ),
+                _ScopeChip(
+                  label: l10n?.unassigned ?? '未标记',
+                  count: _playerCount(state, null),
+                  dashed: true,
+                  selected: _playerFilterActive && _includeUnassigned,
+                  onSelected: (value) => setState(() {
+                    _playerFilterActive = true;
+                    _includeUnassigned = value;
+                  }),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: Spacing.md),
+        ],
+        Text(
+          l10n?.exportOutputMode ?? '输出方式',
+          style: theme.textTheme.titleSmall,
+        ),
+        const SizedBox(height: Spacing.sm),
+        Row(
+          children: [
+            Expanded(
+              child: _ModeCard(
+                key: const Key('export-mode-merge'),
+                title: l10n?.exportMergeTitle ?? '合并成一个视频',
+                description:
+                    l10n?.exportMergeDescription ?? '按时间顺序拼接为一个 MP4，适合直接分享。',
+                selected: _mergeMode,
+                onTap: () => setState(() => _mergeMode = true),
+              ),
+            ),
+            const SizedBox(width: Spacing.sm),
+            Expanded(
+              child: _ModeCard(
+                key: const Key('export-mode-separate'),
+                title: l10n?.exportSeparateTitle ?? '每个片段单独导出',
+                description:
+                    l10n?.exportSeparateDescription ??
+                    '每段一个文件，放进同一个文件夹，适合二次剪辑。',
+                selected: !_mergeMode,
+                onTap: () => setState(() => _mergeMode = false),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: Spacing.md),
+        CsCard(
+          child: Row(
             children: [
-              Text(
-                l10n?.exportHighlights ?? '导出集锦',
-                style: theme.textTheme.displayMedium,
-              ),
-              const SizedBox(height: Spacing.sm),
-              Text(
-                l10n?.exportDescription ?? '分析结果默认保留，导出时只排除你打叉的片段。',
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: c.textSecondary,
+              Expanded(
+                child: _ExportStat(
+                  label: l10n?.exportClipCount ?? '片段',
+                  value: l10n?.text('$includedCount 个') ?? '$includedCount 个',
                 ),
               ),
-              const SizedBox(height: Spacing.xxl),
-
-              CsCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    CsMetricTile(
-                      label: l10n?.includedCount ?? '当前保留',
-                      value: l10n?.text('$includedCount 个') ?? '$includedCount 个',
-                      icon: LucideIcons.check,
-                    ),
-                    CsMetricTile(
-                      label: l10n?.totalDuration ?? '合计时长',
-                      value: _formatMs(durationMs),
-                      icon: LucideIcons.clock,
-                    ),
-                    CsMetricTile(
-                      label: l10n?.outputCodec ?? '输出编码',
-                      value: 'H.264 / AAC',
-                      icon: LucideIcons.fileVideo,
-                    ),
-                    CsMetricTile(
-                      label: l10n?.processingMethod ?? '处理方式',
-                      value: l10n?.processingValue ?? '硬件编码优先，软件回退',
-                      icon: LucideIcons.cpu,
-                    ),
-                    if (state.players.isNotEmpty || _playerFilterActive) ...[
-                      const SizedBox(height: Spacing.md),
-                      Text(
-                        l10n?.exportScope ?? '导出范围',
-                        style: theme.textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: Spacing.xs),
-                      Wrap(
-                        spacing: Spacing.xs,
-                        runSpacing: Spacing.xs,
-                        children: [
-                          FilterChip(
-                            label: Text(l10n?.allPlayers ?? '全部球员'),
-                            selected: !_playerFilterActive,
-                            onSelected: (_) => setState(_resetPlayerFilter),
-                          ),
-                          for (final player in state.players)
-                            FilterChip(
-                              label: Text(player['name']?.toString() ?? ''),
-                              selected: _selectedPlayerIds.contains(
-                                player['id']?.toString(),
-                              ),
-                              onSelected: (value) => setState(() {
-                                final id = player['id']?.toString();
-                                if (id == null) return;
-                                if (!_playerFilterActive) {
-                                  _includeUnassigned = false;
-                                }
-                                _playerFilterActive = true;
-                                if (value) {
-                                  _selectedPlayerIds.add(id);
-                                } else {
-                                  _selectedPlayerIds.remove(id);
-                                }
-                              }),
-                            ),
-                          FilterChip(
-                            label: Text(l10n?.unassigned ?? '未标记'),
-                            selected: _playerFilterActive && _includeUnassigned,
-                            onSelected: (value) => setState(() {
-                              _playerFilterActive = true;
-                              _includeUnassigned = value;
-                            }),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: Spacing.xs),
-                      Text(
-                        '${l10n?.currentFilter ?? '当前筛选'}：${l10n?.filterStats(includedCount, _formatMs(durationMs)) ?? '$includedCount 个 · ${_formatMs(durationMs)}'}',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: c.textSecondary,
-                        ),
-                      ),
-                    ],
-                    if (exportRunning) ...[
-                      const SizedBox(height: Spacing.sm),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(Spacing.sm),
-                        decoration: BoxDecoration(
-                          color: c.orange.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(CsRadius.md),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    '${l10n?.text(_exportStageLabel(exportStage)) ?? _exportStageLabel(exportStage)} · '
-                                    '${(exportProgress * 100).round()}%\n'
-                                    '${l10n?.text('本次输出使用启动导出时的片段列表，之后的审核修改用于下一次导出。') ?? '本次输出使用启动导出时的片段列表，之后的审核修改用于下一次导出。'}',
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: c.textSecondary,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: Spacing.sm),
-                                CsButton(
-                                  label: Text(l10n?.cancelExport ?? '取消导出'),
-                                  icon: LucideIcons.circleStop,
-                                  variant: CsButtonVariant.secondary,
-                                  size: CsButtonSize.sm,
-                                  onPressed: state.busy
-                                      ? null
-                                      : () => notifier.cancelExport(),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: Spacing.sm),
-                            CsProgressTrack(value: exportProgress),
-                          ],
-                        ),
-                      ),
-                    ],
-                    if (state.analysisRunning) ...[
-                      const SizedBox(height: Spacing.sm),
-                      Text(
-                        l10n?.analysisStillRunning ?? '视频仍在分析，分析完成后才能导出新的候选结果。',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: c.warning,
-                        ),
-                      ),
-                    ],
-                    if (state.analysisMode == 'fast' && _showFastRisk) ...[
-                      const SizedBox(height: Spacing.sm),
-                      Container(
-                        key: const Key('fast-analysis-export-risk'),
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(Spacing.sm),
-                        decoration: BoxDecoration(
-                          color: c.warning.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(CsRadius.md),
-                          border: Border.all(
-                            color: c.warning.withValues(alpha: 0.28),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.info_outline,
-                              size: 17,
-                              color: c.warning,
-                            ),
-                            const SizedBox(width: Spacing.sm),
-                            Expanded(
-                              child: Text(
-                                l10n?.fastAnalysisRisk ??
-                                    '当前结果来自快速分析，可能漏检；如需更完整结果，建议先用标准模式重新分析。',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: c.textSecondary,
-                                ),
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: l10n?.dismissHint ?? '关闭提示',
-                              onPressed: () =>
-                                  setState(() => _showFastRisk = false),
-                              icon: const Icon(Icons.close, size: 16),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    if (exportRecoverable) ...[
-                      const SizedBox(height: Spacing.sm),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(Spacing.sm),
-                        decoration: BoxDecoration(
-                          color: c.warning.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(CsRadius.md),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                l10n?.exportInterrupted ??
-                                    '上次导出已中断，可以从原设置重新导出。',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: c.textSecondary,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: Spacing.sm),
-                            CsButton(
-                              label: Text(l10n?.text('重试导出') ?? '重试导出'),
-                              icon: LucideIcons.refreshCw,
-                              size: CsButtonSize.sm,
-                              onPressed: busy
-                                  ? null
-                                  : () => notifier.retryExport(),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: Spacing.sm),
-                    CsButton(
-                      label: Text(l10n?.text('合并导出') ?? '合并导出'),
-                      icon: LucideIcons.merge,
-                      isLoading: busy,
-                      onPressed: includedCount > 0 && !busy
-                          ? () => _chooseMerge(context, notifier)
-                          : null,
-                    ),
-                    const SizedBox(height: Spacing.sm),
-                    CsButton(
-                      label: Text(l10n?.text('分别导出') ?? '分别导出'),
-                      icon: LucideIcons.files,
-                      variant: CsButtonVariant.secondary,
-                      isLoading: busy,
-                      onPressed: includedCount > 0 && !busy
-                          ? () => _chooseSeparate(context, notifier)
-                          : null,
-                    ),
-                  ],
+              Expanded(
+                child: _ExportStat(
+                  label: l10n?.totalDuration ?? '合计时长',
+                  value: _formatMs(durationMs),
                 ),
               ),
-              const SizedBox(height: Spacing.md),
-              Text(
+              Expanded(
+                child: _ExportStat(
+                  label: l10n?.outputCodec ?? '输出编码',
+                  value: 'H.264 / AAC',
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: _ExportStat(
+                  label: l10n?.processingMethod ?? '处理方式',
+                  value: l10n?.processingValue ?? '硬件编码优先，软件回退',
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (state.analysisRunning) ...[
+          const SizedBox(height: Spacing.sm),
+          _ExportNotice(
+            color: c.warning,
+            text:
+                l10n?.analysisStillRunning ?? '视频仍在分析，分析完成后才能导出新的候选结果。',
+          ),
+        ],
+        if (state.analysisMode == 'fast' && _showFastRisk) ...[
+          const SizedBox(height: Spacing.sm),
+          _ExportNotice(
+            key: const Key('fast-analysis-export-risk'),
+            color: c.warning,
+            text:
+                l10n?.fastAnalysisRisk ??
+                '当前结果来自快速分析，可能漏检；如需更完整结果，建议先用标准模式重新分析。',
+            action: IconButton(
+              tooltip: l10n?.dismissHint ?? '关闭提示',
+              onPressed: () => setState(() => _showFastRisk = false),
+              icon: const Icon(Icons.close, size: 16),
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        ],
+        if (exportRecoverable) ...[
+          const SizedBox(height: Spacing.sm),
+          _ExportNotice(
+            color: c.warning,
+            text: l10n?.exportInterrupted ?? '上次导出已中断，可以从原设置重新导出。',
+            action: CsButton(
+              label: Text(l10n?.text('重试导出') ?? '重试导出'),
+              icon: LucideIcons.refreshCw,
+              size: CsButtonSize.sm,
+              onPressed: busy ? null : () => notifier.retryExport(),
+            ),
+          ),
+        ],
+        const SizedBox(height: Spacing.lg),
+        Wrap(
+          spacing: Spacing.md,
+          runSpacing: Spacing.sm,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            CsButton(
+              key: const Key('export-start'),
+              label: Text(
+                l10n?.exportStartButton(includedCount) ??
+                    '导出 $includedCount 个片段',
+              ),
+              icon: LucideIcons.download,
+              size: CsButtonSize.lg,
+              isLoading: busy,
+              onPressed: includedCount > 0 && !busy
+                  ? () => _chooseOutput(notifier, merge: _mergeMode)
+                  : null,
+            ),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 300),
+              child: Text(
                 _choosingOutput
                     ? context.bheText('正在准备输出位置…')
                     : exportRunning
                     ? l10n?.text('导出任务在后台运行，返回审核后仍可继续修改候选。') ??
-                        '导出任务在后台运行，返回审核后仍可继续修改候选。'
-                    : l10n?.text('导出会包含所有当前保留的候选；已排除片段不会进入输出。') ??
-                        '导出会包含所有当前保留的候选；已排除片段不会进入输出。',
+                          '导出任务在后台运行，返回审核后仍可继续修改候选。'
+                    : l10n?.exportStartHint ?? '下一步选择保存位置，已排除的片段不会进入输出。',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: c.textSecondary,
                 ),
               ),
-              const SizedBox(height: Spacing.md),
-              CsButton(
-                label: Text(l10n?.text('返回审核') ?? '返回审核'),
-                icon: LucideIcons.arrowLeft,
-                variant: CsButtonVariant.ghost,
-                onPressed: () => context.go('/review'),
-              ),
-
-              // ── 历史 ──
-              if (state.exportHistory.isNotEmpty) ...[
-                const SizedBox(height: Spacing.xxl),
-                Text(
-                  l10n?.text('最近导出') ?? '最近导出',
-                  style: theme.textTheme.titleLarge,
-                ),
-                const SizedBox(height: Spacing.md),
-                for (final item in state.exportHistory)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: Spacing.sm),
-                    child: _ExportHistoryCard(item: item),
-                  ),
-              ] else ...[
-                const SizedBox(height: Spacing.xxl),
-                CsEmptyState(
-                  icon: LucideIcons.history,
-                  title: l10n?.text('还没有导出记录') ?? '还没有导出记录',
-                  description:
-                      l10n?.text('完成一次导出后，历史记录会出现在这里。') ??
-                      '完成一次导出后，历史记录会出现在这里。',
-                ),
-              ],
-            ],
-          ),
+            ),
+          ],
         ),
-      ),
+      ],
+    );
+
+    final history = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Text(
+              l10n?.exportRecent ?? '最近导出',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(width: Spacing.xs),
+            Text(
+              '${state.exportHistory.length}',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: c.textTertiary,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: Spacing.sm),
+        if (exportRunning) ...[
+          _RunningExportCard(
+            job: state.exportJob,
+            onCancel: state.busy ? null : () => notifier.cancelExport(),
+          ),
+          const SizedBox(height: Spacing.sm),
+        ],
+        if (state.exportHistory.isNotEmpty)
+          for (final item in state.exportHistory)
+            Padding(
+              padding: const EdgeInsets.only(bottom: Spacing.sm),
+              child: _ExportHistoryCard(item: item),
+            )
+        else if (!exportRunning)
+          Padding(
+            padding: const EdgeInsets.only(top: Spacing.xl),
+            child: CsEmptyState(
+              icon: LucideIcons.history,
+              title: l10n?.text('还没有导出记录') ?? '还没有导出记录',
+              description:
+                  l10n?.text('完成一次导出后，历史记录会出现在这里。') ??
+                  '完成一次导出后，历史记录会出现在这里。',
+            ),
+          ),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 1000;
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(Spacing.xl),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1240),
+              child: wide
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 6, child: settings),
+                        const SizedBox(width: Spacing.xl),
+                        Expanded(flex: 5, child: history),
+                      ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        settings,
+                        const SizedBox(height: Spacing.xxl),
+                        history,
+                      ],
+                    ),
+            ),
+          ),
+        );
+      },
     );
   }
 
-  Future<void> _chooseMerge(
-    BuildContext context,
-    ProjectNotifier notifier,
-  ) async {
-    await _chooseOutput(notifier, merge: true);
-  }
+  int _playerCount(ProjectState state, String? playerId) => state.candidates
+      .where(_isIncluded)
+      .where((item) {
+        final id = item['player_id']?.toString();
+        return playerId == null ? id == null || id.isEmpty : id == playerId;
+      })
+      .length;
 
   void _resetPlayerFilter() {
     _playerFilterActive = false;
@@ -396,13 +403,6 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
       return _selectedPlayerIds.contains(playerId) ||
           (_includeUnassigned && (playerId == null || playerId.isEmpty));
     }).toList();
-  }
-
-  Future<void> _chooseSeparate(
-    BuildContext context,
-    ProjectNotifier notifier,
-  ) async {
-    await _chooseOutput(notifier, merge: false);
   }
 
   Future<void> _chooseOutput(
@@ -455,6 +455,353 @@ bool _isIncluded(Map<String, dynamic> item) =>
     item['selection_status']?.toString() != 'excluded' &&
     item['review_status']?.toString() != 'excluded';
 
+class _ExportSection extends StatelessWidget {
+  const _ExportSection({
+    required this.title,
+    required this.hint,
+    required this.child,
+  });
+
+  final String title;
+  final String hint;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = AppColors.of(context);
+    return CsCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(title, style: theme.textTheme.titleSmall),
+              const SizedBox(width: Spacing.sm),
+              Flexible(
+                child: Text(
+                  hint,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: c.textTertiary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Spacing.sm),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _ScopeChip extends StatelessWidget {
+  const _ScopeChip({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onSelected,
+    this.dot,
+    this.dashed = false,
+  });
+
+  final String label;
+  final int count;
+  final bool selected;
+  final ValueChanged<bool> onSelected;
+  final Color? dot;
+  final bool dashed;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    return FilterChip(
+      showCheckmark: false,
+      selected: selected,
+      onSelected: onSelected,
+      backgroundColor: Colors.transparent,
+      selectedColor: c.surface3,
+      side: BorderSide(
+        color: selected
+            ? c.borderStrong
+            : dashed
+            ? c.borderStrong.withValues(alpha: 0.6)
+            : c.border,
+      ),
+      shape: const StadiumBorder(),
+      visualDensity: VisualDensity.compact,
+      avatar: dot == null
+          ? null
+          : Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+            ),
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 160),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: selected ? c.textPrimary : c.textSecondary,
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '$count',
+            style: TextStyle(
+              color: c.textTertiary,
+              fontSize: 11,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ModeCard extends StatelessWidget {
+  const _ModeCard({
+    required this.title,
+    required this.description,
+    required this.selected,
+    required this.onTap,
+    super.key,
+  });
+
+  final String title;
+  final String description;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Material(
+        color: selected ? c.orange.withValues(alpha: 0.08) : c.surface2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(CsRadius.md),
+          side: BorderSide(
+            color: selected ? c.orange : c.border,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(CsRadius.md),
+          child: Padding(
+            padding: const EdgeInsets.all(Spacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      selected
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      size: 18,
+                      color: selected ? c.orange : c.textTertiary,
+                    ),
+                    const SizedBox(width: Spacing.sm),
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: Spacing.xs),
+                Text(
+                  description,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: c.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExportStat extends StatelessWidget {
+  const _ExportStat({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.labelSmall?.copyWith(color: c.textTertiary),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ExportNotice extends StatelessWidget {
+  const _ExportNotice({
+    required this.color,
+    required this.text,
+    this.action,
+    super.key,
+  });
+
+  final Color color;
+  final String text;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        horizontal: Spacing.sm,
+        vertical: Spacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(CsRadius.md),
+        border: Border.all(color: color.withValues(alpha: 0.24)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, size: 16, color: color),
+          const SizedBox(width: Spacing.sm),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Text(
+                text,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: c.textSecondary),
+              ),
+            ),
+          ),
+          if (action != null) ...[const SizedBox(width: Spacing.sm), action!],
+        ],
+      ),
+    );
+  }
+}
+
+class _RunningExportCard extends StatelessWidget {
+  const _RunningExportCard({required this.job, required this.onCancel});
+
+  final Map<String, dynamic>? job;
+  final VoidCallback? onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
+    final progress = ((job?['progress'] as num?)?.toDouble() ?? 0).clamp(
+      0.0,
+      1.0,
+    );
+    final stage = _exportStageLabel(job?['stage']?.toString() ?? '');
+    return Container(
+      key: const Key('export-running'),
+      padding: const EdgeInsets.all(Spacing.md),
+      decoration: BoxDecoration(
+        color: c.surface2,
+        borderRadius: BorderRadius.circular(CsRadius.md),
+        border: Border.all(color: c.orange.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: c.orange,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: Spacing.sm),
+              Expanded(
+                child: Text(
+                  '${l10n?.exportRunningTitle ?? '正在导出'} · '
+                  '${l10n?.text(stage) ?? stage} · ${(progress * 100).round()}%',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+              CsButton(
+                label: Text(l10n?.cancelExport ?? '取消导出'),
+                icon: LucideIcons.circleStop,
+                variant: CsButtonVariant.secondary,
+                size: CsButtonSize.sm,
+                onPressed: onCancel,
+              ),
+            ],
+          ),
+          const SizedBox(height: Spacing.sm),
+          CsProgressTrack(value: progress),
+          const SizedBox(height: Spacing.sm),
+          Text(
+            l10n?.text('本次输出使用启动导出时的片段列表，之后的审核修改用于下一次导出。') ??
+                '本次输出使用启动导出时的片段列表，之后的审核修改用于下一次导出。',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: c.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ExportHistoryCard extends StatelessWidget {
   const _ExportHistoryCard({required this.item});
 
@@ -486,48 +833,68 @@ class _ExportHistoryCard extends StatelessWidget {
               '${createdAt.hour.toString().padLeft(2, '0')}:'
               '${createdAt.minute.toString().padLeft(2, '0')}';
 
+    final meta = [
+      _formatMs(duration),
+      _formatBytes(fileSize),
+      if (width != null && height != null) '$width×$height',
+      if (videoCodec != null && videoCodec.isNotEmpty) videoCodec,
+      if (audioCodec != null && audioCodec.isNotEmpty) audioCodec,
+    ].join(' · ');
     return CsCard(
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(LucideIcons.history, size: 18, color: c.textTertiary),
-          const SizedBox(width: Spacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  l10n?.text('$mode · $count 个片段 · ${_formatMs(duration)}') ??
-                      '$mode · $count 个片段 · ${_formatMs(duration)}',
-                  style: theme.textTheme.titleMedium,
+                Row(
+                  children: [
+                    Icon(Icons.check_rounded, size: 16, color: c.goal),
+                    const SizedBox(width: Spacing.xs),
+                    Flexible(
+                      child: Text(
+                        l10n?.text('$mode · $count 个片段') ??
+                            '$mode · $count 个片段',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall,
+                      ),
+                    ),
+                    if (time.isNotEmpty) ...[
+                      const SizedBox(width: Spacing.sm),
+                      Text(
+                        time,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: c.textTertiary,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: Spacing.xs),
-                SelectableText(
-                  path,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: c.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: Spacing.xs),
                 Text(
-                  l10n?.text(
-                        '${time.isEmpty ? '' : '$time · '}处理 ${_formatMs(processing)}',
-                      ) ??
-                      '${time.isEmpty ? '' : '$time · '}处理 ${_formatMs(processing)}',
+                  meta,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: c.textTertiary,
+                    color: c.textSecondary,
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
-                const SizedBox(height: Spacing.xs),
+                const SizedBox(height: 2),
+                SelectableText(
+                  path,
+                  maxLines: 1,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: c.textTertiary,
+                  ),
+                ),
                 Text(
-                  [
-                    _formatBytes(fileSize),
-                    if (width != null && height != null) '$width×$height',
-                    if (videoCodec != null && videoCodec.isNotEmpty) videoCodec,
-                    if (audioCodec != null && audioCodec.isNotEmpty) audioCodec,
-                  ].join(' · '),
+                  l10n?.text('处理 ${_formatMs(processing)}') ??
+                      '处理 ${_formatMs(processing)}',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: c.textTertiary,
                     fontFeatures: const [FontFeature.tabularFigures()],

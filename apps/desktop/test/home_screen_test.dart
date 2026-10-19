@@ -104,10 +104,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final deleteButton = find.byTooltip('删除项目');
-      expect(deleteButton, findsOneWidget);
-      await tester.ensureVisible(deleteButton);
-      await tester.tap(deleteButton);
+      final actions = find.byTooltip('项目操作');
+      expect(actions, findsOneWidget);
+      await tester.ensureVisible(actions);
+      await tester.tap(actions);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('删除项目'));
       await tester.pumpAndSettle();
 
       expect(find.text('删除项目？'), findsOneWidget);
@@ -131,7 +133,41 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('还没有项目'), findsOneWidget);
+    expect(find.text('还没有打开的项目'), findsOneWidget);
   });
+
+  testWidgets('current project card shows progress and the next step', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [projectProvider.overrideWith(_CurrentProjectNotifier.new)],
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('继续上次'), findsOneWidget);
+    expect(find.text('三分'), findsOneWidget);
+    expect(find.text('三分.mp4'), findsOneWidget);
+    expect(find.text('待审核'), findsOneWidget);
+    expect(find.text('继续审核'), findsOneWidget);
+    expect(find.text('01:57'), findsOneWidget);
+  });
+}
+
+class _CurrentProjectNotifier extends ProjectNotifier {
+  @override
+  ProjectState build() => const ProjectState(
+    video: {'id': 'v1', 'duration_ms': 117000, 'source_path': '/v/三分.mp4'},
+    statistics: {
+      'project': {'name': '三分'},
+    },
+    candidates: [
+      {'id': 'c1', 'review_status': 'pending'},
+      {'id': 'c2', 'review_status': 'excluded'},
+    ],
+  );
 }
 
 class _EmptyProjectNotifier extends ProjectNotifier {

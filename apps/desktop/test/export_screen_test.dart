@@ -169,7 +169,7 @@ void main() {
       final picker = _TestOutputPicker();
       final notifier = _TrackingExportNotifier();
       await _pumpExport(tester, coordinator, picker, notifier);
-      final merge = find.widgetWithText(CsButton, '合并导出');
+      final merge = find.byKey(const Key('export-start'));
       await tester.ensureVisible(merge);
       await tester.tap(merge);
       await tester.pump();
@@ -205,7 +205,7 @@ void main() {
       final picker = _TestOutputPicker();
       final notifier = _TrackingExportNotifier();
       await _pumpExport(tester, coordinator, picker, notifier);
-      final merge = find.widgetWithText(CsButton, '合并导出');
+      final merge = find.byKey(const Key('export-start'));
       await tester.ensureVisible(merge);
       await tester.tap(merge);
       await tester.pump();
@@ -223,7 +223,11 @@ void main() {
     final picker = _TestOutputPicker();
     final notifier = _TrackingExportNotifier();
     await _pumpExport(tester, PlaybackCoordinator(), picker, notifier);
-    final separate = find.widgetWithText(CsButton, '分别导出');
+    final mode = find.byKey(const Key('export-mode-separate'));
+    await tester.ensureVisible(mode);
+    await tester.tap(mode);
+    await tester.pumpAndSettle();
+    final separate = find.byKey(const Key('export-start'));
     await tester.ensureVisible(separate);
     await tester.tap(separate);
     await tester.pump();
@@ -298,13 +302,11 @@ void main() {
 
     expect(find.text('当前结果来自快速分析，可能漏检；如需更完整结果，建议先用标准模式重新分析。'), findsOneWidget);
     expect(
-      tester.widget<CsButton>(find.widgetWithText(CsButton, '合并导出')).onPressed,
+      tester.widget<CsButton>(find.byKey(const Key('export-start'))).onPressed,
       isNotNull,
     );
-    expect(
-      tester.widget<CsButton>(find.widgetWithText(CsButton, '分别导出')).onPressed,
-      isNotNull,
-    );
+    expect(find.byKey(const Key('export-mode-merge')), findsOneWidget);
+    expect(find.byKey(const Key('export-mode-separate')), findsOneWidget);
   });
 }
 
@@ -381,7 +383,7 @@ FilterChip _filterChip(WidgetTester tester, String label) =>
     tester.widget<FilterChip>(find.widgetWithText(FilterChip, label));
 
 CsButton _mergeButton(WidgetTester tester) =>
-    tester.widget<CsButton>(find.widgetWithText(CsButton, '合并导出'));
+    tester.widget<CsButton>(find.byKey(const Key('export-start')));
 
 Future<void> _pickFilter(WidgetTester tester, String label) async {
   final chip = find.widgetWithText(FilterChip, label);
@@ -394,7 +396,7 @@ Future<void> _exportFiltered(
   WidgetTester tester,
   _TestOutputPicker picker,
 ) async {
-  final merge = find.widgetWithText(CsButton, '合并导出');
+  final merge = find.byKey(const Key('export-start'));
   await tester.ensureVisible(merge);
   await tester.tap(merge);
   await tester.pump();

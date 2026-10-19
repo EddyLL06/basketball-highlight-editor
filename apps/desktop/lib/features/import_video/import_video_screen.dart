@@ -15,7 +15,6 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../../components/cs_button.dart';
 import '../../components/cs_card.dart';
 import '../../components/cs_empty_state.dart';
-import '../../components/cs_step_indicator.dart';
 import '../../core/engine_session.dart';
 import '../../providers/notice_provider.dart';
 import '../../providers/project_state.dart';
@@ -538,183 +537,271 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
     final hasVideo = state.video != null;
     final busy =
         state.busy || state.analysisRunning || state.exportRunning || _applying;
-    final steps = <CsStep>[
+    final steps = <_ImportStep>[
       (
-        index: '01',
         title: l10n?.selectVideo ?? '选择视频',
-        icon: LucideIcons.upload,
         completed: hasVideo,
       ),
       (
-        index: '02',
         title: l10n?.analysisRange ?? '分析范围',
-        icon: LucideIcons.scanLine,
         completed: hasVideo,
       ),
       (
-        index: '03',
         title: l10n?.detectRegionStep ?? '检测区域',
-        icon: LucideIcons.target,
         completed: _roi != null,
       ),
       (
-        index: '04',
-        title: l10n?.confirmAndStartAnalysis ?? '确认并分析',
-        icon: LucideIcons.listChecks,
+        title: l10n?.importConfirmStep ?? '确认并分析',
         completed: false,
       ),
     ];
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(
-        Spacing.xl,
-        Spacing.lg,
-        Spacing.xl,
-        Spacing.xxl,
-      ),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1080),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    final stepSummaries = <String?>[
+      hasVideo
+          ? (state.video!['source_path']?.toString() ?? '')
+                .split(RegExp(r'[/\\]'))
+                .last
+          : null,
+      hasVideo && _analysisEndMs > _analysisStartMs
+          ? '${_formatDuration(_analysisStartMs)} – ${_formatDuration(_analysisEndMs)}'
+          : null,
+      _roi == null ? null : context.bheText('已设置'),
+      _step == _stepCount - 1
+          ? context.bheText(_analysisMode == 'fast' ? '快速分析' : '标准分析')
+          : null,
+    ];
+    final replacesCandidates = state.candidates.isNotEmpty;
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            Spacing.xl,
+            Spacing.lg,
+            Spacing.xl,
+            0,
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1240),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          l10n?.configureProject ?? '配置分析项目',
-                          style: theme.textTheme.displayMedium,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n?.configureProject ?? '配置分析项目',
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              hasVideo
+                                  ? (l10n?.confirmProjectSteps ??
+                                        '按步骤确认视频、分析范围和篮筐检测区域，最后再开始分析。')
+                                  : (l10n?.chooseVideoLastStep ??
+                                        '先选择一段固定机位视频，系统会在最后一步统一应用配置。'),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: c.textSecondary,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: Spacing.xs),
-                        Text(
-                          hasVideo
-                              ? (l10n?.confirmProjectSteps ??
-                                    '按步骤确认视频、分析范围和篮筐检测区域，最后再开始分析。')
-                              : (l10n?.chooseVideoLastStep ??
-                                    '先选择一段固定机位视频，系统会在最后一步统一应用配置。'),
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: c.textSecondary,
+                      ),
+                      if (hasVideo)
+                        TextButton.icon(
+                          onPressed: busy
+                              ? null
+                              : state.videoPath == null ||
+                                    state.videoPath!.isEmpty
+                              ? _relinkMissingVideo
+                              : _selectVideo,
+                          icon: Icon(
+                            state.videoPath == null || state.videoPath!.isEmpty
+                                ? Icons.link_rounded
+                                : Icons.swap_horiz_rounded,
+                            size: 17,
+                          ),
+                          label: Text(
+                            state.videoPath == null || state.videoPath!.isEmpty
+                                ? (l10n?.relinkVideo ?? '重新定位视频')
+                                : (l10n?.replaceVideo ?? '更换视频'),
                           ),
                         ),
-                      ],
-                    ),
+                    ],
                   ),
-                  if (hasVideo)
-                    TextButton.icon(
-                      onPressed: busy
-                          ? null
-                          : state.videoPath == null || state.videoPath!.isEmpty
-                          ? _relinkMissingVideo
-                          : _selectVideo,
-                      icon: Icon(
-                        state.videoPath == null || state.videoPath!.isEmpty
-                            ? Icons.link_rounded
-                            : Icons.swap_horiz_rounded,
-                        size: 17,
-                      ),
-                      label: Text(
-                        state.videoPath == null || state.videoPath!.isEmpty
-                            ? (l10n?.relinkVideo ?? '重新定位视频')
-                            : (l10n?.replaceVideo ?? '更换视频'),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: Spacing.lg),
-              CsCard(
-                child: CsStepIndicator(
-                  steps: steps,
-                  onStepTap: busy
-                      ? null
-                      : (index) {
-                          if (index < _step) {
-                            if (_step == 2 && index != 2) {
-                              _stopPreviewPlayback();
-                            }
-                            setState(() => _step = index);
-                            unawaited(_persistDraft(step: index));
-                          }
-                        },
-                ),
-              ),
-              if (_showExistingDraft) ...[
-                const SizedBox(height: Spacing.sm),
-                _DraftBanner(
-                  onContinue: () => setState(() => _showExistingDraft = false),
-                  onDiscard: () async {
-                    await ref
-                        .read(projectProvider.notifier)
-                        .clearWorkflowDraft();
-                    if (!mounted) return;
-                    _syncFromState(ref.read(projectProvider));
-                    setState(() {
-                      _step = 1;
-                      _showExistingDraft = false;
-                    });
-                  },
-                ),
-              ],
-              const SizedBox(height: Spacing.md),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                child: _buildStep(context, state, busy),
-              ),
-              if (state.busyMessage != null) ...[
-                const SizedBox(height: Spacing.sm),
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 13,
-                      height: 13,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.8,
-                        color: c.orange,
-                      ),
-                    ),
-                    const SizedBox(width: Spacing.sm),
-                    Text(
-                      context.bheText(state.busyMessage!),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: c.textSecondary,
-                      ),
+                  const SizedBox(height: Spacing.md),
+                  _ImportStepper(
+                    steps: steps,
+                    summaries: stepSummaries,
+                    current: _step,
+                    onStepTap: busy ? null : _goToEarlierStep,
+                  ),
+                  if (_showExistingDraft) ...[
+                    const SizedBox(height: Spacing.sm),
+                    _DraftBanner(
+                      onContinue: () =>
+                          setState(() => _showExistingDraft = false),
+                      onDiscard: () async {
+                        await ref
+                            .read(projectProvider.notifier)
+                            .clearWorkflowDraft();
+                        if (!mounted) return;
+                        _syncFromState(ref.read(projectProvider));
+                        setState(() {
+                          _step = 1;
+                          _showExistingDraft = false;
+                        });
+                      },
                     ),
                   ],
+                ],
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(
+              horizontal: Spacing.xl,
+              vertical: Spacing.md,
+            ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1240),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  child: _buildStep(context, state, busy),
                 ),
-              ],
-              const SizedBox(height: Spacing.md),
-              Row(
+              ),
+            ),
+          ),
+        ),
+        Container(
+          key: const Key('import-footer'),
+          decoration: BoxDecoration(
+            color: c.surface,
+            border: Border(top: BorderSide(color: c.border)),
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: Spacing.xl,
+            vertical: Spacing.sm,
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1240),
+              child: Row(
                 children: [
                   if (_step > 0)
-                    TextButton.icon(
-                      onPressed: busy ? null : _back,
-                      icon: const Icon(Icons.arrow_back_rounded, size: 17),
-                      label: Text(l10n?.returnAction ?? '上一步'),
-                    ),
-                  const Spacer(),
-                  if (_step < _stepCount - 1)
                     CsButton(
-                      label: Text(l10n?.nextStep ?? '下一步'),
+                      label: Flexible(
+                        child: Text(
+                          l10n?.returnAction ?? '上一步',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      icon: LucideIcons.arrowLeft,
+                      variant: CsButtonVariant.secondary,
+                      onPressed: busy ? null : _back,
+                    ),
+                  const SizedBox(width: Spacing.md),
+                  Expanded(
+                    child: state.busyMessage != null
+                        ? Row(
+                            children: [
+                              SizedBox(
+                                width: 13,
+                                height: 13,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 1.8,
+                                  color: c.orange,
+                                ),
+                              ),
+                              const SizedBox(width: Spacing.sm),
+                              Flexible(
+                                child: Text(
+                                  context.bheText(state.busyMessage!),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: c.textSecondary,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          )
+                        : _step == _stepCount - 1 && replacesCandidates
+                        ? Text(
+                            l10n?.importReplacesCandidates ??
+                                '已有候选会被本次结果替换',
+                            textAlign: TextAlign.right,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: c.textSecondary,
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                  const SizedBox(width: Spacing.md),
+                  if (_step < _stepCount - 1)
+                    Flexible(
+                      flex: 2,
+                      child: CsButton(
+                      label: Flexible(
+                        child: Text(
+                          _nextStepLabel(l10n) ?? (l10n?.nextStep ?? '下一步'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                       icon: LucideIcons.arrowRight,
                       onPressed: busy || !_canLeaveStep(_step) ? null : _next,
+                    ),
                     )
                   else
-                    CsButton(
-                      label: Text(l10n?.confirmAndStartAnalysis ?? '确认配置并开始分析'),
+                    Flexible(
+                      flex: 2,
+                      child: CsButton(
+                      label: Flexible(
+                        child: Text(
+                          l10n?.confirmAndStartAnalysis ?? '确认配置并开始分析',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                       icon: LucideIcons.play,
                       isLoading: _applying,
-                      onPressed: busy || _roi == null ? null : _applyAndAnalyze,
+                      onPressed: busy || _roi == null
+                          ? null
+                          : _applyAndAnalyze,
+                    ),
                     ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
-      ),
+      ],
     );
+  }
+
+  String? _nextStepLabel(BheLocalizations? l10n) => switch (_step) {
+    0 => l10n?.importNextTo(l10n.analysisRange),
+    1 => l10n?.importNextTo(l10n.detectRegionStep),
+    2 => l10n?.importNextTo(l10n.importConfirmStep),
+    _ => null,
+  };
+
+  void _goToEarlierStep(int index) {
+    if (index >= _step) return;
+    if (_step == 2 && index != 2) _stopPreviewPlayback();
+    setState(() => _step = index);
+    unawaited(_persistDraft(step: index));
   }
 
   Widget _buildStep(BuildContext context, ProjectState state, bool busy) {
@@ -832,10 +919,143 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
             setState(() => _afterSeconds = seconds);
             unawaited(_persistDraft());
           },
+          onEditStep: busy ? null : _goToEarlierStep,
         );
       default:
         return const SizedBox.shrink();
     }
+  }
+}
+
+typedef _ImportStep = ({String title, bool completed});
+
+class _ImportStepper extends StatelessWidget {
+  const _ImportStepper({
+    required this.steps,
+    required this.summaries,
+    required this.current,
+    required this.onStepTap,
+  });
+
+  final List<_ImportStep> steps;
+  final List<String?> summaries;
+  final int current;
+  final ValueChanged<int>? onStepTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        for (var index = 0; index < steps.length; index++) ...[
+          if (index > 0) const SizedBox(width: Spacing.xs),
+          Expanded(
+            child: Builder(
+              builder: (context) {
+                final step = steps[index];
+                final active = index == current;
+                final done = index < current && step.completed;
+                final tappable = onStepTap != null && index < current;
+                return Semantics(
+                  button: tappable,
+                  selected: active,
+                  child: Material(
+                    key: ValueKey('import-step-$index'),
+                    color: active ? c.surface2 : Colors.transparent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(CsRadius.md),
+                      side: BorderSide(
+                        color: active ? c.borderStrong : Colors.transparent,
+                      ),
+                    ),
+                    child: InkWell(
+                      onTap: tappable ? () => onStepTap!(index) : null,
+                      borderRadius: BorderRadius.circular(CsRadius.md),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: Spacing.sm,
+                          vertical: Spacing.xs,
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 24,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: done
+                                    ? c.goal.withValues(alpha: 0.16)
+                                    : active
+                                    ? c.orange
+                                    : Colors.transparent,
+                                border: done || active
+                                    ? null
+                                    : Border.all(color: c.borderStrong),
+                              ),
+                              child: done
+                                  ? Icon(
+                                      Icons.check_rounded,
+                                      size: 14,
+                                      color: c.goal,
+                                    )
+                                  : Text(
+                                      '${index + 1}',
+                                      style: TextStyle(
+                                        color: active
+                                            ? c.onOrange
+                                            : c.textTertiary,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                            ),
+                            const SizedBox(width: Spacing.sm),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    step.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelLarge?.copyWith(
+                                      color: active || done
+                                          ? c.textPrimary
+                                          : c.textSecondary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  if (summaries[index] != null)
+                                    Text(
+                                      summaries[index]!,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.labelSmall
+                                          ?.copyWith(
+                                            color: c.textTertiary,
+                                            fontFeatures: const [
+                                              FontFeature.tabularFigures(),
+                                            ],
+                                          ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ],
+    );
   }
 }
 
@@ -917,7 +1137,7 @@ class _VideoStep extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            context.bheText(_videoSummary(video!)),
+            _videoSummary(video!, noAudio: context.bheText('无音频')),
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: Spacing.md),
@@ -1089,10 +1309,12 @@ class _AnalysisStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _InfoPanel(
-      title: context.bheText('分析范围'),
-      icon: LucideIcons.scanLine,
-      subtitle: context.bheText('默认分析全片。拖动范围手柄排除热身、暂停或比赛结束部分，修改会自动保存在当前草稿。'),
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
+    final analyzed = (endMs - startMs).clamp(0, durationMs).toInt();
+    final percent = durationMs <= 0 ? 0 : (analyzed * 100 / durationMs).round();
+    final editor = CsCard(
       child: _AnalysisRangeEditor(
         videoPath: videoPath,
         durationMs: durationMs,
@@ -1103,6 +1325,132 @@ class _AnalysisStep extends StatelessWidget {
         onChanged: onChanged,
         onCommit: (_, _) async {},
       ),
+    );
+    final info = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CsCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                context.bheText('分析范围'),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: Spacing.sm),
+              Text(
+                context.bheText('默认分析全片。拖动范围手柄排除热身、暂停或比赛结束部分，修改会自动保存在当前草稿。'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: c.textSecondary,
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: Spacing.md),
+        CsCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: _RangeStat(
+                      label: l10n?.importRangeAnalyzed ?? '分析时长',
+                      value: _formatDuration(analyzed),
+                    ),
+                  ),
+                  Expanded(
+                    child: _RangeStat(
+                      label: l10n?.importRangeExcluded ?? '已排除',
+                      value: _formatDuration(durationMs - analyzed),
+                      muted: true,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: Spacing.md),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(3),
+                child: LinearProgressIndicator(
+                  value: durationMs <= 0 ? 0 : analyzed / durationMs,
+                  minHeight: 6,
+                  backgroundColor: c.surface3,
+                  color: c.orange,
+                ),
+              ),
+              const SizedBox(height: Spacing.sm),
+              Text(
+                l10n?.importRangeCoverage(
+                      _formatDuration(durationMs),
+                      percent,
+                    ) ??
+                    '全片 ${_formatDuration(durationMs)} · 分析其中 $percent%',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: c.textTertiary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 1000) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: editor),
+              const SizedBox(width: Spacing.lg),
+              SizedBox(width: 300, child: info),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [editor, const SizedBox(height: Spacing.md), info],
+        );
+      },
+    );
+  }
+}
+
+class _RangeStat extends StatelessWidget {
+  const _RangeStat({
+    required this.label,
+    required this.value,
+    this.muted = false,
+  });
+
+  final String label;
+  final String value;
+  final bool muted;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(color: c.textTertiary),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: theme.textTheme.titleLarge?.copyWith(
+            color: muted ? c.textSecondary : c.textPrimary,
+            fontWeight: FontWeight.w600,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1470,42 +1818,45 @@ class _ClipWindowSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
     final totalSeconds = beforeSeconds + afterSeconds;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(Spacing.md),
-      decoration: BoxDecoration(
-        color: c.surface2,
-        border: Border.all(color: c.border),
-      ),
+    return CsCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            context.bheText('候选片段长度'),
-            style: Theme.of(context).textTheme.titleSmall,
+          Wrap(
+            spacing: Spacing.sm,
+            crossAxisAlignment: WrapCrossAlignment.end,
+            children: [
+              Text(
+                context.bheText('候选片段长度'),
+                style: theme.textTheme.titleSmall,
+              ),
+              Text(
+                l10n?.importClipLengthHint ?? '审核时仍可单独调整每个片段',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: c.textTertiary,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: Spacing.xs),
-          Text(
-            context.bheText('以下是自动生成候选的默认范围，审核时仍可单独调整片段。'),
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: c.textSecondary),
-          ),
-          const SizedBox(height: Spacing.sm),
+          const SizedBox(height: Spacing.md),
           Row(
             children: [
               Expanded(
                 child: _SecondSelector(
+                  key: const Key('clip-before'),
                   label: context.bheText('进球前'),
                   value: beforeSeconds,
                   options: _beforeSecondOptions,
                   onChanged: onBeforeChanged,
                 ),
               ),
-              const SizedBox(width: Spacing.sm),
+              const SizedBox(width: Spacing.md),
               Expanded(
                 child: _SecondSelector(
+                  key: const Key('clip-after'),
                   label: context.bheText('进球后'),
                   value: afterSeconds,
                   options: _afterSecondOptions,
@@ -1514,12 +1865,60 @@ class _ClipWindowSelector extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: Spacing.sm),
-          Text(
-            '${context.bheText('默认片段总长')}：$totalSeconds ${context.bheText('秒')}',
-            style: Theme.of(
-              context,
-            ).textTheme.labelLarge?.copyWith(color: c.orange),
+          const SizedBox(height: Spacing.md),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(CsRadius.sm),
+            child: SizedBox(
+              height: 26,
+              child: Row(
+                children: [
+                  if (beforeSeconds > 0)
+                    Expanded(
+                      flex: beforeSeconds,
+                      child: ColoredBox(
+                        color: c.orange.withValues(alpha: 0.22),
+                        child: Center(
+                          child: Text(
+                            '${context.bheText('进球前')} $beforeSeconds ${context.bheText('秒')}',
+                            maxLines: 1,
+                            overflow: TextOverflow.clip,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: c.orange,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Container(width: 2, color: c.warning),
+                  Expanded(
+                    flex: afterSeconds,
+                    child: ColoredBox(
+                      color: c.orange.withValues(alpha: 0.12),
+                      child: Center(
+                        child: Text(
+                          '${context.bheText('进球后')} $afterSeconds ${context.bheText('秒')}',
+                          maxLines: 1,
+                          overflow: TextOverflow.clip,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: c.orange,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: Spacing.xs),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              l10n?.importClipTotal(totalSeconds) ?? '每段 $totalSeconds 秒',
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
           ),
         ],
       ),
@@ -1527,12 +1926,14 @@ class _ClipWindowSelector extends StatelessWidget {
   }
 }
 
+/// Steps through the allowed second options so the value never leaves them.
 class _SecondSelector extends StatelessWidget {
   const _SecondSelector({
     required this.label,
     required this.value,
     required this.options,
     required this.onChanged,
+    super.key,
   });
 
   final String label;
@@ -1542,24 +1943,53 @@ class _SecondSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InputDecorator(
-      decoration: InputDecoration(labelText: label),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<int>(
-          value: value,
-          isExpanded: true,
-          items: [
-            for (final seconds in options)
-              DropdownMenuItem<int>(
-                value: seconds,
-                child: Text('$seconds ${context.bheText('秒')}'),
-              ),
-          ],
-          onChanged: (next) {
-            if (next != null) onChanged(next);
-          },
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    final index = options.indexOf(value);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(color: c.textTertiary),
         ),
-      ),
+        const SizedBox(height: Spacing.xs),
+        Container(
+          height: 40,
+          decoration: BoxDecoration(
+            color: c.surface2,
+            borderRadius: BorderRadius.circular(CsRadius.md),
+            border: Border.all(color: c.border),
+          ),
+          child: Row(
+            children: [
+              IconButton(
+                key: const ValueKey('decrease'),
+                tooltip: '−',
+                onPressed: index > 0 ? () => onChanged(options[index - 1]) : null,
+                icon: const Icon(Icons.remove, size: 18),
+              ),
+              Expanded(
+                child: Text(
+                  '$value ${context.bheText('秒')}',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+              IconButton(
+                key: const ValueKey('increase'),
+                tooltip: '+',
+                onPressed: index >= 0 && index < options.length - 1
+                    ? () => onChanged(options[index + 1])
+                    : null,
+                icon: const Icon(Icons.add, size: 18),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1587,6 +2017,7 @@ class _SummaryStep extends StatelessWidget {
     required this.onAnalysisModeChanged,
     required this.onBeforeSecondsChanged,
     required this.onAfterSecondsChanged,
+    required this.onEditStep,
   });
   final ProjectState state;
   final int startMs;
@@ -1600,28 +2031,15 @@ class _SummaryStep extends StatelessWidget {
   final ValueChanged<String> onAnalysisModeChanged;
   final ValueChanged<int> onBeforeSecondsChanged;
   final ValueChanged<int> onAfterSecondsChanged;
+  final ValueChanged<int>? onEditStep;
 
   @override
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
-    final rows = <(String, String)>[
-      (
-        context.bheText('视频'),
-        state.video?['source_path']?.toString().split('/').last ?? '-',
-      ),
-      (
-        context.bheText('分析范围'),
-        '${_formatDuration(startMs)} - ${_formatDuration(endMs)}',
-      ),
-      (
-        context.bheText('投篮分析区'),
-        roi == null ? context.bheText('未设置') : context.bheText('已设置'),
-      ),
-      (
-        context.bheText('篮网检测区'),
-        netRoi == null ? context.bheText('自动推荐') : context.bheText('已设置'),
-      ),
-    ];
+    final theme = Theme.of(context);
+    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
+    final durationMs = (state.video?['duration_ms'] as num?)?.toInt() ?? 0;
+    final analyzed = (endMs - startMs).clamp(0, durationMs).toInt();
     final estimate = estimateAnalysisDuration(
       startMs: startMs,
       endMs: endMs,
@@ -1629,98 +2047,366 @@ class _SummaryStep extends StatelessWidget {
       height: (state.video?['height'] as num?)?.toInt() ?? 0,
       mode: analysisMode,
     );
-    return _InfoPanel(
-      title: context.bheText('确认配置'),
-      icon: LucideIcons.listChecks,
-      subtitle: context.bheText('确认后保存检测区域并开始分析；已有候选将被当前配置替换。'),
+    Widget regionLine(String label, String value, Color border, bool ok) =>
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Row(
+            children: [
+              Container(
+                width: 11,
+                height: 11,
+                decoration: BoxDecoration(
+                  border: Border.all(color: border, width: 1.5),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: Spacing.xs),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+              const SizedBox(width: Spacing.xs),
+              Text(
+                value,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: ok ? c.goal : c.warning,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        );
+
+    final summary = CsCard(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final row in rows)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: Spacing.sm),
-              child: Row(
-                children: [
-                  Text(row.$1, style: TextStyle(color: c.textSecondary)),
-                  const Spacer(),
-                  Flexible(child: Text(row.$2, textAlign: TextAlign.right)),
-                ],
-              ),
+          Text(
+            l10n?.importSummaryTitle ?? '配置摘要',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
             ),
-          if (fastModeEnabled)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: Spacing.sm),
-              child: SegmentedButton<String>(
-                segments: [
-                  ButtonSegment<String>(
-                    value: 'standard',
-                    label: Text(context.bheText('标准分析')),
-                  ),
-                  ButtonSegment<String>(
-                    value: 'fast',
-                    label: Text(context.bheText('快速分析')),
-                  ),
-                ],
-                selected: {analysisMode},
-                onSelectionChanged: (selection) {
-                  if (selection.isNotEmpty) {
-                    onAnalysisModeChanged(selection.first);
-                  }
-                },
-              ),
-            ),
-          if (fastModeEnabled && analysisMode == 'fast')
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                context.bheText('快速分析使用低规格代理，可能漏检少量片段。'),
-              ),
-            ),
-          const SizedBox(height: Spacing.sm),
-          _ClipWindowSelector(
-            beforeSeconds: beforeSeconds,
-            afterSeconds: afterSeconds,
-            onBeforeChanged: onBeforeSecondsChanged,
-            onAfterChanged: onAfterSecondsChanged,
           ),
           const SizedBox(height: Spacing.sm),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(
-              horizontal: Spacing.md,
-              vertical: Spacing.sm,
-            ),
-            decoration: BoxDecoration(
-              color: c.surface2,
-              border: Border.all(color: c.border),
-            ),
-            child: Row(
+          _SummaryRow(
+            label: context.bheText('视频'),
+            onEdit: onEditStep == null ? null : () => onEditStep!(0),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.schedule_outlined, size: 17, color: c.textSecondary),
-                const SizedBox(width: Spacing.sm),
-                Expanded(
-                  child: Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(text: context.bheText('开始前预计耗时：')),
-                        TextSpan(
-                          text: context.bheText(estimate.label),
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        TextSpan(
-                          text: context.bheText(
-                            '\n实际耗时会受视频编码、磁盘和设备负载影响。',
-                          ),
-                        ),
-                      ],
+                Text(
+                  state.video?['source_path']
+                          ?.toString()
+                          .split(RegExp(r'[/\\]'))
+                          .last ??
+                      '-',
+                  style: theme.textTheme.titleSmall,
+                ),
+                if (state.video != null)
+                  Text(
+                    _videoSummary(
+                      state.video!,
+                      noAudio: context.bheText('无音频'),
                     ),
-                    style: TextStyle(color: c.textSecondary, height: 1.4),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: c.textSecondary,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          _SummaryRow(
+            label: context.bheText('分析范围'),
+            onEdit: onEditStep == null ? null : () => onEditStep!(1),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_formatDuration(startMs)} – ${_formatDuration(endMs)}',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                Text(
+                  '${l10n?.importRangeAnalyzed ?? '分析时长'} ${_formatDuration(analyzed)} · '
+                  '${l10n?.importRangeExcluded ?? '已排除'} ${_formatDuration(durationMs - analyzed)}',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: c.textSecondary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
               ],
             ),
           ),
+          _SummaryRow(
+            label: context.bheText('检测区域'),
+            onEdit: onEditStep == null ? null : () => onEditStep!(2),
+            last: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                regionLine(
+                  context.bheText('投篮分析区'),
+                  roi == null ? context.bheText('未设置') : context.bheText('已设置'),
+                  c.orange,
+                  roi != null,
+                ),
+                regionLine(
+                  context.bheText('篮网检测区'),
+                  netRoi == null
+                      ? context.bheText('自动推荐')
+                      : context.bheText('已设置'),
+                  c.textPrimary,
+                  true,
+                ),
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+
+    final settings = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (fastModeEnabled) ...[
+          Text(
+            l10n?.importAnalysisMode ?? '分析模式',
+            style: theme.textTheme.titleSmall,
+          ),
+          const SizedBox(height: Spacing.sm),
+          Row(
+            children: [
+              Expanded(
+                child: _AnalysisModeOption(
+                  key: const Key('analysis-mode-standard'),
+                  title: context.bheText('标准分析'),
+                  badge: l10n?.importRecommended ?? '推荐',
+                  description:
+                      l10n?.importStandardDescription ?? '完整检测，漏检更少。',
+                  selected: analysisMode != 'fast',
+                  onTap: () => onAnalysisModeChanged('standard'),
+                ),
+              ),
+              const SizedBox(width: Spacing.sm),
+              Expanded(
+                child: _AnalysisModeOption(
+                  key: const Key('analysis-mode-fast'),
+                  title: context.bheText('快速分析'),
+                  description:
+                      l10n?.importFastDescription ??
+                      '使用低规格代理，更快，但可能漏检少量片段。',
+                  selected: analysisMode == 'fast',
+                  onTap: () => onAnalysisModeChanged('fast'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Spacing.md),
+        ],
+        _ClipWindowSelector(
+          beforeSeconds: beforeSeconds,
+          afterSeconds: afterSeconds,
+          onBeforeChanged: onBeforeSecondsChanged,
+          onAfterChanged: onAfterSecondsChanged,
+        ),
+        const SizedBox(height: Spacing.md),
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: Spacing.md,
+            vertical: Spacing.sm,
+          ),
+          decoration: BoxDecoration(
+            color: c.surface2,
+            borderRadius: BorderRadius.circular(CsRadius.md),
+            border: Border.all(color: c.border),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.schedule_outlined, size: 16, color: c.textSecondary),
+              const SizedBox(width: Spacing.sm),
+              Expanded(
+                child: Text(
+                  l10n?.importEstimate(context.bheText(estimate.label)) ??
+                      '预计耗时 ${estimate.label} · 实际受视频编码、磁盘和设备负载影响',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: c.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 1000) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 10, child: summary),
+              const SizedBox(width: Spacing.lg),
+              Expanded(flex: 11, child: settings),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [summary, const SizedBox(height: Spacing.md), settings],
+        );
+      },
+    );
+  }
+}
+
+class _SummaryRow extends StatelessWidget {
+  const _SummaryRow({
+    required this.label,
+    required this.child,
+    required this.onEdit,
+    this.last = false,
+  });
+
+  final String label;
+  final Widget child;
+  final VoidCallback? onEdit;
+  final bool last;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: Spacing.sm),
+      decoration: BoxDecoration(
+        border: last ? null : Border(bottom: BorderSide(color: c.border)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 84,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                label,
+                style: Theme.of(
+                  context,
+                ).textTheme.labelSmall?.copyWith(color: c.textTertiary),
+              ),
+            ),
+          ),
+          Expanded(child: child),
+          TextButton(
+            onPressed: onEdit,
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+            child: Text(l10n?.importEdit ?? '修改'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AnalysisModeOption extends StatelessWidget {
+  const _AnalysisModeOption({
+    required this.title,
+    required this.description,
+    required this.selected,
+    required this.onTap,
+    this.badge,
+    super.key,
+  });
+
+  final String title;
+  final String description;
+  final bool selected;
+  final VoidCallback onTap;
+  final String? badge;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Material(
+        color: selected ? c.orange.withValues(alpha: 0.08) : c.surface2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(CsRadius.md),
+          side: BorderSide(
+            color: selected ? c.orange : c.border,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(CsRadius.md),
+          child: Padding(
+            padding: const EdgeInsets.all(Spacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      selected
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      size: 18,
+                      color: selected ? c.orange : c.textTertiary,
+                    ),
+                    const SizedBox(width: Spacing.sm),
+                    Flexible(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall,
+                      ),
+                    ),
+                    if (badge != null) ...[
+                      const SizedBox(width: Spacing.xs),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: c.orange.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(CsRadius.xs),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 1,
+                          ),
+                          child: Text(
+                            badge!,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: c.orange,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: Spacing.xs),
+                Text(
+                  description,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: c.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1808,9 +2494,14 @@ class _InfoPanel extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon, size: 19, color: c.orange),
+              Icon(icon, size: 17, color: c.textSecondary),
               const SizedBox(width: Spacing.sm),
-              Text(title, style: theme.textTheme.titleLarge),
+              Text(
+                title,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ],
           ),
           if (subtitle != null) ...[
@@ -1823,7 +2514,7 @@ class _InfoPanel extends StatelessWidget {
               ),
             ),
           ],
-          const SizedBox(height: Spacing.lg),
+          const SizedBox(height: Spacing.md),
           child,
         ],
       ),
@@ -1854,13 +2545,13 @@ Rect? _rectFromJson(Object? raw) {
   return Rect.fromLTRB(x1!, y1!, x2!, y2!);
 }
 
-String _videoSummary(JsonMap video) {
+String _videoSummary(JsonMap video, {required String noAudio}) {
   final w = video['width'] ?? '-';
   final h = video['height'] ?? '-';
   final fps = (video['fps'] as num?)?.toStringAsFixed(2) ?? '-';
   final duration = (video['duration_ms'] as num?)?.toInt() ?? 0;
   final codec = video['video_codec'] ?? '-';
-  final audio = video['audio_codec'] ?? '无音频';
+  final audio = video['audio_codec'] ?? noAudio;
   return '$w×$h · $fps fps · ${_formatDuration(duration)} · $codec / $audio';
 }
 
@@ -2129,20 +2820,9 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
     final end = _endMs.clamp(start + 1000, widget.durationMs).toInt();
     final fullRange = start == 0 && end == widget.durationMs;
     final controller = _controller;
-    return Container(
-      padding: const EdgeInsets.all(Spacing.sm),
-      decoration: BoxDecoration(
-        color: c.surface2,
-        border: Border.all(color: c.border),
-        borderRadius: BorderRadius.circular(CsRadius.sm),
-      ),
-      child: Column(
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            context.bheText('分析范围'),
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
           Text(
             fullRange
                 ? context.bheText(
@@ -2157,8 +2837,12 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
             ),
           ),
           const SizedBox(height: Spacing.sm),
-          AspectRatio(
-            key: const Key('analysis-range-video-frame'),
+          ConstrainedBox(
+            // Keep the timeline and footer on screen for tall sources.
+            constraints: const BoxConstraints(maxHeight: 440),
+            child: Center(
+              child: AspectRatio(
+                key: const Key('analysis-range-video-frame'),
             aspectRatio: widget.aspectRatio,
             child: DecoratedBox(
               decoration: const BoxDecoration(color: Colors.black),
@@ -2239,6 +2923,8 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
                     ),
             ),
           ),
+            ),
+          ),
           const SizedBox(height: Spacing.xs),
           Row(
             children: [
@@ -2250,11 +2936,13 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
                 ),
               ),
               const SizedBox(width: Spacing.xs),
-              Text(
-                context.bheText('拖动下方两个手柄，视频会跳到正在调整的位置。'),
-                style: Theme.of(
-                  context,
-                ).textTheme.labelSmall?.copyWith(color: c.textSecondary),
+              Expanded(
+                child: Text(
+                  context.bheText('拖动下方两个手柄，视频会跳到正在调整的位置。'),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelSmall?.copyWith(color: c.textSecondary),
+                ),
               ),
             ],
           ),
@@ -2276,32 +2964,46 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
             onRangeCommit: (nextStart, nextEnd) =>
                 unawaited(_commitRange(nextStart, nextEnd)),
           ),
-          Row(
+          const SizedBox(height: Spacing.sm),
+          Wrap(
+            spacing: Spacing.lg,
+            runSpacing: Spacing.sm,
+            crossAxisAlignment: WrapCrossAlignment.end,
             children: [
-              Text(
-                context.bheText('起点 ${_formatDuration(start)}'),
-                style: Theme.of(
-                  context,
-                ).textTheme.labelSmall?.copyWith(color: c.textSecondary),
+              _RangeHandleControls(
+                keyPrefix: 'analysis-start',
+                label: context.bheText('起点 ${_formatDuration(start)}'),
+                setLabel:
+                    Localizations.of<BheLocalizations>(
+                      context,
+                      BheLocalizations,
+                    )?.importSetStart ??
+                    '设为起点',
+                enabled: widget.enabled,
+                onNudge: (delta) =>
+                    _applyRange(start + delta, end, start + delta),
+                onSetHere: _ready
+                    ? () => _applyRange(_positionMs, end, _positionMs)
+                    : null,
               ),
-              const Spacer(),
-              Text(
-                context.bheText('终点 ${_formatDuration(end)}'),
-                style: Theme.of(
-                  context,
-                ).textTheme.labelSmall?.copyWith(color: c.textSecondary),
+              _RangeHandleControls(
+                keyPrefix: 'analysis-end',
+                label: context.bheText('终点 ${_formatDuration(end)}'),
+                setLabel:
+                    Localizations.of<BheLocalizations>(
+                      context,
+                      BheLocalizations,
+                    )?.importSetEnd ??
+                    '设为终点',
+                enabled: widget.enabled,
+                onNudge: (delta) => _applyRange(start, end + delta, end + delta),
+                onSetHere: _ready
+                    ? () => _applyRange(start, _positionMs, _positionMs)
+                    : null,
               ),
-              const SizedBox(width: Spacing.sm),
               TextButton.icon(
-                onPressed: widget.enabled
-                    ? () {
-                        setState(() {
-                          _startMs = 0;
-                          _endMs = widget.durationMs;
-                        });
-                        widget.onChanged(0, widget.durationMs);
-                        unawaited(_commitRange(0, widget.durationMs));
-                      }
+                onPressed: widget.enabled && !fullRange
+                    ? () => _applyRange(0, widget.durationMs, 0)
                     : null,
                 icon: const Icon(Icons.unfold_more_rounded, size: 16),
                 label: Text(context.bheText('使用全片')),
@@ -2309,7 +3011,91 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
             ],
           ),
         ],
-      ),
+    );
+  }
+
+  void _applyRange(int startMs, int endMs, int seekTarget) {
+    if (!widget.enabled) return;
+    final start = startMs.clamp(0, widget.durationMs - 1000).toInt();
+    final end = endMs.clamp(start + 1000, widget.durationMs).toInt();
+    final adjustedStart = start.clamp(0, end - 1000).toInt();
+    setState(() {
+      _startMs = adjustedStart;
+      _endMs = end;
+    });
+    widget.onChanged(adjustedStart, end);
+    unawaited(_commitRange(adjustedStart, end));
+    unawaited(_seek(seekTarget.clamp(0, widget.durationMs).toInt()));
+  }
+}
+
+class _RangeHandleControls extends StatelessWidget {
+  const _RangeHandleControls({
+    required this.keyPrefix,
+    required this.label,
+    required this.setLabel,
+    required this.enabled,
+    required this.onNudge,
+    required this.onSetHere,
+  });
+
+  final String keyPrefix;
+  final String label;
+  final String setLabel;
+  final bool enabled;
+  final ValueChanged<int> onNudge;
+  final VoidCallback? onSetHere;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final compact = OutlinedButton.styleFrom(
+      foregroundColor: c.textSecondary,
+      side: BorderSide(color: c.border),
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            color: c.textPrimary,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+        const SizedBox(height: Spacing.xs),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            OutlinedButton(
+              key: ValueKey('$keyPrefix-minus'),
+              style: compact,
+              onPressed: enabled ? () => onNudge(-5000) : null,
+              child: Text(context.bheText('−5 秒')),
+            ),
+            const SizedBox(width: Spacing.xs),
+            OutlinedButton(
+              key: ValueKey('$keyPrefix-plus'),
+              style: compact,
+              onPressed: enabled ? () => onNudge(5000) : null,
+              child: Text(context.bheText('+5 秒')),
+            ),
+            const SizedBox(width: Spacing.xs),
+            OutlinedButton.icon(
+              key: ValueKey('$keyPrefix-set'),
+              style: compact.copyWith(
+                foregroundColor: WidgetStatePropertyAll(c.textPrimary),
+              ),
+              onPressed: enabled ? onSetHere : null,
+              icon: const Icon(Icons.my_location_rounded, size: 15),
+              label: Text(setLabel),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -2705,7 +3491,7 @@ class _CalibrationTargetButton extends StatelessWidget {
             child: Text(
               index,
               style: TextStyle(
-                fontSize: 10,
+                fontSize: 11,
                 color: color == Colors.white ? Colors.black : Colors.white,
               ),
             ),
@@ -3193,7 +3979,7 @@ class _RoiPainter extends CustomPainter {
         text: label,
         style: TextStyle(
           color: color == Colors.white ? Colors.black : Colors.white,
-          fontSize: 10 * inverseScale,
+          fontSize: 11 * inverseScale,
           fontWeight: FontWeight.w500,
         ),
       ),

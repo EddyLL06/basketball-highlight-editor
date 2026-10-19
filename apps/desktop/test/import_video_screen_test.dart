@@ -31,7 +31,13 @@ void main() {
       expect(preview, findsOneWidget);
       final size = tester.getSize(preview);
       expect(size.aspectRatio, closeTo(frame.aspectRatio, 0.001));
-      expect(size.width, greaterThan(700));
+      // Tall sources must not push the timeline and footer off screen.
+      expect(size.height, lessThanOrEqualTo(440));
+      expect(size.width, greaterThan(frame.aspectRatio > 1 ? 500 : 200));
+      expect(
+        tester.getRect(find.byKey(const Key('import-footer'))).bottom,
+        lessThanOrEqualTo(700),
+      );
       expect(tester.takeException(), isNull);
     });
   }

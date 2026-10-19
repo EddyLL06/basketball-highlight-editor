@@ -158,13 +158,13 @@ String? _translateDynamic(String source) {
     return 'Analysis runs locally. Time depends mainly on video length, resolution, and bitrate.';
   }
   final exportSummary = RegExp(
-    r'^(合并导出|分别导出) · (\d+) 个片段 · (.+)$',
+    r'^(合并导出|分别导出) · (\d+) 个片段$',
   ).firstMatch(source);
   if (exportSummary != null) {
     final mode = exportSummary.group(1) == '合并导出'
         ? 'Merged export'
         : 'Separate exports';
-    return '$mode · ${exportSummary.group(2)} clips · ${exportSummary.group(3)}';
+    return '$mode · ${exportSummary.group(2)} clips';
   }
   final exportProcessing = RegExp(r'^(?:(.+) · )?处理 (.+)$').firstMatch(source);
   if (exportProcessing != null) {

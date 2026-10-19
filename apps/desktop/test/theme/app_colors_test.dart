@@ -5,7 +5,7 @@ import 'package:desktop/theme/app_colors.dart';
 
 void main() {
   test('dark brand colors match spec', () {
-    expect(darkAppColors.indigo, const Color(0xFFF0B35A));
+    expect(darkAppColors.amber, const Color(0xFFF0B35A));
     expect(darkAppColors.orange, const Color(0xFFFF6B2C));
     expect(darkAppColors.background, const Color(0xFF0B0E14));
     expect(darkAppColors.surface, const Color(0xFF121620));
@@ -16,8 +16,38 @@ void main() {
     expect(darkAppColors.excluded, const Color(0xFF6B7280));
   });
   test('light orange darkened for contrast', () {
-    expect(lightAppColors.orange, const Color(0xFFF2601D));
+    expect(lightAppColors.orange, const Color(0xFFB93E0E));
   });
+  for (final (name, colors) in [('dark', darkAppColors), ('light', lightAppColors)]) {
+    test('$name text tokens stay readable on surfaces', () {
+      double contrast(Color a, Color b) {
+        final la = a.computeLuminance();
+        final lb = b.computeLuminance();
+        return ((la > lb ? la : lb) + 0.05) / ((la > lb ? lb : la) + 0.05);
+      }
+
+      final text = {
+        'textSecondary': colors.textSecondary,
+        'textTertiary': colors.textTertiary,
+        'orange': colors.orange,
+        'goal': colors.goal,
+        'warning': colors.warning,
+        'error': colors.error,
+        'data': colors.data,
+        for (var i = 0; i < colors.players.length; i++) 'player$i': colors.players[i],
+      };
+      for (final background in [colors.surface, colors.surface2]) {
+        for (final entry in text.entries) {
+          expect(
+            contrast(entry.value, background),
+            greaterThanOrEqualTo(4.5),
+            reason: '${entry.key} on $background',
+          );
+        }
+      }
+      expect(contrast(colors.onOrange, colors.orange), greaterThanOrEqualTo(4.5));
+    });
+  }
   testWidgets('of(context) returns theme extension', (tester) async {
     late AppColors captured;
     await tester.pumpWidget(
@@ -31,6 +61,6 @@ void main() {
         ),
       ),
     );
-    expect(captured.indigo, darkAppColors.indigo);
+    expect(captured.amber, darkAppColors.amber);
   });
 }

@@ -344,12 +344,6 @@ abstract class BheLocalizations {
   /// **'导入固定机位视频，本地分析候选进球，剔除误检后导出集锦。所有处理在本机完成，原始视频不会被复制或上传。'**
   String get homeSubtitle;
 
-  /// No description provided for @startFromVideo.
-  ///
-  /// In zh, this message translates to:
-  /// **'从视频开始'**
-  String get startFromVideo;
-
   /// No description provided for @openProject.
   ///
   /// In zh, this message translates to:
@@ -362,35 +356,11 @@ abstract class BheLocalizations {
   /// **'选择一段固定机位录像，系统会优先自动定位篮筐，随后生成候选进球片段供你审核与导出。'**
   String get startFromVideoDescription;
 
-  /// No description provided for @currentProject.
-  ///
-  /// In zh, this message translates to:
-  /// **'当前项目'**
-  String get currentProject;
-
-  /// No description provided for @includedCount.
-  ///
-  /// In zh, this message translates to:
-  /// **'当前保留'**
-  String get includedCount;
-
-  /// No description provided for @excludedCount.
-  ///
-  /// In zh, this message translates to:
-  /// **'已排除'**
-  String get excludedCount;
-
   /// No description provided for @videoDuration.
   ///
   /// In zh, this message translates to:
   /// **'视频时长'**
   String get videoDuration;
-
-  /// No description provided for @localDatabaseNote.
-  ///
-  /// In zh, this message translates to:
-  /// **'本地 SQLite · 原始视频不复制'**
-  String get localDatabaseNote;
 
   /// No description provided for @recentProjects.
   ///
@@ -403,12 +373,6 @@ abstract class BheLocalizations {
   /// In zh, this message translates to:
   /// **'刷新最近项目'**
   String get refreshRecentProjects;
-
-  /// No description provided for @workflow.
-  ///
-  /// In zh, this message translates to:
-  /// **'工作流'**
-  String get workflow;
 
   /// No description provided for @deleteProjectQuestion.
   ///
@@ -439,36 +403,6 @@ abstract class BheLocalizations {
   /// In zh, this message translates to:
   /// **'新建一个项目后，分析记录和导出历史会显示在这里。'**
   String get noProjectsDescription;
-
-  /// No description provided for @importVideoStep.
-  ///
-  /// In zh, this message translates to:
-  /// **'导入视频'**
-  String get importVideoStep;
-
-  /// No description provided for @roiStep.
-  ///
-  /// In zh, this message translates to:
-  /// **'框选 ROI'**
-  String get roiStep;
-
-  /// No description provided for @analysisStep.
-  ///
-  /// In zh, this message translates to:
-  /// **'分析扫描'**
-  String get analysisStep;
-
-  /// No description provided for @reviewStep.
-  ///
-  /// In zh, this message translates to:
-  /// **'审核候选'**
-  String get reviewStep;
-
-  /// No description provided for @exportHighlightsStep.
-  ///
-  /// In zh, this message translates to:
-  /// **'导出集锦'**
-  String get exportHighlightsStep;
 
   /// No description provided for @exportHighlights.
   ///
@@ -1339,6 +1273,276 @@ abstract class BheLocalizations {
   /// In zh, this message translates to:
   /// **'分析详情'**
   String get reviewAnalysisDetails;
+
+  /// No description provided for @exportOutputMode.
+  ///
+  /// In zh, this message translates to:
+  /// **'输出方式'**
+  String get exportOutputMode;
+
+  /// No description provided for @exportMergeTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'合并成一个视频'**
+  String get exportMergeTitle;
+
+  /// No description provided for @exportMergeDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'按时间顺序拼接为一个 MP4，适合直接分享。'**
+  String get exportMergeDescription;
+
+  /// No description provided for @exportSeparateTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'每个片段单独导出'**
+  String get exportSeparateTitle;
+
+  /// No description provided for @exportSeparateDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'每段一个文件，放进同一个文件夹，适合二次剪辑。'**
+  String get exportSeparateDescription;
+
+  /// No description provided for @exportStartButton.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出 {count} 个片段'**
+  String exportStartButton(int count);
+
+  /// No description provided for @exportStartHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'下一步选择保存位置，已排除的片段不会进入输出。'**
+  String get exportStartHint;
+
+  /// No description provided for @exportClipCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'片段'**
+  String get exportClipCount;
+
+  /// No description provided for @exportScopeHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'可多选球员'**
+  String get exportScopeHint;
+
+  /// No description provided for @exportRecent.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近导出'**
+  String get exportRecent;
+
+  /// No description provided for @exportRunningTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在导出'**
+  String get exportRunningTitle;
+
+  /// No description provided for @homeContinueTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续上次'**
+  String get homeContinueTitle;
+
+  /// No description provided for @homeContinueReview.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续审核'**
+  String get homeContinueReview;
+
+  /// No description provided for @homeContinueSetup.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续配置'**
+  String get homeContinueSetup;
+
+  /// No description provided for @homeNoCurrentProject.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没有打开的项目'**
+  String get homeNoCurrentProject;
+
+  /// No description provided for @homeNoCurrentProjectDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'新建项目，或从下方最近项目中打开一个继续。'**
+  String get homeNoCurrentProjectDescription;
+
+  /// No description provided for @homeSupportedFormats.
+  ///
+  /// In zh, this message translates to:
+  /// **'MP4 · MOV · M4V · AVI · MKV · 原始视频不会被修改'**
+  String get homeSupportedFormats;
+
+  /// No description provided for @homeCandidates.
+  ///
+  /// In zh, this message translates to:
+  /// **'候选'**
+  String get homeCandidates;
+
+  /// No description provided for @homeKept.
+  ///
+  /// In zh, this message translates to:
+  /// **'保留'**
+  String get homeKept;
+
+  /// No description provided for @homeExcluded.
+  ///
+  /// In zh, this message translates to:
+  /// **'排除'**
+  String get homeExcluded;
+
+  /// No description provided for @homeStatusPending.
+  ///
+  /// In zh, this message translates to:
+  /// **'待审核'**
+  String get homeStatusPending;
+
+  /// No description provided for @homeStatusExported.
+  ///
+  /// In zh, this message translates to:
+  /// **'已导出'**
+  String get homeStatusExported;
+
+  /// No description provided for @homeStatusEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂无候选'**
+  String get homeStatusEmpty;
+
+  /// No description provided for @homeStatusMissingVideo.
+  ///
+  /// In zh, this message translates to:
+  /// **'视频缺失'**
+  String get homeStatusMissingVideo;
+
+  /// No description provided for @homeStatusAnalyzing.
+  ///
+  /// In zh, this message translates to:
+  /// **'分析中'**
+  String get homeStatusAnalyzing;
+
+  /// No description provided for @homeProjectActions.
+  ///
+  /// In zh, this message translates to:
+  /// **'项目操作'**
+  String get homeProjectActions;
+
+  /// No description provided for @importNextTo.
+  ///
+  /// In zh, this message translates to:
+  /// **'下一步：{step}'**
+  String importNextTo(String step);
+
+  /// No description provided for @importConfirmStep.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认并分析'**
+  String get importConfirmStep;
+
+  /// No description provided for @importReplacesCandidates.
+  ///
+  /// In zh, this message translates to:
+  /// **'已有候选会被本次结果替换'**
+  String get importReplacesCandidates;
+
+  /// No description provided for @importRangeAnalyzed.
+  ///
+  /// In zh, this message translates to:
+  /// **'分析时长'**
+  String get importRangeAnalyzed;
+
+  /// No description provided for @importRangeExcluded.
+  ///
+  /// In zh, this message translates to:
+  /// **'已排除'**
+  String get importRangeExcluded;
+
+  /// No description provided for @importRangeCoverage.
+  ///
+  /// In zh, this message translates to:
+  /// **'全片 {total} · 分析其中 {percent}%'**
+  String importRangeCoverage(String total, int percent);
+
+  /// No description provided for @importSetStart.
+  ///
+  /// In zh, this message translates to:
+  /// **'设为起点'**
+  String get importSetStart;
+
+  /// No description provided for @importSetEnd.
+  ///
+  /// In zh, this message translates to:
+  /// **'设为终点'**
+  String get importSetEnd;
+
+  /// No description provided for @importSummaryTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'配置摘要'**
+  String get importSummaryTitle;
+
+  /// No description provided for @importEdit.
+  ///
+  /// In zh, this message translates to:
+  /// **'修改'**
+  String get importEdit;
+
+  /// No description provided for @importAnalysisMode.
+  ///
+  /// In zh, this message translates to:
+  /// **'分析模式'**
+  String get importAnalysisMode;
+
+  /// No description provided for @importStandardDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'完整检测，漏检更少。'**
+  String get importStandardDescription;
+
+  /// No description provided for @importFastDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用低规格代理，更快，但可能漏检少量片段。'**
+  String get importFastDescription;
+
+  /// No description provided for @importRecommended.
+  ///
+  /// In zh, this message translates to:
+  /// **'推荐'**
+  String get importRecommended;
+
+  /// No description provided for @importClipLengthHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'审核时仍可单独调整每个片段'**
+  String get importClipLengthHint;
+
+  /// No description provided for @importClipTotal.
+  ///
+  /// In zh, this message translates to:
+  /// **'每段 {seconds} 秒'**
+  String importClipTotal(int seconds);
+
+  /// No description provided for @importEstimate.
+  ///
+  /// In zh, this message translates to:
+  /// **'预计耗时 {estimate} · 实际受视频编码、磁盘和设备负载影响'**
+  String importEstimate(String estimate);
+
+  /// No description provided for @reviewProgress.
+  ///
+  /// In zh, this message translates to:
+  /// **'已审核 {done} / {total}'**
+  String reviewProgress(int done, int total);
+
+  /// No description provided for @reviewUnreviewed.
+  ///
+  /// In zh, this message translates to:
+  /// **'未审核'**
+  String get reviewUnreviewed;
 }
 
 class _BheLocalizationsDelegate

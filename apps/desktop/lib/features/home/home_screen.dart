@@ -7,10 +7,7 @@ import 'package:bhe_l10n/bhe_l10n.dart';
 import '../../components/cs_button.dart';
 import '../../components/cs_card.dart';
 import '../../components/cs_empty_state.dart';
-import '../../components/cs_metric_tile.dart';
 import '../../components/cs_skeleton.dart';
-import '../../components/cs_status_chip.dart';
-import '../../components/cs_step_indicator.dart';
 import '../../providers/project_state.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
@@ -106,155 +103,200 @@ class HomeScreen extends ConsumerWidget {
       }
     }
 
-    final steps = <CsStep>[
-      (
-        index: '01',
-        title: l10n?.importVideoStep ?? '导入视频',
-        icon: LucideIcons.upload,
-        completed: state.video != null,
-      ),
-      (
-        index: '02',
-        title: l10n?.roiStep ?? '框选 ROI',
-        icon: LucideIcons.target,
-        completed: state.roiSource != null,
-      ),
-      (
-        index: '03',
-        title: l10n?.analysisStep ?? '分析扫描',
-        icon: LucideIcons.scanLine,
-        completed: state.job?['state'] == 'completed',
-      ),
-      (
-        index: '04',
-        title: l10n?.reviewStep ?? '审核候选',
-        icon: LucideIcons.checkCheck,
-        completed: state.candidates.isNotEmpty,
-      ),
-      (
-        index: '05',
-        title: l10n?.exportHighlightsStep ?? '导出集锦',
-        icon: LucideIcons.share,
-        completed: state.exportHistory.isNotEmpty,
-      ),
-    ];
+    final statistics = state.statistics ?? const <String, dynamic>{};
+    final currentName =
+        _map(statistics['project'])['name']?.toString() ??
+        context.bheText('未命名项目');
+    final source = state.video?['source_path']?.toString() ?? state.videoPath;
+    final currentVideoName = source == null || source.isEmpty
+        ? null
+        : source.split(RegExp(r'[/\\]')).last;
+    final hasCurrent = state.video != null;
+    final currentStatus = state.analysisRunning
+        ? (l10n?.homeStatusAnalyzing ?? '分析中', c.warning)
+        : state.candidates.isEmpty
+        ? (l10n?.homeStatusEmpty ?? '暂无候选', c.textTertiary)
+        : state.exportHistory.isNotEmpty || _int(statistics['export_count']) > 0
+        ? (l10n?.homeStatusExported ?? '已导出', c.textSecondary)
+        : (l10n?.homeStatusPending ?? '待审核', c.goal);
+
+    final newProjectCard = _NewProjectCard(
+      onTap: busy ? null : startNewProject,
+      title: l10n?.newProject ?? '新建项目',
+      description:
+          l10n?.startFromVideoDescription ??
+          '选择一段固定机位录像，系统会优先自动定位篮筐，随后生成候选进球片段供你审核与导出。',
+      formats:
+          l10n?.homeSupportedFormats ?? 'MP4 · MOV · M4V · AVI · MKV · 原始视频不会被修改',
+    );
+    final continueCard = CsCard(
+      child: hasCurrent
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      l10n?.homeContinueTitle ?? '继续上次',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: c.textTertiary,
+                      ),
+                    ),
+                    const SizedBox(width: Spacing.sm),
+                    _StatusBadge(
+                      label: currentStatus.$1,
+                      color: currentStatus.$2,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: Spacing.sm),
+                Text(
+                  currentName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (currentVideoName != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    currentVideoName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: c.textSecondary,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: Spacing.md),
+                Wrap(
+                  spacing: Spacing.xl,
+                  runSpacing: Spacing.sm,
+                  children: [
+                    _HomeStat(
+                      label: l10n?.homeCandidates ?? '候选',
+                      value: '${state.candidates.length}',
+                    ),
+                    _HomeStat(
+                      label: l10n?.homeKept ?? '保留',
+                      value: '$included',
+                      color: included > 0 ? c.goal : null,
+                    ),
+                    _HomeStat(
+                      label: l10n?.homeExcluded ?? '排除',
+                      value: '$excluded',
+                    ),
+                    _HomeStat(
+                      label: l10n?.videoDuration ?? '视频时长',
+                      value: _formatDuration(durationMs),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: Spacing.lg),
+                Wrap(
+                  spacing: Spacing.sm,
+                  runSpacing: Spacing.sm,
+                  children: [
+                    if (state.candidates.isNotEmpty)
+                      CsButton(
+                        label: Text(l10n?.homeContinueReview ?? '继续审核'),
+                        icon: LucideIcons.arrowRight,
+                        onPressed: () => context.go('/review'),
+                      )
+                    else
+                      CsButton(
+                        label: Text(l10n?.homeContinueSetup ?? '继续配置'),
+                        icon: LucideIcons.arrowRight,
+                        onPressed: () => context.go('/import'),
+                      ),
+                    CsButton(
+                      label: Text(l10n?.exportHighlights ?? '导出集锦'),
+                      icon: LucideIcons.download,
+                      variant: CsButtonVariant.secondary,
+                      onPressed: included > 0
+                          ? () => context.go('/export')
+                          : null,
+                    ),
+                  ],
+                ),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(LucideIcons.folderOpen, size: 22, color: c.textTertiary),
+                const SizedBox(height: Spacing.sm),
+                Text(
+                  l10n?.homeNoCurrentProject ?? '还没有打开的项目',
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: Spacing.xs),
+                Text(
+                  l10n?.homeNoCurrentProjectDescription ??
+                      '新建项目，或从下方最近项目中打开一个继续。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: c.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+    );
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(Spacing.xl),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1100),
+          constraints: const BoxConstraints(maxWidth: 1240),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Hero ──
-              Text(
-                l10n?.homeHeadline ?? '把整场比赛，变成你的高光。',
-                style: theme.textTheme.displayLarge,
-              ),
-              const SizedBox(height: Spacing.sm),
-              Text(
-                l10n?.homeSubtitle ??
-                    '导入固定机位视频，本地分析候选进球，剔除误检后导出集锦。所有处理在本机完成，原始视频不会被复制或上传。',
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: c.textSecondary,
-                ),
-              ),
-              const SizedBox(height: Spacing.xxl),
-
-              // ── 主 CTA + 当前项目 metrics ──
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final wide = constraints.maxWidth >= Breakpoints.md;
-                  final ctaCard = CsCard(
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Row(
-                          children: [
-                            Icon(
-                              LucideIcons.sparkles,
-                              size: 20,
-                              color: c.orange,
-                            ),
-                            const SizedBox(width: Spacing.sm),
-                            Text(
-                              l10n?.startFromVideo ?? '从视频开始',
-                              style: theme.textTheme.titleLarge,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: Spacing.sm),
                         Text(
-                          l10n?.startFromVideoDescription ??
-                              '选择一段固定机位录像，系统会优先自动定位篮筐，随后生成候选进球片段供你审核与导出。',
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            color: c.textSecondary,
+                          l10n?.homeHeadline ?? '把整场比赛，变成你的高光。',
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
                           ),
-                        ),
-                        const SizedBox(height: Spacing.lg),
-                        Wrap(
-                          spacing: Spacing.sm,
-                          runSpacing: Spacing.sm,
-                          children: [
-                            CsButton(
-                              label: Text(l10n?.newProject ?? '新建项目'),
-                              icon: LucideIcons.plus,
-                              onPressed: busy ? null : startNewProject,
-                            ),
-                            CsButton(
-                              label: Text(l10n?.openProject ?? '打开项目'),
-                              icon: LucideIcons.folderOpen,
-                              variant: CsButtonVariant.secondary,
-                              onPressed: busy ? null : openProject,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  );
-                  final metricsCard = CsCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          l10n?.currentProject ?? '当前项目',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: Spacing.md),
-                        CsMetricTile(
-                          label: l10n?.includedCount ?? '当前保留',
-                          value: '$included',
-                          icon: LucideIcons.check,
-                        ),
-                        CsMetricTile(
-                          label: l10n?.excludedCount ?? '已排除',
-                          value: '$excluded',
-                          icon: LucideIcons.x,
-                        ),
-                        CsMetricTile(
-                          label: l10n?.videoDuration ?? '视频时长',
-                          value: _formatDuration(durationMs),
-                          icon: LucideIcons.clock,
                         ),
                         const SizedBox(height: Spacing.xs),
                         Text(
-                          l10n?.localDatabaseNote ?? '本地 SQLite · 原始视频不复制',
-                          style: TextStyle(color: c.textTertiary, fontSize: 11),
+                          l10n?.homeSubtitle ??
+                              '导入固定机位视频，本地分析候选进球，剔除误检后导出集锦。所有处理在本机完成，原始视频不会被复制或上传。',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: c.textSecondary,
+                          ),
                         ),
                       ],
                     ),
-                  );
-                  if (wide) {
+                  ),
+                  const SizedBox(width: Spacing.md),
+                  CsButton(
+                    label: Text(l10n?.openProject ?? '打开项目'),
+                    icon: LucideIcons.folderOpen,
+                    variant: CsButtonVariant.secondary,
+                    onPressed: busy ? null : openProject,
+                  ),
+                ],
+              ),
+              const SizedBox(height: Spacing.xl),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  if (constraints.maxWidth >= Breakpoints.md) {
                     return IntrinsicHeight(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Expanded(flex: 3, child: ctaCard),
+                          Expanded(flex: 4, child: newProjectCard),
                           const SizedBox(width: Spacing.md),
-                          Expanded(flex: 2, child: metricsCard),
+                          Expanded(flex: 5, child: continueCard),
                         ],
                       ),
                     );
@@ -262,24 +304,31 @@ class HomeScreen extends ConsumerWidget {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      ctaCard,
+                      newProjectCard,
                       const SizedBox(height: Spacing.md),
-                      metricsCard,
+                      continueCard,
                     ],
                   );
                 },
               ),
               const SizedBox(height: Spacing.xxl),
-
-              // ── 最近项目 ──
               Row(
                 children: [
-                  Expanded(
-                    child: Text(
-                      l10n?.recentProjects ?? '最近项目',
-                      style: theme.textTheme.titleLarge,
+                  Text(
+                    l10n?.recentProjects ?? '最近项目',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
+                  const SizedBox(width: Spacing.xs),
+                  Text(
+                    '${state.recentProjects.length}',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: c.textTertiary,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const Spacer(),
                   IconButton(
                     tooltip: l10n?.refreshRecentProjects ?? '刷新最近项目',
                     onPressed: state.recentLoading || busy
@@ -289,25 +338,188 @@ class HomeScreen extends ConsumerWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: Spacing.md),
+              const SizedBox(height: Spacing.sm),
               _RecentProjects(
                 state: state,
                 busy: busy,
                 onOpen: openRecentProject,
                 onDelete: deleteRecentProject,
-                onCreate: () => context.go('/import'),
+                onCreate: busy ? () {} : startNewProject,
               ),
-              const SizedBox(height: Spacing.xxl),
-
-              // ── 工作流 ──
-              Text(l10n?.workflow ?? '工作流', style: theme.textTheme.titleMedium),
-              const SizedBox(height: Spacing.md),
-              CsStepIndicator(steps: steps),
               const SizedBox(height: Spacing.xl),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _NewProjectCard extends StatelessWidget {
+  const _NewProjectCard({
+    required this.onTap,
+    required this.title,
+    required this.description,
+    required this.formats,
+  });
+
+  final VoidCallback? onTap;
+  final String title;
+  final String description;
+  final String formats;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    return Semantics(
+      button: true,
+      child: CustomPaint(
+        foregroundPainter: _DashedBorderPainter(
+          color: c.borderStrong,
+          radius: CsRadius.lg,
+        ),
+        child: Material(
+          key: const Key('home-new-project'),
+          color: c.surface,
+          borderRadius: BorderRadius.circular(CsRadius.lg),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(CsRadius.lg),
+            child: Padding(
+              padding: const EdgeInsets.all(Spacing.xl),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: c.orange.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(CsRadius.md),
+                    ),
+                    child: Icon(LucideIcons.plus, color: c.orange, size: 22),
+                  ),
+                  const SizedBox(height: Spacing.md),
+                  Text(
+                    title,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: Spacing.xs),
+                  Text(
+                    description,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: c.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: Spacing.sm),
+                  Text(
+                    formats,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: c.textTertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashedBorderPainter extends CustomPainter {
+  _DashedBorderPainter({required this.color, required this.radius});
+
+  final Color color;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    final path = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Offset.zero & size,
+          Radius.circular(radius),
+        ).deflate(0.6),
+      );
+    for (final metric in path.computeMetrics()) {
+      for (var distance = 0.0; distance < metric.length; distance += 9) {
+        canvas.drawPath(metric.extractPath(distance, distance + 5), paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedBorderPainter old) =>
+      old.color != color || old.radius != radius;
+}
+
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(CsRadius.xs),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeStat extends StatelessWidget {
+  const _HomeStat({required this.label, required this.value, this.color});
+
+  final String label;
+  final String value;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          value,
+          style: theme.textTheme.titleLarge?.copyWith(
+            color: color,
+            fontWeight: FontWeight.w600,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(color: c.textTertiary),
+        ),
+      ],
     );
   }
 }
@@ -372,9 +584,11 @@ class _RecentGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cols = constraints.maxWidth >= 900
+        final cols = constraints.maxWidth >= 1100
+            ? 4
+            : constraints.maxWidth >= 820
             ? 3
-            : (constraints.maxWidth >= 560 ? 2 : 1);
+            : (constraints.maxWidth >= 520 ? 2 : 1);
         final rows = <Widget>[];
         for (var i = 0; i < projects.length; i += cols) {
           final cells = <Widget>[];
@@ -399,10 +613,12 @@ class _RecentGrid extends StatelessWidget {
           }
           rows.add(
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: Spacing.xs),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: cells,
+              padding: EdgeInsets.zero,
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: cells,
+                ),
               ),
             ),
           );
@@ -447,52 +663,134 @@ class _ProjectCard extends StatelessWidget {
         ? null
         : source.split('/').last;
 
-    return CsCard(
-      onTap: (onOpen == null || root.isEmpty) ? null : () => onOpen!(root),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Icon(LucideIcons.folder, size: 16, color: c.textTertiary),
-              const SizedBox(width: Spacing.sm),
-              Expanded(
-                child: Text(
-                  name,
-                  style: theme.textTheme.titleMedium,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+    final missing = video['source_status']?.toString() == 'missing';
+    final status = missing
+        ? (l10n?.homeStatusMissingVideo ?? '视频缺失', c.warning)
+        : candidates == 0
+        ? (l10n?.homeStatusEmpty ?? '暂无候选', c.textTertiary)
+        : _int(statistics['export_count']) > 0
+        ? (l10n?.homeStatusExported ?? '已导出', c.textSecondary)
+        : (l10n?.homeStatusPending ?? '待审核', c.goal);
+    final modified = DateTime.tryParse(
+      item['last_modified_at']?.toString() ?? '',
+    )?.toLocal();
+    final modifiedLabel = modified == null
+        ? null
+        : '${modified.month.toString().padLeft(2, '0')}-'
+              '${modified.day.toString().padLeft(2, '0')} '
+              '${modified.hour.toString().padLeft(2, '0')}:'
+              '${modified.minute.toString().padLeft(2, '0')}';
+
+    return Material(
+      color: c.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(CsRadius.lg),
+        side: BorderSide(color: c.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: (onOpen == null || root.isEmpty) ? null : () => onOpen!(root),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              height: 88,
+              color: c.surface2,
+              child: Stack(
+                children: [
+                  Center(
+                    child: Icon(
+                      LucideIcons.film,
+                      size: 26,
+                      color: c.textTertiary,
+                    ),
+                  ),
+                  Positioned(
+                    left: Spacing.sm,
+                    top: Spacing.sm,
+                    child: _StatusBadge(label: status.$1, color: status.$2),
+                  ),
+                  if (duration > 0)
+                    Positioned(
+                      right: Spacing.sm,
+                      bottom: Spacing.xs,
+                      child: Text(
+                        _formatDuration(duration),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: c.textSecondary,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              if (onDelete != null && root.isNotEmpty)
-                IconButton(
-                  tooltip: l10n?.deleteProject ?? '删除项目',
-                  onPressed: () => onDelete!(item),
-                  icon: const Icon(LucideIcons.trash2, size: 17),
-                  visualDensity: VisualDensity.compact,
-                ),
-              if (goals > 0)
-                const CsStatusChip(status: ReviewStatus.goal, compact: true),
-            ],
-          ),
-          const SizedBox(height: Spacing.xs),
-          if (videoName != null)
-            Text(
-              videoName,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: c.textSecondary,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
-          const SizedBox(height: Spacing.xs),
-          Text(
-            l10n?.projectStats(goals, candidates, _formatDuration(duration)) ??
-                '$goals 保留 · $candidates 候选 · ${_formatDuration(duration)}',
-            style: theme.textTheme.bodySmall?.copyWith(color: c.textTertiary),
-          ),
-        ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Spacing.md,
+                Spacing.sm,
+                Spacing.xs,
+                Spacing.md,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          name,
+                          style: theme.textTheme.titleSmall,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (onDelete != null && root.isNotEmpty)
+                        PopupMenuButton<String>(
+                          tooltip: l10n?.homeProjectActions ?? '项目操作',
+                          icon: Icon(
+                            Icons.more_horiz,
+                            size: 18,
+                            color: c.textSecondary,
+                          ),
+                          onSelected: (_) => onDelete!(item),
+                          itemBuilder: (context) => [
+                            PopupMenuItem(
+                              value: 'delete',
+                              child: Text(l10n?.deleteProject ?? '删除项目'),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                  Text(
+                    [?videoName, ?modifiedLabel].join(' · '),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: c.textSecondary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    l10n?.projectStats(
+                          goals,
+                          candidates,
+                          _formatDuration(duration),
+                        ) ??
+                        '$goals 保留 · $candidates 候选 · ${_formatDuration(duration)}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: c.textTertiary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

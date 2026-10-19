@@ -141,9 +141,6 @@ class BheLocalizationsEn extends BheLocalizations {
       'Import a fixed-camera video, find scoring candidates locally, remove false positives, and export a highlight reel. Processing stays on this device; the source video is not copied or uploaded.';
 
   @override
-  String get startFromVideo => 'Start from video';
-
-  @override
   String get openProject => 'Open project';
 
   @override
@@ -151,28 +148,13 @@ class BheLocalizationsEn extends BheLocalizations {
       'Choose a fixed-camera recording. BHE first locates the hoop, then creates scoring candidates for review and export.';
 
   @override
-  String get currentProject => 'Current project';
-
-  @override
-  String get includedCount => 'Included';
-
-  @override
-  String get excludedCount => 'Excluded';
-
-  @override
   String get videoDuration => 'Video duration';
-
-  @override
-  String get localDatabaseNote => 'Local SQLite · source video is not copied';
 
   @override
   String get recentProjects => 'Recent projects';
 
   @override
   String get refreshRecentProjects => 'Refresh recent projects';
-
-  @override
-  String get workflow => 'Workflow';
 
   @override
   String get deleteProjectQuestion => 'Delete project?';
@@ -191,21 +173,6 @@ class BheLocalizationsEn extends BheLocalizations {
   @override
   String get noProjectsDescription =>
       'Create a project to see its analysis records and export history here.';
-
-  @override
-  String get importVideoStep => 'Import video';
-
-  @override
-  String get roiStep => 'Set ROI';
-
-  @override
-  String get analysisStep => 'Analyze';
-
-  @override
-  String get reviewStep => 'Review candidates';
-
-  @override
-  String get exportHighlightsStep => 'Export highlights';
 
   @override
   String get exportHighlights => 'Export highlights';
@@ -698,4 +665,158 @@ class BheLocalizationsEn extends BheLocalizations {
 
   @override
   String get reviewAnalysisDetails => 'Analysis details';
+
+  @override
+  String get exportOutputMode => 'Output';
+
+  @override
+  String get exportMergeTitle => 'Merge into one video';
+
+  @override
+  String get exportMergeDescription =>
+      'Joins clips in time order into one MP4, ready to share.';
+
+  @override
+  String get exportSeparateTitle => 'Export each clip';
+
+  @override
+  String get exportSeparateDescription =>
+      'One file per clip in a single folder, ready for further editing.';
+
+  @override
+  String exportStartButton(int count) {
+    return 'Export $count clips';
+  }
+
+  @override
+  String get exportStartHint =>
+      'Choose where to save next. Excluded clips are left out.';
+
+  @override
+  String get exportClipCount => 'Clips';
+
+  @override
+  String get exportScopeHint => 'Select one or more players';
+
+  @override
+  String get exportRecent => 'Recent exports';
+
+  @override
+  String get exportRunningTitle => 'Exporting';
+
+  @override
+  String get homeContinueTitle => 'Continue';
+
+  @override
+  String get homeContinueReview => 'Continue review';
+
+  @override
+  String get homeContinueSetup => 'Continue setup';
+
+  @override
+  String get homeNoCurrentProject => 'No project open';
+
+  @override
+  String get homeNoCurrentProjectDescription =>
+      'Create a project, or open one from recent projects below.';
+
+  @override
+  String get homeSupportedFormats =>
+      'MP4 · MOV · M4V · AVI · MKV · Source video stays unchanged';
+
+  @override
+  String get homeCandidates => 'Candidates';
+
+  @override
+  String get homeKept => 'Kept';
+
+  @override
+  String get homeExcluded => 'Excluded';
+
+  @override
+  String get homeStatusPending => 'To review';
+
+  @override
+  String get homeStatusExported => 'Exported';
+
+  @override
+  String get homeStatusEmpty => 'No candidates';
+
+  @override
+  String get homeStatusMissingVideo => 'Video missing';
+
+  @override
+  String get homeStatusAnalyzing => 'Analyzing';
+
+  @override
+  String get homeProjectActions => 'Project actions';
+
+  @override
+  String importNextTo(String step) {
+    return 'Next: $step';
+  }
+
+  @override
+  String get importConfirmStep => 'Confirm & analyze';
+
+  @override
+  String get importReplacesCandidates => 'Existing candidates will be replaced';
+
+  @override
+  String get importRangeAnalyzed => 'Analyzed';
+
+  @override
+  String get importRangeExcluded => 'Excluded';
+
+  @override
+  String importRangeCoverage(String total, int percent) {
+    return 'Full video $total · $percent% analyzed';
+  }
+
+  @override
+  String get importSetStart => 'Set start';
+
+  @override
+  String get importSetEnd => 'Set end';
+
+  @override
+  String get importSummaryTitle => 'Summary';
+
+  @override
+  String get importEdit => 'Edit';
+
+  @override
+  String get importAnalysisMode => 'Analysis mode';
+
+  @override
+  String get importStandardDescription => 'Full detection with fewer misses.';
+
+  @override
+  String get importFastDescription =>
+      'Uses a low-resolution proxy. Faster, but may miss a few clips.';
+
+  @override
+  String get importRecommended => 'Recommended';
+
+  @override
+  String get importClipLengthHint =>
+      'Each clip can still be adjusted during review';
+
+  @override
+  String importClipTotal(int seconds) {
+    return '${seconds}s per clip';
+  }
+
+  @override
+  String importEstimate(String estimate) {
+    return 'Estimated $estimate · Actual time depends on encoding, disk and device load';
+  }
+
+  @override
+  String reviewProgress(int done, int total) {
+    return 'Reviewed $done / $total';
+  }
+
+  @override
+  String get reviewUnreviewed => 'Not reviewed';
 }

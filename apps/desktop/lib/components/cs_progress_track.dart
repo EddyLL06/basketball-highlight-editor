@@ -17,7 +17,7 @@ class CsProgressTrack extends StatelessWidget {
         value: indeterminate ? null : value,
         minHeight: 4,
         backgroundColor: c.surface3,
-        valueColor: AlwaysStoppedAnimation<Color>(c.indigo),
+        valueColor: AlwaysStoppedAnimation<Color>(c.amber),
       ),
     );
   }

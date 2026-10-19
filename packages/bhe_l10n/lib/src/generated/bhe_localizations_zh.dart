@@ -135,9 +135,6 @@ class BheLocalizationsZh extends BheLocalizations {
       '导入固定机位视频，本地分析候选进球，剔除误检后导出集锦。所有处理在本机完成，原始视频不会被复制或上传。';
 
   @override
-  String get startFromVideo => '从视频开始';
-
-  @override
   String get openProject => '打开项目';
 
   @override
@@ -145,28 +142,13 @@ class BheLocalizationsZh extends BheLocalizations {
       '选择一段固定机位录像，系统会优先自动定位篮筐，随后生成候选进球片段供你审核与导出。';
 
   @override
-  String get currentProject => '当前项目';
-
-  @override
-  String get includedCount => '当前保留';
-
-  @override
-  String get excludedCount => '已排除';
-
-  @override
   String get videoDuration => '视频时长';
-
-  @override
-  String get localDatabaseNote => '本地 SQLite · 原始视频不复制';
 
   @override
   String get recentProjects => '最近项目';
 
   @override
   String get refreshRecentProjects => '刷新最近项目';
-
-  @override
-  String get workflow => '工作流';
 
   @override
   String get deleteProjectQuestion => '删除项目？';
@@ -184,21 +166,6 @@ class BheLocalizationsZh extends BheLocalizations {
 
   @override
   String get noProjectsDescription => '新建一个项目后，分析记录和导出历史会显示在这里。';
-
-  @override
-  String get importVideoStep => '导入视频';
-
-  @override
-  String get roiStep => '框选 ROI';
-
-  @override
-  String get analysisStep => '分析扫描';
-
-  @override
-  String get reviewStep => '审核候选';
-
-  @override
-  String get exportHighlightsStep => '导出集锦';
 
   @override
   String get exportHighlights => '导出集锦';
@@ -676,4 +643,151 @@ class BheLocalizationsZh extends BheLocalizations {
 
   @override
   String get reviewAnalysisDetails => '分析详情';
+
+  @override
+  String get exportOutputMode => '输出方式';
+
+  @override
+  String get exportMergeTitle => '合并成一个视频';
+
+  @override
+  String get exportMergeDescription => '按时间顺序拼接为一个 MP4，适合直接分享。';
+
+  @override
+  String get exportSeparateTitle => '每个片段单独导出';
+
+  @override
+  String get exportSeparateDescription => '每段一个文件，放进同一个文件夹，适合二次剪辑。';
+
+  @override
+  String exportStartButton(int count) {
+    return '导出 $count 个片段';
+  }
+
+  @override
+  String get exportStartHint => '下一步选择保存位置，已排除的片段不会进入输出。';
+
+  @override
+  String get exportClipCount => '片段';
+
+  @override
+  String get exportScopeHint => '可多选球员';
+
+  @override
+  String get exportRecent => '最近导出';
+
+  @override
+  String get exportRunningTitle => '正在导出';
+
+  @override
+  String get homeContinueTitle => '继续上次';
+
+  @override
+  String get homeContinueReview => '继续审核';
+
+  @override
+  String get homeContinueSetup => '继续配置';
+
+  @override
+  String get homeNoCurrentProject => '还没有打开的项目';
+
+  @override
+  String get homeNoCurrentProjectDescription => '新建项目，或从下方最近项目中打开一个继续。';
+
+  @override
+  String get homeSupportedFormats => 'MP4 · MOV · M4V · AVI · MKV · 原始视频不会被修改';
+
+  @override
+  String get homeCandidates => '候选';
+
+  @override
+  String get homeKept => '保留';
+
+  @override
+  String get homeExcluded => '排除';
+
+  @override
+  String get homeStatusPending => '待审核';
+
+  @override
+  String get homeStatusExported => '已导出';
+
+  @override
+  String get homeStatusEmpty => '暂无候选';
+
+  @override
+  String get homeStatusMissingVideo => '视频缺失';
+
+  @override
+  String get homeStatusAnalyzing => '分析中';
+
+  @override
+  String get homeProjectActions => '项目操作';
+
+  @override
+  String importNextTo(String step) {
+    return '下一步：$step';
+  }
+
+  @override
+  String get importConfirmStep => '确认并分析';
+
+  @override
+  String get importReplacesCandidates => '已有候选会被本次结果替换';
+
+  @override
+  String get importRangeAnalyzed => '分析时长';
+
+  @override
+  String get importRangeExcluded => '已排除';
+
+  @override
+  String importRangeCoverage(String total, int percent) {
+    return '全片 $total · 分析其中 $percent%';
+  }
+
+  @override
+  String get importSetStart => '设为起点';
+
+  @override
+  String get importSetEnd => '设为终点';
+
+  @override
+  String get importSummaryTitle => '配置摘要';
+
+  @override
+  String get importEdit => '修改';
+
+  @override
+  String get importAnalysisMode => '分析模式';
+
+  @override
+  String get importStandardDescription => '完整检测，漏检更少。';
+
+  @override
+  String get importFastDescription => '使用低规格代理，更快，但可能漏检少量片段。';
+
+  @override
+  String get importRecommended => '推荐';
+
+  @override
+  String get importClipLengthHint => '审核时仍可单独调整每个片段';
+
+  @override
+  String importClipTotal(int seconds) {
+    return '每段 $seconds 秒';
+  }
+
+  @override
+  String importEstimate(String estimate) {
+    return '预计耗时 $estimate · 实际受视频编码、磁盘和设备负载影响';
+  }
+
+  @override
+  String reviewProgress(int done, int total) {
+    return '已审核 $done / $total';
+  }
+
+  @override
+  String get reviewUnreviewed => '未审核';
 }

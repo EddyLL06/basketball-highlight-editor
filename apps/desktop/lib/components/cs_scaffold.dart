@@ -77,9 +77,8 @@ class _CsScaffoldState extends ConsumerState<CsScaffold> {
 /// 顶部条:branch 标题 + Engine 胶囊 + 隐私徽章 + 主题切换 IconButton。
 ///
 /// 放在 cs_scaffold.dart 内(与 Scaffold 同文件,无独立 spec 章节)。Engine
-/// 状态胶囊通过私有 _EngineStatusChip 渲染,使用 AppColors 的语义色而非
-/// CsStatusChip 的 ReviewStatus(因为 Engine 的 loading/error/ready 三态
-/// 语义不是 goal/pending/excluded,自定义胶囊更直接)。
+/// 状态胶囊通过私有 _EngineStatusChip 渲染,使用 AppColors 的语义色表示
+/// Engine 的 loading/error/ready 三态。
 class CsTopBar extends ConsumerWidget {
   const CsTopBar({required this.shell, this.compact = false, super.key});
 

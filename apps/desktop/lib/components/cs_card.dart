@@ -94,7 +94,7 @@ class _CardBoxState extends State<_CardBox> {
                 borderRadius: BorderRadius.circular(CsRadius.lg),
                 border: Border.all(
                   color: _focused
-                      ? AppColors.of(context).indigo
+                      ? AppColors.of(context).amber
                       : widget.border,
                   width: _focused ? 2 : 1,
                 ),

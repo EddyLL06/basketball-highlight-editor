@@ -786,6 +786,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     playerColor: selected == null
                         ? AppColors.of(context).textTertiary
                         : _playerColor(
+                            AppColors.of(context),
                             selected['player_id']?.toString(),
                             _playerIndex(selected, state.players),
                           ),
@@ -818,6 +819,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     candidates: candidates,
                     selectedId: selected?['id']?.toString(),
                     includedCount: includedCount,
+                    reviewedCount: allCandidates.where(_isReviewed).length,
                     totalCount: allCandidates.length,
                     filter: _candidateFilter,
                     playerFilter: _playerFilter,
@@ -1177,7 +1179,7 @@ class _AnalysisBar extends StatelessWidget {
                               ? '${l10n?.text('已用') ?? '已用'} $elapsed'
                               : '${l10n?.text('已用') ?? '已用'} $elapsed · ${l10n?.text('剩余约') ?? '剩余约'} $remaining',
                           style: TextStyle(
-                            fontSize: 10,
+                            fontSize: 11,
                             color: c.textSecondary,
                           ),
                         ),
@@ -2274,7 +2276,7 @@ class _AnnotationToggle extends StatelessWidget {
                   context.bheText('标注'),
                   style: TextStyle(
                     color: c.textPrimary,
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -2402,7 +2404,7 @@ class _VideoSourceOption extends StatelessWidget {
                   label,
                   style: TextStyle(
                     color: selected ? c.textPrimary : c.textSecondary,
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   ),
                 ),
@@ -2435,7 +2437,7 @@ class _AnnotationHint extends StatelessWidget {
             ),
             child: Text(
               context.bheText('标注会显示轨迹与判定点 · 按 A 可开关'),
-              style: TextStyle(color: c.textSecondary, fontSize: 10),
+              style: TextStyle(color: c.textSecondary, fontSize: 11),
               textAlign: TextAlign.right,
             ),
           ),
@@ -3577,7 +3579,7 @@ class _InspectorMetric extends StatelessWidget {
               value: bar.clamp(0.0, 1.0),
               minHeight: 3,
               backgroundColor: c.surface3,
-              color: c.indigo,
+              color: c.data,
             ),
           ),
         ],
@@ -4425,7 +4427,7 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
                         onPressed: _applyRange,
                         style: FilledButton.styleFrom(
                           backgroundColor: c.orange,
-                          foregroundColor: Colors.white,
+                          foregroundColor: c.onOrange,
                           disabledBackgroundColor: c.surface3,
                           disabledForegroundColor: c.textTertiary,
                         ),
@@ -4569,6 +4571,7 @@ class _CandidatePanel extends StatelessWidget {
     required this.candidates,
     required this.selectedId,
     required this.includedCount,
+    required this.reviewedCount,
     required this.totalCount,
     required this.filter,
     required this.playerFilter,
@@ -4607,6 +4610,7 @@ class _CandidatePanel extends StatelessWidget {
   final List<Map<String, dynamic>> candidates;
   final String? selectedId;
   final int includedCount;
+  final int reviewedCount;
   final int totalCount;
   final String filter;
   final String playerFilter;
@@ -4739,6 +4743,34 @@ class _CandidatePanel extends StatelessWidget {
               ],
             ),
           ),
+          if (totalCount > 0) ...[
+            const SizedBox(height: 2),
+            Row(
+              key: const Key('review-progress'),
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      value: reviewedCount / totalCount,
+                      minHeight: 3,
+                      backgroundColor: c.surface3,
+                      color: c.data,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: Spacing.sm),
+                Text(
+                  l10n?.reviewProgress(reviewedCount, totalCount) ??
+                      '已审核 $reviewedCount / $totalCount',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: c.textSecondary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: Spacing.sm),
           _StatusSegments(
             value: filter,
@@ -4841,6 +4873,7 @@ class _CandidatePanel extends StatelessWidget {
                         onDeletePlayer: onDeletePlayer,
                         players: players,
                         playerColor: _playerColor(
+                          c,
                           candidate['player_id']?.toString(),
                           _playerIndex(candidate, players),
                         ),
@@ -5079,7 +5112,7 @@ class _PlayerTagChips extends StatelessWidget {
           index < 9
               ? '${index + 1} · ${players[index]['name'] ?? ''}'
               : players[index]['name']?.toString() ?? '',
-          _playerColor(players[index]['id']?.toString(), index),
+          _playerColor(c, players[index]['id']?.toString(), index),
         ),
     ];
     return Semantics(
@@ -5558,6 +5591,28 @@ class _CandidateRow extends StatelessWidget {
                               children: [
                                 Row(
                                   children: [
+                                    if (!_isReviewed(candidate)) ...[
+                                      Semantics(
+                                        label:
+                                            Localizations.of<BheLocalizations>(
+                                              context,
+                                              BheLocalizations,
+                                            )?.reviewUnreviewed ??
+                                            '未审核',
+                                        child: Container(
+                                          key: ValueKey(
+                                            'unreviewed-${candidate['id']}',
+                                          ),
+                                          width: 7,
+                                          height: 7,
+                                          decoration: BoxDecoration(
+                                            color: c.data,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                    ],
                                     Flexible(
                                       child: Text.rich(
                                         TextSpan(
@@ -5785,7 +5840,7 @@ class _PlayerChipState extends State<_PlayerChip> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: widget.color,
-                        fontSize: 10,
+                        fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -5855,7 +5910,7 @@ class _PlayerPickerMenuContent extends StatelessWidget {
                           final name = player['name']?.toString() ?? '';
                           return _PlayerPickerOption(
                             label: name,
-                            color: _playerColor(id, index),
+                            color: _playerColor(c, id, index),
                             shortcut: index < 9 ? '${index + 1}' : null,
                             onTap: id == null ? null : () => onSelected(id),
                             trailing: onDelete == null || id == null
@@ -5956,7 +6011,7 @@ class _PlayerPickerOption extends StatelessWidget {
                         shortcut!,
                         style: TextStyle(
                           color: AppColors.of(context).textTertiary,
-                          fontSize: 10,
+                          fontSize: 11,
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
@@ -5972,26 +6027,18 @@ class _PlayerPickerOption extends StatelessWidget {
   }
 }
 
-Color _playerColor(String? playerId, [int fallbackIndex = -1]) {
-  const palette = <Color>[
-    Color(0xFFFFB454),
-    Color(0xFF7DD3A8),
-    Color(0xFF5CC8C0),
-    Color(0xFFFF6B8A),
-    Color(0xFF4CC9F0),
-    Color(0xFFB6A1FF),
-  ];
-  if (playerId == null || playerId.isEmpty) {
-    return const Color(0xFF8B93A7);
-  }
-  if (fallbackIndex >= 0) {
-    return palette[fallbackIndex % palette.length];
-  }
+Color _playerColor(
+  AppColors c,
+  String? playerId, [
+  int fallbackIndex = -1,
+]) {
+  if (playerId == null || playerId.isEmpty) return c.textTertiary;
+  if (fallbackIndex >= 0) return c.player(fallbackIndex);
   final hash = playerId.codeUnits.fold<int>(
     0,
     (value, unit) => value * 31 + unit,
   );
-  return palette[hash.abs() % palette.length];
+  return c.player(hash.abs());
 }
 
 int _playerIndex(
@@ -6084,7 +6131,7 @@ class _CandidateCoverState extends State<_CandidateCover> {
                           widget.durationLabel,
                           style: TextStyle(
                             color: c.textPrimary,
-                            fontSize: 10,
+                            fontSize: 11,
                             fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                         ),
@@ -6104,6 +6151,11 @@ class _CandidateCoverState extends State<_CandidateCover> {
     color: c.surface3,
     child: Icon(Icons.movie_outlined, size: 19, color: c.textTertiary),
   );
+}
+
+bool _isReviewed(Map<String, dynamic> candidate) {
+  final status = candidate['review_status']?.toString() ?? '';
+  return status.isNotEmpty && status != 'pending';
 }
 
 bool _isExcluded(Map<String, dynamic> candidate) =>
