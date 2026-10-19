@@ -39,6 +39,8 @@ void main() {
     expect(english.text('正在添加球员…'), 'Adding player…');
     expect(english.text('保留'), 'Included');
     expect(english.text('排除'), 'Excluded');
+    expect(english.text('正在准备输出位置…'), 'Preparing output location…');
+    expect(english.text('选择输出位置失败：test'), 'Could not choose an output location: test');
     expect(english.text('保留 380 / 389'), 'Included 380 / 389');
     expect(english.text('正在保存球员标签…'), 'Saving player tags…');
     expect(english.text('正在删除球员…'), 'Deleting player…');

@@ -19,6 +19,7 @@ import '../../components/cs_step_indicator.dart';
 import '../../core/engine_session.dart';
 import '../../providers/notice_provider.dart';
 import '../../providers/project_state.dart';
+import '../../providers/playback_coordinator.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
 
@@ -67,6 +68,16 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _restoreDraft());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!TickerMode.valuesOf(context).enabled) {
+      _previewPlaybackTimer?.cancel();
+      _previewPlaybackTimer = null;
+      _previewPlaying = false;
+    }
   }
 
   Future<void> _restoreDraft() async {
@@ -1096,7 +1107,7 @@ class _AnalysisStep extends StatelessWidget {
   }
 }
 
-class _DetectionStep extends StatefulWidget {
+class _DetectionStep extends ConsumerStatefulWidget {
   const _DetectionStep({
     required this.state,
     required this.hoopBbox,
@@ -1129,10 +1140,31 @@ class _DetectionStep extends StatefulWidget {
   final VoidCallback onResetCurrent;
 
   @override
-  State<_DetectionStep> createState() => _DetectionStepState();
+  ConsumerState<_DetectionStep> createState() => _DetectionStepState();
 }
 
-class _DetectionStepState extends State<_DetectionStep> {
+class _DetectionStepState extends ConsumerState<_DetectionStep> {
+  late final _playback = ref.read(playbackCoordinatorProvider);
+  bool _routeActive = true;
+
+  Future<void> _pauseForDialog() async {
+    _playingRequested = false;
+    await _player?.pause();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _routeActive = TickerMode.valuesOf(context).enabled;
+    if (!_routeActive) {
+      unawaited(
+        _pauseForDialog().catchError((Object error) {
+          debugPrint('Hidden detection preview pause failed: $error');
+        }),
+      );
+    }
+  }
+
   Player? _player;
   VideoController? _controller;
   StreamSubscription<Duration>? _positionSubscription;
@@ -1147,11 +1179,13 @@ class _DetectionStepState extends State<_DetectionStep> {
   @override
   void initState() {
     super.initState();
+    _playback.register(this, _pauseForDialog);
     unawaited(_openVideo());
   }
 
   @override
   void dispose() {
+    _playback.unregister(this);
     // 组件卸载后纹理不再渲染,此时销毁是安全的(见 review 页同类处理)。
     unawaited(_positionSubscription?.cancel());
     unawaited(_playingSubscription?.cancel());
@@ -1234,6 +1268,7 @@ class _DetectionStepState extends State<_DetectionStep> {
   }
 
   void _syncPlaying(bool playing) {
+    if (playing && (!_routeActive || _playback.dialogActive)) return;
     final player = _player;
     if (player == null) return;
     if (playing) {
@@ -1252,6 +1287,7 @@ class _DetectionStepState extends State<_DetectionStep> {
   }
 
   void _togglePlaying() {
+    if (!_routeActive || _playback.dialogActive) return;
     final player = _player;
     if (player == null || !_playerReady) return;
     if (_playing) {
@@ -1887,7 +1923,7 @@ String _formatDuration(int milliseconds) {
       '${remaining.toString().padLeft(2, '0')}';
 }
 
-class _AnalysisRangeEditor extends StatefulWidget {
+class _AnalysisRangeEditor extends ConsumerStatefulWidget {
   const _AnalysisRangeEditor({
     required this.videoPath,
     required this.durationMs,
@@ -1909,10 +1945,32 @@ class _AnalysisRangeEditor extends StatefulWidget {
   final Future<void> Function(int startMs, int endMs) onCommit;
 
   @override
-  State<_AnalysisRangeEditor> createState() => _AnalysisRangeEditorState();
+  ConsumerState<_AnalysisRangeEditor> createState() =>
+      _AnalysisRangeEditorState();
 }
 
-class _AnalysisRangeEditorState extends State<_AnalysisRangeEditor> {
+class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
+  late final _playback = ref.read(playbackCoordinatorProvider);
+  bool _routeActive = true;
+
+  Future<void> _pauseForDialog() async {
+    _playbackRequested = false;
+    await _player?.pause();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _routeActive = TickerMode.valuesOf(context).enabled;
+    if (!_routeActive) {
+      unawaited(
+        _pauseForDialog().catchError((Object error) {
+          debugPrint('Hidden range preview pause failed: $error');
+        }),
+      );
+    }
+  }
+
   Player? _player;
   VideoController? _controller;
   StreamSubscription<Duration>? _positionSubscription;
@@ -1930,6 +1988,7 @@ class _AnalysisRangeEditorState extends State<_AnalysisRangeEditor> {
   @override
   void initState() {
     super.initState();
+    _playback.register(this, _pauseForDialog);
     _openVideo();
   }
 
@@ -2014,6 +2073,7 @@ class _AnalysisRangeEditorState extends State<_AnalysisRangeEditor> {
 
   @override
   void dispose() {
+    _playback.unregister(this);
     _mediaGeneration++;
     unawaited(_positionSubscription?.cancel());
     unawaited(_playingSubscription?.cancel());
@@ -2039,6 +2099,7 @@ class _AnalysisRangeEditorState extends State<_AnalysisRangeEditor> {
   }
 
   Future<void> _togglePlayback() async {
+    if (!_routeActive || _playback.dialogActive) return;
     final player = _player;
     if (player == null) return;
     if (player.state.playing) {

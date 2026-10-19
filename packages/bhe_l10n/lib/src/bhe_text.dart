@@ -935,6 +935,8 @@ const _englishText = <String, String>{
   '正在删除球员…': 'Deleting player…',
   '正在保存修改并关闭项目…': 'Saving changes and closing the project…',
   '球员已删除': 'Player deleted',
+  '选择输出位置失败：': 'Could not choose an output location: ',
+  '正在准备输出位置…': 'Preparing output location…',
   '导出任务未返回 id': 'The export task did not return an id',
   '检查视频输入': 'Check video input',
   '生成预览视频': 'Generate preview video',

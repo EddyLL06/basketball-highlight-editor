@@ -14,6 +14,7 @@ import '../../components/cs_button.dart';
 import '../../components/cs_empty_state.dart';
 import '../../components/cs_progress_track.dart';
 import '../../providers/project_state.dart';
+import '../../providers/playback_coordinator.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
 import 'media_readiness.dart';
@@ -1263,7 +1264,7 @@ class _TextEntryDialogState extends State<_TextEntryDialog> {
   }
 }
 
-class _VideoPane extends StatefulWidget {
+class _VideoPane extends ConsumerStatefulWidget {
   const _VideoPane({
     required this.controller,
     required this.videoPath,
@@ -1303,10 +1304,34 @@ class _VideoPane extends StatefulWidget {
   final VoidCallback onUndo;
 
   @override
-  State<_VideoPane> createState() => _VideoPaneState();
+  ConsumerState<_VideoPane> createState() => _VideoPaneState();
 }
 
-class _VideoPaneState extends State<_VideoPane> {
+class _VideoPaneState extends ConsumerState<_VideoPane> {
+  late final _playback = ref.read(playbackCoordinatorProvider);
+  bool _routeActive = true;
+  bool get _mayPlay => _routeActive && !_playback.dialogActive;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final active = TickerMode.valuesOf(context).enabled;
+    if (_routeActive && !active) {
+      unawaited(
+        _pauseForDialog().catchError((Object error) {
+          if (mounted) setState(() => _error = error.toString());
+        }),
+      );
+    }
+    _routeActive = active;
+  }
+
+  Future<void> _pauseForDialog() async {
+    _playbackToken++;
+    await _mediaQueue;
+    await _player?.pause();
+  }
+
   Player? _player;
   VideoController? _controller;
   StreamSubscription<Duration>? _positionSubscription;
@@ -1328,6 +1353,7 @@ class _VideoPaneState extends State<_VideoPane> {
   void initState() {
     super.initState();
     widget.controller._attach(this);
+    _playback.register(this, _pauseForDialog);
     _clipEndMs = reviewTimelineBounds(
       isOriginalVideo: widget.isOriginalVideo,
       candidate: widget.candidate,
@@ -1359,7 +1385,7 @@ class _VideoPaneState extends State<_VideoPane> {
       return;
     }
     _positionSubscription = _player!.stream.position.listen((position) {
-      if (_disposed || !mounted) return;
+      if (_disposed || !mounted || !_mayPlay) return;
       final end = _clipEndMs;
       final clipEnded = end != null && position.inMilliseconds >= end;
       final player = _player;
@@ -1448,6 +1474,7 @@ class _VideoPaneState extends State<_VideoPane> {
   @override
   void dispose() {
     widget.controller._detach(this);
+    _playback.unregister(this);
     _disposed = true;
     _mediaGeneration++;
     _playbackToken++;
@@ -1602,7 +1629,7 @@ class _VideoPaneState extends State<_VideoPane> {
           playbackToken: _playbackToken,
         );
       }
-      if (reviewVideoAutoPlayAfterOpen || playAfterOpen) {
+      if (_mayPlay && (reviewVideoAutoPlayAfterOpen || playAfterOpen)) {
         if (widget.isOriginalVideo) {
           await player.play();
         } else {
@@ -1631,6 +1658,7 @@ class _VideoPaneState extends State<_VideoPane> {
   }) async {
     final player = _player;
     if (player == null ||
+        !_mayPlay ||
         !_isCurrent(generation, playbackToken: playbackToken) ||
         !_ready ||
         candidate == null ||
@@ -1690,6 +1718,7 @@ class _VideoPaneState extends State<_VideoPane> {
   int get currentPositionMs => _player?.state.position.inMilliseconds ?? 0;
 
   Future<void> togglePlayPause() async {
+    if (!_mayPlay) return;
     final generation = _mediaGeneration;
     final playbackToken = _playbackToken;
     await _queuePlayerAction(

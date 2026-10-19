@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,6 +12,8 @@ import '../../components/cs_empty_state.dart';
 import '../../components/cs_metric_tile.dart';
 import '../../components/cs_progress_track.dart';
 import '../../providers/project_state.dart';
+import '../../providers/playback_coordinator.dart';
+import '../../providers/export_output_picker.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
 
@@ -32,6 +33,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   bool _includeUnassigned = true;
   bool _playerFilterActive = false;
   bool _showFastRisk = true;
+  bool _choosingOutput = false;
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +56,11 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
         );
     final exportStage = state.exportJob?['stage']?.toString() ?? '';
     final busy =
-        state.busy || exportRunning || state.analysisRunning || state.hydrating;
+        _choosingOutput ||
+        state.busy ||
+        exportRunning ||
+        state.analysisRunning ||
+        state.hydrating;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(Spacing.xl),
@@ -306,7 +312,9 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
               ),
               const SizedBox(height: Spacing.md),
               Text(
-                exportRunning
+                _choosingOutput
+                    ? context.bheText('正在准备输出位置…')
+                    : exportRunning
                     ? l10n?.text('导出任务在后台运行，返回审核后仍可继续修改候选。') ??
                         '导出任务在后台运行，返回审核后仍可继续修改候选。'
                     : l10n?.text('导出会包含所有当前保留的候选；已排除片段不会进入输出。') ??
@@ -357,20 +365,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     BuildContext context,
     ProjectNotifier notifier,
   ) async {
-    final location = await getSaveLocation(
-      suggestedName: 'highlights.mp4',
-      acceptedTypeGroups: [
-        XTypeGroup(label: context.bheText('视频'), extensions: ['mp4']),
-      ],
-    );
-    if (location != null) {
-      await notifier.export(
-        'merge',
-        outputPath: location.path,
-        playerIds: _playerFilterActive ? _selectedPlayerIds.toList() : null,
-        includeUnassigned: _playerFilterActive ? _includeUnassigned : null,
-      );
-    }
+    await _chooseOutput(notifier, merge: true);
   }
 
   List<Map<String, dynamic>> _filteredCandidates(ProjectState state) {
@@ -386,16 +381,49 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     BuildContext context,
     ProjectNotifier notifier,
   ) async {
-    final directory = await getDirectoryPath(
-      confirmButtonText: context.bheText('选择输出目录'),
-    );
-    if (directory != null) {
+    await _chooseOutput(notifier, merge: false);
+  }
+
+  Future<void> _chooseOutput(
+    ProjectNotifier notifier, {
+    required bool merge,
+  }) async {
+    if (_choosingOutput) return;
+    setState(() => _choosingOutput = true);
+    final videoId = ref.read(projectProvider).video?['id'];
+    try {
+      final picker = ref.read(exportOutputPickerProvider);
+      final path = await ref
+          .read(playbackCoordinatorProvider)
+          .withPausedPlayback(() async {
+            // Let the paused, offstage previews finish their last Flutter frame
+            // before Windows enters the native modal message loop.
+            await WidgetsBinding.instance.endOfFrame;
+            if (!mounted || !TickerMode.valuesOf(context).enabled) return null;
+            return merge
+                ? picker.mergedPath(typeLabel: context.bheText('视频'))
+                : picker.directory(confirmLabel: context.bheText('选择输出目录'));
+          });
+      if (!mounted ||
+          path == null ||
+          ref.read(projectProvider).video?['id'] != videoId) {
+        return;
+      }
       await notifier.export(
-        'separate',
-        outputDir: directory,
+        merge ? 'merge' : 'separate',
+        outputPath: merge ? path : null,
+        outputDir: merge ? null : path,
         playerIds: _playerFilterActive ? _selectedPlayerIds.toList() : null,
         includeUnassigned: _playerFilterActive ? _includeUnassigned : null,
       );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.bheText('选择输出位置失败：$error'))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _choosingOutput = false);
     }
   }
 }
