@@ -36,7 +36,7 @@ void main() {
         'data': colors.data,
         for (var i = 0; i < colors.players.length; i++) 'player$i': colors.players[i],
       };
-      for (final background in [colors.surface, colors.surface2]) {
+      for (final background in [colors.surface, colors.surface2, colors.surface3]) {
         for (final entry in text.entries) {
           expect(
             contrast(entry.value, background),

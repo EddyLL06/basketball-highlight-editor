@@ -1,7 +1,7 @@
 // lib/theme/app_colors.dart
 import 'package:flutter/material.dart';
 
-// Text-bearing tokens keep at least 4.5:1 against surface and surface2.
+// Text-bearing tokens keep at least 4.5:1 against every surface layer.
 const darkAppColors = AppColors(
   background: Color(0xFF0B0E14),
   surface: Color(0xFF121620),
@@ -46,14 +46,14 @@ const lightAppColors = AppColors(
   orange: Color(0xFFB93E0E),
   onOrange: Color(0xFFFFFFFF),
   data: Color(0xFF1D4ED8),
-  goal: Color(0xFF15803D),
+  goal: Color(0xFF166534),
   pending: Color(0xFF9A5B06),
   excluded: Color(0xFF71717A),
-  success: Color(0xFF15803D),
+  success: Color(0xFF166534),
   error: Color(0xFFC81E1E),
   warning: Color(0xFF9A5B06),
   players: <Color>[
-    Color(0xFFB45309),
+    Color(0xFF92400E),
     Color(0xFF047857),
     Color(0xFF0F766E),
     Color(0xFFBE123C),
