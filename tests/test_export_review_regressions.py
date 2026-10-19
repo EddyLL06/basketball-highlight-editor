@@ -138,3 +138,17 @@ def test_replace_candidates_preserves_stable_id_manual_range(
     assert candidate["review_status"] == "goal"
     assert (candidate["review_start_ms"], candidate["review_end_ms"]) == expected
     assert (candidate["default_start_ms"], candidate["default_end_ms"]) == (7000, min(10_000, duration_ms))
+
+
+def test_failed_retry_preflight_keeps_the_interrupted_export_job(project):
+    service, store, video, rows = project
+    job = store.create_job(store.project()["id"], video["id"], "export", {"mode": "merge"})
+    store.update_job(job["id"], state="running", stage="export_clips")
+    for row in rows:
+        store.review_candidate(row["id"], "excluded")
+
+    with pytest.raises(ProtocolError) as error:
+        service.handle("retry_export", {"project_root": str(store.root), "job_id": job["id"]})
+
+    assert error.value.code == "NO_EXPORT_CANDIDATES"
+    assert store.get_job(job["id"])["state"] == "running"

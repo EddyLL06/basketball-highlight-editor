@@ -1055,15 +1055,6 @@ class EngineService:
             raise ProtocolError("JOB_NOT_FOUND", "导出任务不存在")
         if job.get("state") not in {"failed", "cancelled", "running", "queued"}:
             raise ProtocolError("INVALID_REQUEST", "当前导出任务不可重试")
-        if job.get("state") in {"running", "queued"}:
-            store.update_job(
-                job_id,
-                state="cancelled",
-                stage="replaced_for_retry",
-                error_code="JOB_RETRIED",
-                error_message="用户发起重试，旧任务已结束",
-                allow_terminal_transition=True,
-            )
         checkpoint = self._decode_checkpoint(job)
         retry_payload = {
             "project_root": str(store.root),
@@ -1077,6 +1068,24 @@ class EngineService:
         for key in ("player_ids", "include_unassigned"):
             if key in checkpoint:
                 retry_payload[key] = checkpoint[key]
+        # Check what start_export would reject before ending the old job, so a
+        # failed retry leaves the interrupted job retryable.
+        video_id = retry_payload["video_id"]
+        video = store.video(video_id) if isinstance(video_id, str) else None
+        if not store.project() or not video:
+            raise ProtocolError("VIDEO_NOT_FOUND", "导出任务缺少有效视频")
+        source = self._validated_source(video)
+        self._ensure_disk_space(store.root, source)
+        self._export_candidate_snapshot(store, video_id, retry_payload)
+        if job.get("state") in {"running", "queued"}:
+            store.update_job(
+                job_id,
+                state="cancelled",
+                stage="replaced_for_retry",
+                error_code="JOB_RETRIED",
+                error_message="用户发起重试，旧任务已结束",
+                allow_terminal_transition=True,
+            )
         return self.start_export(retry_payload)
 
     @staticmethod
@@ -1999,6 +2008,39 @@ class EngineService:
         })
         return {"export": export, "files": result["files"]}
 
+    @staticmethod
+    def _export_candidate_snapshot(
+        store: ProjectStore,
+        video_id: str,
+        payload: Dict[str, Any],
+    ) -> tuple[list[str] | None, bool, list[Dict[str, Any]]]:
+        requested_player_ids = payload.get("player_ids")
+        if requested_player_ids is not None and (
+            not isinstance(requested_player_ids, list)
+            or not all(isinstance(item, str) and item for item in requested_player_ids)
+        ):
+            raise ProtocolError("INVALID_REQUEST", "player_ids 必须是字符串列表")
+        include_unassigned = payload.get("include_unassigned", True) is True
+        selected_players = {item for item in requested_player_ids or []}
+        candidate_snapshot = [
+            {
+                "id": candidate["id"],
+                "event_time_ms": int(candidate["event_time_ms"]),
+                "review_start_ms": int(candidate["review_start_ms"]),
+                "review_end_ms": int(candidate["review_end_ms"]),
+            }
+            for candidate in store.list_candidates(video_id)
+            if candidate.get("selection_status") != "excluded"
+            and (
+                requested_player_ids is None
+                or candidate.get("player_id") in selected_players
+                or (include_unassigned and not candidate.get("player_id"))
+            )
+        ]
+        if not candidate_snapshot:
+            raise ProtocolError("NO_EXPORT_CANDIDATES", "没有可导出的候选片段")
+        return requested_player_ids, include_unassigned, candidate_snapshot
+
     def start_export(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         store = self._require_store(payload)
         project = store.project()
@@ -2023,31 +2065,10 @@ class EngineService:
                     "项目存在未完成的分析或导出任务，请先恢复、重试或取消该任务",
                     {"job_ids": [item["id"] for item in active]},
                 )
-            requested_player_ids = payload.get("player_ids")
-            if requested_player_ids is not None and (
-                not isinstance(requested_player_ids, list)
-                or not all(isinstance(item, str) and item for item in requested_player_ids)
-            ):
-                raise ProtocolError("INVALID_REQUEST", "player_ids 必须是字符串列表")
-            include_unassigned = payload.get("include_unassigned", True) is True
-            selected_players = {item for item in requested_player_ids or []}
-            candidate_snapshot = [
-                {
-                    "id": candidate["id"],
-                    "event_time_ms": int(candidate["event_time_ms"]),
-                    "review_start_ms": int(candidate["review_start_ms"]),
-                    "review_end_ms": int(candidate["review_end_ms"]),
-                }
-                for candidate in store.list_candidates(video_id)
-                if candidate.get("selection_status") != "excluded"
-                and (
-                    requested_player_ids is None
-                    or candidate.get("player_id") in selected_players
-                    or (include_unassigned and not candidate.get("player_id"))
-                )
-            ]
-            if not candidate_snapshot:
-                raise ProtocolError("NO_EXPORT_CANDIDATES", "没有可导出的候选片段")
+            requested_player_ids, include_unassigned, candidate_snapshot = (
+                self._export_candidate_snapshot(store, video_id, payload)
+            )
+            selected_players = set(requested_player_ids or [])
             checkpoint = {
                 "mode": payload.get("mode", "separate"),
                 "output_dir": payload.get("output_dir"),
