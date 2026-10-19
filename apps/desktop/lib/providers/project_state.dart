@@ -269,6 +269,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
       String? reason,
       Future<bool> result,
       _ReviewBaseline baseline,
+      bool showNotice,
     })
   >
   _pendingReviews = {};
@@ -1551,6 +1552,16 @@ class ProjectNotifier extends Notifier<ProjectState> {
         pending.generation == generation &&
         pending.status == engineStatus &&
         pending.reason == reason) {
+      if (showNotice && !pending.showNotice) {
+        _pendingReviews[id] = (
+          generation: pending.generation,
+          status: pending.status,
+          reason: pending.reason,
+          result: pending.result,
+          baseline: pending.baseline,
+          showNotice: true,
+        );
+      }
       return pending.result;
     }
     final previous = state.candidates.cast<JsonMap?>().firstWhere(
@@ -1584,6 +1595,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
       reason: reason,
       result: result.future,
       baseline: baseline,
+      showNotice: showNotice,
     );
     if (previous != null) {
       _setLocalReviewState(id, engineStatus, reason: reason);
@@ -1615,7 +1627,11 @@ class ProjectNotifier extends Notifier<ProjectState> {
           note: snapshot?.note,
         );
         unawaited(refreshStatistics(generation: generation));
-        if (showNotice) {
+        final record = _pendingReviews[id];
+        final notify = identical(record?.result, result.future)
+            ? record!.showNotice
+            : showNotice;
+        if (notify) {
           _pushNotice(switch (status) {
             'goal' || 'included' => '已保留片段',
             'deferred' => '已暂缓审核',

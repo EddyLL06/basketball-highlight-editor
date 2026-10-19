@@ -35,6 +35,22 @@ void main() {
     expect(h.transport.reviewCalls, hasLength(2));
   });
 
+  test('静默审核排队中再次要求提示时，保存成功后只提示一次', () async {
+    final h = await _Harness.create();
+    final gate = h.transport.holdReview(h.root, 'A');
+    final first = h.notifier.reviewCandidate('A', 'excluded', showNotice: false);
+    final duplicate = h.notifier.reviewCandidate('A', 'excluded');
+    await gate.entered.future;
+    gate.release.complete();
+
+    expect(await Future.wait([first, duplicate]), [true, true]);
+    expect(h.transport.reviewCalls, hasLength(1));
+    expect(
+      h.container.read(noticeProvider).where((n) => n.title == '已排除候选'),
+      hasLength(1),
+    );
+  });
+
   test('尚未启动的相同审核也只发送一次请求', () async {
     final h = await _Harness.create();
     final gate = h.transport.holdReview(h.root, 'A');
