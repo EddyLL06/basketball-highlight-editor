@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,6 +12,7 @@ import '../../components/cs_button.dart';
 import '../../components/cs_card.dart';
 import '../../components/cs_empty_state.dart';
 import '../../components/cs_skeleton.dart';
+import '../../providers/pending_import_provider.dart';
 import '../../providers/project_state.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
@@ -60,6 +63,24 @@ class HomeScreen extends ConsumerWidget {
 
     Future<void> startNewProject() async {
       if (await notifier.startNewProject() && context.mounted) {
+        context.go('/import');
+      }
+    }
+
+    Future<void> startFromDroppedVideo(String path) async {
+      if (!isImportableVideo(path)) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(
+            content: Text(
+              l10n?.homeDropUnsupported ??
+                  '不支持这个文件，请拖入 MP4、MOV、M4V、AVI 或 MKV 视频',
+            ),
+          ),
+        );
+        return;
+      }
+      if (await notifier.startNewProject() && context.mounted) {
+        ref.read(pendingImportProvider.notifier).set(path);
         context.go('/import');
       }
     }
@@ -124,6 +145,9 @@ class HomeScreen extends ConsumerWidget {
 
     final newProjectCard = _NewProjectCard(
       onTap: busy ? null : startNewProject,
+      onDropFile: busy ? null : (path) => unawaited(startFromDroppedVideo(path)),
+      dropHint: l10n?.homeDropHint ?? '也可以把视频拖到这里',
+      dropActiveLabel: l10n?.homeDropActive ?? '松开即可新建项目',
       title: l10n?.newProject ?? '新建项目',
       description:
           l10n?.startFromVideoDescription ??
@@ -369,75 +393,102 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-class _NewProjectCard extends StatelessWidget {
+class _NewProjectCard extends StatefulWidget {
   const _NewProjectCard({
     required this.onTap,
+    required this.onDropFile,
     required this.title,
     required this.description,
     required this.formats,
+    required this.dropHint,
+    required this.dropActiveLabel,
   });
 
   final VoidCallback? onTap;
+  final ValueChanged<String>? onDropFile;
   final String title;
   final String description;
   final String formats;
+  final String dropHint;
+  final String dropActiveLabel;
+
+  @override
+  State<_NewProjectCard> createState() => _NewProjectCardState();
+}
+
+class _NewProjectCardState extends State<_NewProjectCard> {
+  bool _dragging = false;
 
   @override
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
     final theme = Theme.of(context);
-    return Semantics(
-      button: true,
-      child: CustomPaint(
-        foregroundPainter: _DashedBorderPainter(
-          color: c.borderStrong,
-          radius: CsRadius.lg,
-        ),
-        child: Material(
-          key: const Key('home-new-project'),
-          color: c.surface,
-          borderRadius: BorderRadius.circular(CsRadius.lg),
-          child: InkWell(
-            onTap: onTap,
+    final onDropFile = widget.onDropFile;
+    return DropTarget(
+      enable: onDropFile != null,
+      onDragEntered: (_) => setState(() => _dragging = true),
+      onDragExited: (_) => setState(() => _dragging = false),
+      onDragDone: (details) {
+        setState(() => _dragging = false);
+        if (details.files.isNotEmpty) onDropFile?.call(details.files.first.path);
+      },
+      child: Semantics(
+        button: true,
+        child: CustomPaint(
+          foregroundPainter: _DashedBorderPainter(
+            color: _dragging ? c.orange : c.borderStrong,
+            radius: CsRadius.lg,
+          ),
+          child: Material(
+            key: const Key('home-new-project'),
+            color: _dragging ? c.orange.withValues(alpha: 0.06) : c.surface,
             borderRadius: BorderRadius.circular(CsRadius.lg),
-            child: Padding(
-              padding: const EdgeInsets.all(Spacing.xl),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: c.orange.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(CsRadius.md),
+            child: InkWell(
+              onTap: widget.onTap,
+              borderRadius: BorderRadius.circular(CsRadius.lg),
+              child: Padding(
+                padding: const EdgeInsets.all(Spacing.xl),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: c.orange.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(CsRadius.md),
+                      ),
+                      child: Icon(
+                        _dragging ? LucideIcons.download : LucideIcons.plus,
+                        color: c.orange,
+                        size: 22,
+                      ),
                     ),
-                    child: Icon(LucideIcons.plus, color: c.orange, size: 22),
-                  ),
-                  const SizedBox(height: Spacing.md),
-                  Text(
-                    title,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
+                    const SizedBox(height: Spacing.md),
+                    Text(
+                      _dragging ? widget.dropActiveLabel : widget.title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: Spacing.xs),
-                  Text(
-                    description,
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: c.textSecondary,
+                    const SizedBox(height: Spacing.xs),
+                    Text(
+                      widget.description,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: c.textSecondary,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: Spacing.sm),
-                  Text(
-                    formats,
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: c.textTertiary,
+                    const SizedBox(height: Spacing.sm),
+                    Text(
+                      '${widget.dropHint} · ${widget.formats}',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: c.textTertiary,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

@@ -819,4 +819,14 @@ class BheLocalizationsEn extends BheLocalizations {
 
   @override
   String get reviewUnreviewed => 'Not reviewed';
+
+  @override
+  String get homeDropHint => 'Or drop a video here';
+
+  @override
+  String get homeDropActive => 'Release to create a project';
+
+  @override
+  String get homeDropUnsupported =>
+      'Unsupported file. Drop an MP4, MOV, M4V, AVI or MKV video.';
 }

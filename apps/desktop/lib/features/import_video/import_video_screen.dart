@@ -17,6 +17,7 @@ import '../../components/cs_card.dart';
 import '../../components/cs_empty_state.dart';
 import '../../core/engine_session.dart';
 import '../../providers/notice_provider.dart';
+import '../../providers/pending_import_provider.dart';
 import '../../providers/project_state.dart';
 import '../../providers/playback_coordinator.dart';
 import '../../theme/app_colors.dart';
@@ -66,7 +67,16 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreDraft());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _restoreDraft();
+      _takePendingImport();
+    });
+  }
+
+  void _takePendingImport() {
+    if (!mounted || ref.read(pendingImportProvider) == null) return;
+    final path = ref.read(pendingImportProvider.notifier).take();
+    if (path != null) unawaited(_importVideoPath(path));
   }
 
   @override
@@ -281,6 +291,12 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
     );
     final file = await openFile(acceptedTypeGroups: [group]);
     if (file == null || !mounted) return;
+    await _importVideoPath(file.path);
+  }
+
+  /// Runs the import after a path is chosen, from the picker or a drop.
+  Future<void> _importVideoPath(String path) async {
+    final existingState = ref.read(projectProvider);
     setState(() {
       _step = 1;
       _showExistingDraft = false;
@@ -288,7 +304,7 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
     try {
       final metadata = await ref
           .read(projectSessionProvider)
-          .inspectVideo(videoPath: file.path);
+          .inspectVideo(videoPath: path);
       final video =
           (metadata['video'] as Map?)?.cast<String, dynamic>() ?? metadata;
       final advice = _videoProcessingAdvice(video);
@@ -327,7 +343,7 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
     }
     final previousVideoId = existingState.video?['id']?.toString();
     _rangeTouched = false;
-    await ref.read(projectProvider.notifier).selectVideo(file.path);
+    await ref.read(projectProvider.notifier).selectVideo(path);
     if (!mounted) return;
     final importedState = ref.read(projectProvider);
     final importedVideoId = importedState.video?['id']?.toString();
@@ -494,6 +510,11 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(projectProvider);
+    ref.listen<String?>(pendingImportProvider, (_, next) {
+      if (next == null) return;
+      // Let the project-change handling below settle before importing.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _takePendingImport());
+    });
     ref.listen<ProjectState>(projectProvider, (previous, next) {
       final previousVideoId = previous?.video?['id']?.toString();
       final nextVideoId = next.video?['id']?.toString();

@@ -1543,6 +1543,24 @@ abstract class BheLocalizations {
   /// In zh, this message translates to:
   /// **'未审核'**
   String get reviewUnreviewed;
+
+  /// No description provided for @homeDropHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'也可以把视频拖到这里'**
+  String get homeDropHint;
+
+  /// No description provided for @homeDropActive.
+  ///
+  /// In zh, this message translates to:
+  /// **'松开即可新建项目'**
+  String get homeDropActive;
+
+  /// No description provided for @homeDropUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'不支持这个文件，请拖入 MP4、MOV、M4V、AVI 或 MKV 视频'**
+  String get homeDropUnsupported;
 }
 
 class _BheLocalizationsDelegate

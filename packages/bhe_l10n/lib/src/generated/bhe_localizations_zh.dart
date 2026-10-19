@@ -790,4 +790,13 @@ class BheLocalizationsZh extends BheLocalizations {
 
   @override
   String get reviewUnreviewed => '未审核';
+
+  @override
+  String get homeDropHint => '也可以把视频拖到这里';
+
+  @override
+  String get homeDropActive => '松开即可新建项目';
+
+  @override
+  String get homeDropUnsupported => '不支持这个文件，请拖入 MP4、MOV、M4V、AVI 或 MKV 视频';
 }

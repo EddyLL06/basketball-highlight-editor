@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:desktop/providers/pending_import_provider.dart';
 import 'package:desktop/providers/project_state.dart';
 
 import 'package:desktop/features/import_video/import_video_screen.dart';
@@ -41,6 +42,29 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('imports a video dropped on the home screen', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final notifier = _DropNotifier();
+    final container = ProviderContainer(
+      overrides: [projectProvider.overrideWith(() => notifier)],
+    );
+    addTearDown(container.dispose);
+    container.read(pendingImportProvider.notifier).set('/v/game.MP4');
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: Scaffold(body: ImportVideoScreen())),
+      ),
+    );
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(notifier.selectedPaths, ['/v/game.MP4']);
+    expect(container.read(pendingImportProvider), isNull);
+  });
 
   test(
     'estimates standard analysis from the selected range and resolution',
@@ -110,4 +134,17 @@ class _RangeNotifier extends ProjectNotifier {
     },
     workflowDraft: const {'step': 1},
   );
+}
+
+class _DropNotifier extends ProjectNotifier {
+  final selectedPaths = <String>[];
+
+  @override
+  ProjectState build() => const ProjectState();
+
+  @override
+  Future<Map<String, dynamic>?> loadWorkflowDraft() async => null;
+
+  @override
+  Future<void> selectVideo(String path) async => selectedPaths.add(path);
 }

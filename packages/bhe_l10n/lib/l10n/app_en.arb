@@ -256,5 +256,8 @@
   "@importEstimate": {"placeholders": {"estimate": {"type": "String"}}},
   "reviewProgress": "Reviewed {done} / {total}",
   "@reviewProgress": {"placeholders": {"done": {"type": "int"}, "total": {"type": "int"}}},
-  "reviewUnreviewed": "Not reviewed"
+  "reviewUnreviewed": "Not reviewed",
+  "homeDropHint": "Or drop a video here",
+  "homeDropActive": "Release to create a project",
+  "homeDropUnsupported": "Unsupported file. Drop an MP4, MOV, M4V, AVI or MKV video."
 }
