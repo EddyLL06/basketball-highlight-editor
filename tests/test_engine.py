@@ -1240,6 +1240,45 @@ def test_list_recent_projects_scans_only_explicit_root_children(tmp_path: Path):
     assert result["scanned_roots"] == [str(projects_root.resolve())]
 
 
+def test_list_recent_projects_uses_an_existing_frame_as_cover(tmp_path: Path):
+    projects_root = tmp_path / "projects"
+    project_root = projects_root / "game"
+    service = EngineService()
+    service.handle("create_project", {"name": "封面", "root_path": str(project_root)})
+    store = ProjectStore(project_root)
+    video = store.link_video({
+        "source_path": str(tmp_path / "source.mp4"),
+        "source_size_bytes": 1,
+        "source_mtime_ns": 1,
+        "duration_ms": 20_000,
+        "width": 960,
+        "height": 720,
+    })
+    store.replace_candidates(video["id"], [
+        {"id": f"c{index}", "video_id": video["id"], "event_time_ms": time_ms,
+         "default_start_ms": time_ms - 1_000, "default_end_ms": time_ms + 1_000,
+         "review_start_ms": time_ms - 1_000, "review_end_ms": time_ms + 1_000,
+         "detector_version": "test", "evidence_json": "{}"}
+        for index, time_ms in enumerate([4_000, 9_000])
+    ])
+    store.review_candidate("c0", "excluded")
+
+    def cover() -> str | None:
+        result = service.handle("list_recent_projects", {"roots": [str(projects_root)]})
+        return result["projects"][0]["cover_path"]
+
+    assert cover() is None
+    calibration = EngineService._preview_path(store, video, 1_000)
+    calibration.parent.mkdir(parents=True, exist_ok=True)
+    calibration.write_bytes(b"jpg")
+    assert cover() == str(calibration)
+    excluded_frame = EngineService._preview_path(store, video, 4_000)
+    excluded_frame.write_bytes(b"jpg")
+    kept_frame = EngineService._preview_path(store, video, 9_000)
+    kept_frame.write_bytes(b"jpg")
+    assert cover() == str(kept_frame)
+
+
 def test_list_recent_projects_requires_explicit_roots():
     with pytest.raises(ProtocolError) as error:
         EngineService().handle("list_recent_projects", {})

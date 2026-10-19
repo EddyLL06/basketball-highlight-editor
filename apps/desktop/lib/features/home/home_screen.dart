@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -127,101 +129,113 @@ class HomeScreen extends ConsumerWidget {
           l10n?.startFromVideoDescription ??
           '选择一段固定机位录像，系统会优先自动定位篮筐，随后生成候选进球片段供你审核与导出。',
       formats:
-          l10n?.homeSupportedFormats ?? 'MP4 · MOV · M4V · AVI · MKV · 原始视频不会被修改',
+          l10n?.homeSupportedFormats ??
+          'MP4 · MOV · M4V · AVI · MKV · 原始视频不会被修改',
     );
+    final currentCover = state.recentProjects
+        .where(
+          (item) =>
+              state.video?['id'] != null &&
+              _map(item['video'])['id'] == state.video?['id'],
+        )
+        .map((item) => item['cover_path']?.toString())
+        .firstOrNull;
     final continueCard = CsCard(
       child: hasCurrent
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      l10n?.homeContinueTitle ?? '继续上次',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: c.textTertiary,
+          ? _ContinueLayout(
+              cover: currentCover,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        l10n?.homeContinueTitle ?? '继续上次',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: c.textTertiary,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: Spacing.sm),
-                    _StatusBadge(
-                      label: currentStatus.$1,
-                      color: currentStatus.$2,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: Spacing.sm),
-                Text(
-                  currentName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
+                      const SizedBox(width: Spacing.sm),
+                      _StatusBadge(
+                        label: currentStatus.$1,
+                        color: currentStatus.$2,
+                      ),
+                    ],
                   ),
-                ),
-                if (currentVideoName != null) ...[
-                  const SizedBox(height: 2),
+                  const SizedBox(height: Spacing.sm),
                   Text(
-                    currentVideoName,
+                    currentName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: c.textSecondary,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                ],
-                const SizedBox(height: Spacing.md),
-                Wrap(
-                  spacing: Spacing.xl,
-                  runSpacing: Spacing.sm,
-                  children: [
-                    _HomeStat(
-                      label: l10n?.homeCandidates ?? '候选',
-                      value: '${state.candidates.length}',
-                    ),
-                    _HomeStat(
-                      label: l10n?.homeKept ?? '保留',
-                      value: '$included',
-                      color: included > 0 ? c.goal : null,
-                    ),
-                    _HomeStat(
-                      label: l10n?.homeExcluded ?? '排除',
-                      value: '$excluded',
-                    ),
-                    _HomeStat(
-                      label: l10n?.videoDuration ?? '视频时长',
-                      value: _formatDuration(durationMs),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: Spacing.lg),
-                Wrap(
-                  spacing: Spacing.sm,
-                  runSpacing: Spacing.sm,
-                  children: [
-                    if (state.candidates.isNotEmpty)
-                      CsButton(
-                        label: Text(l10n?.homeContinueReview ?? '继续审核'),
-                        icon: LucideIcons.arrowRight,
-                        onPressed: () => context.go('/review'),
-                      )
-                    else
-                      CsButton(
-                        label: Text(l10n?.homeContinueSetup ?? '继续配置'),
-                        icon: LucideIcons.arrowRight,
-                        onPressed: () => context.go('/import'),
+                  if (currentVideoName != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      currentVideoName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: c.textSecondary,
                       ),
-                    CsButton(
-                      label: Text(l10n?.exportHighlights ?? '导出集锦'),
-                      icon: LucideIcons.download,
-                      variant: CsButtonVariant.secondary,
-                      onPressed: included > 0
-                          ? () => context.go('/export')
-                          : null,
                     ),
                   ],
-                ),
-              ],
+                  const SizedBox(height: Spacing.md),
+                  Wrap(
+                    spacing: Spacing.xl,
+                    runSpacing: Spacing.sm,
+                    children: [
+                      _HomeStat(
+                        label: l10n?.homeCandidates ?? '候选',
+                        value: '${state.candidates.length}',
+                      ),
+                      _HomeStat(
+                        label: l10n?.homeKept ?? '保留',
+                        value: '$included',
+                        color: included > 0 ? c.goal : null,
+                      ),
+                      _HomeStat(
+                        label: l10n?.homeExcluded ?? '排除',
+                        value: '$excluded',
+                      ),
+                      _HomeStat(
+                        label: l10n?.videoDuration ?? '视频时长',
+                        value: _formatDuration(durationMs),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: Spacing.lg),
+                  Wrap(
+                    spacing: Spacing.sm,
+                    runSpacing: Spacing.sm,
+                    children: [
+                      if (state.candidates.isNotEmpty)
+                        CsButton(
+                          label: Text(l10n?.homeContinueReview ?? '继续审核'),
+                          icon: LucideIcons.arrowRight,
+                          onPressed: () => context.go('/review'),
+                        )
+                      else
+                        CsButton(
+                          label: Text(l10n?.homeContinueSetup ?? '继续配置'),
+                          icon: LucideIcons.arrowRight,
+                          onPressed: () => context.go('/import'),
+                        ),
+                      CsButton(
+                        label: Text(l10n?.exportHighlights ?? '导出集锦'),
+                        icon: LucideIcons.download,
+                        variant: CsButtonVariant.secondary,
+                        onPressed: included > 0
+                            ? () => context.go('/export')
+                            : null,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -464,6 +478,68 @@ class _DashedBorderPainter extends CustomPainter {
       old.color != color || old.radius != radius;
 }
 
+class _ProjectCover extends StatelessWidget {
+  const _ProjectCover({required this.path, super.key});
+
+  final String? path;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final placeholder = ColoredBox(
+      color: c.surface2,
+      child: Center(
+        child: Icon(LucideIcons.film, size: 26, color: c.textTertiary),
+      ),
+    );
+    final file = path;
+    if (file == null || file.isEmpty) return placeholder;
+    return Image.file(
+      File(file),
+      fit: BoxFit.cover,
+      errorBuilder: (_, _, _) => placeholder,
+    );
+  }
+}
+
+class _ContinueLayout extends StatelessWidget {
+  const _ContinueLayout({required this.cover, required this.child});
+
+  final String? cover;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    // The card sits in an IntrinsicHeight row, which LayoutBuilder cannot
+    // answer, so the window width decides whether the cover fits.
+    if (cover == null ||
+        cover!.isEmpty ||
+        MediaQuery.sizeOf(context).width < 700) {
+      return child;
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 180,
+          child: AspectRatio(
+            aspectRatio: 16 / 9,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(CsRadius.md),
+              child: _ProjectCover(
+                key: const ValueKey('current-project-cover'),
+                path: cover,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: Spacing.lg),
+        Expanded(child: child),
+      ],
+    );
+  }
+}
+
 class _StatusBadge extends StatelessWidget {
   const _StatusBadge({required this.label, required this.color});
 
@@ -698,11 +774,10 @@ class _ProjectCard extends StatelessWidget {
               color: c.surface2,
               child: Stack(
                 children: [
-                  Center(
-                    child: Icon(
-                      LucideIcons.film,
-                      size: 26,
-                      color: c.textTertiary,
+                  Positioned.fill(
+                    child: _ProjectCover(
+                      key: ValueKey('project-cover-$root'),
+                      path: item['cover_path']?.toString(),
                     ),
                   ),
                   Positioned(

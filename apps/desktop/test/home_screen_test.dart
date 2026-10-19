@@ -136,6 +136,26 @@ void main() {
     expect(find.text('还没有打开的项目'), findsOneWidget);
   });
 
+  testWidgets('project covers render and fall back without crashing', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [projectProvider.overrideWith(_CoverProjectNotifier.new)],
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('project-cover-/p/cover')), findsOneWidget);
+    expect(find.byKey(const ValueKey('current-project-cover')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('current project card shows progress and the next step', (
     tester,
   ) async {
@@ -154,6 +174,28 @@ void main() {
     expect(find.text('继续审核'), findsOneWidget);
     expect(find.text('01:57'), findsOneWidget);
   });
+}
+
+class _CoverProjectNotifier extends ProjectNotifier {
+  @override
+  ProjectState build() => const ProjectState(
+    video: {'id': 'v1', 'duration_ms': 117000, 'source_path': '/v/a.mp4'},
+    statistics: {
+      'project': {'name': '封面项目'},
+    },
+    candidates: [
+      {'id': 'c1', 'review_status': 'pending'},
+    ],
+    recentProjects: [
+      {
+        'project_root': '/p/cover',
+        'project': {'name': '封面项目'},
+        'video': {'id': 'v1', 'source_path': '/v/a.mp4', 'duration_ms': 117000},
+        'statistics': {'included_count': 1, 'candidate_count': 1},
+        'cover_path': '/missing/cover.jpg',
+      },
+    ],
+  );
 }
 
 class _CurrentProjectNotifier extends ProjectNotifier {

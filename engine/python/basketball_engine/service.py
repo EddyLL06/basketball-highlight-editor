@@ -353,9 +353,34 @@ class EngineService:
                 ).isoformat(timespec="milliseconds")
             except (OSError, ProtocolError):
                 continue
-            projects.append({**context, "last_modified_at": modified_at})
+            projects.append({
+                **context,
+                "last_modified_at": modified_at,
+                "cover_path": self._project_cover(store, context.get("video")),
+            })
         projects.sort(key=lambda item: item["last_modified_at"], reverse=True)
         return {"projects": projects[:limit], "scanned_roots": scanned_roots}
+
+    @classmethod
+    def _project_cover(cls, store: ProjectStore, video: Dict[str, Any] | None) -> str | None:
+        """Pick an already extracted frame; listing projects never runs ffmpeg."""
+        if not video:
+            return None
+        rows = sorted(store.list_candidates(video["id"]), key=lambda row: int(row["event_time_ms"]))
+        for row in rows:
+            if row.get("selection_status") == "excluded":
+                continue
+            path = cls._preview_path(store, video, int(row["event_time_ms"]))
+            if path.is_file() and path.stat().st_size > 0:
+                return str(path)
+        preview_dir = store.root / "artifacts" / "previews"
+        if not preview_dir.is_dir():
+            return None
+        frames = sorted(
+            frame for frame in preview_dir.glob(f"{video['id']}_*.jpg")
+            if frame.stat().st_size > 0
+        )
+        return str(frames[0]) if frames else None
 
     def inspect_video(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         raw_path = payload.get("video_path")
