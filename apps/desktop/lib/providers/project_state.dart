@@ -1759,6 +1759,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
   }) async {
     if (candidateIds.isEmpty) return null;
     JsonMap? result;
+    String? message;
     await _runBusy(() async {
       result = await ref
           .read(projectSessionProvider)
@@ -1769,7 +1770,10 @@ class ProjectNotifier extends Notifier<ProjectState> {
             overwriteManual: overwriteManual,
           );
       await refreshCandidates();
-    }, successMessage: '已更新片段时长');
+      final skipped = (result?['skipped_invalid'] as num?)?.toInt() ?? 0;
+      message = skipped > 0 ? '已更新片段时长，$skipped 个片段靠近视频结尾未调整' : '已更新片段时长';
+    });
+    if (message != null) _pushNotice(message!, NoticeSeverity.success);
     return result;
   }
 

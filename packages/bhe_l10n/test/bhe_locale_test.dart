@@ -125,6 +125,10 @@ void main() {
     );
     expect(english.text('新建项目'), 'New project');
     expect(
+      english.text('已更新片段时长，2 个片段靠近视频结尾未调整'),
+      startsWith('Clip duration updated; 2 clips'),
+    );
+    expect(
       english.text('标准分析 · 13 个候选 · 用时 10 秒'),
       'Standard analysis · 13 candidates · Elapsed 10 sec',
     );

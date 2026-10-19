@@ -1024,11 +1024,14 @@ class ProjectStore:
             raise ValueError("INVALID_CLIP_RANGE")
         ids = list(dict.fromkeys(str(item) for item in candidate_ids if str(item)))
         if not ids:
-            return {"updated": 0, "skipped_manual": 0, "total": 0}
+            return {"updated": 0, "skipped_manual": 0, "skipped_invalid": 0, "total": 0}
         placeholders = ",".join("?" for _ in ids)
         now = now_iso()
         updated = 0
         skipped_manual = 0
+        # Clips whose event sits at the very end cannot take the new window;
+        # they keep their range instead of failing the whole batch.
+        skipped_invalid = 0
         with self.connect() as connection:
             rows = connection.execute(
                 f"""
@@ -1055,13 +1058,19 @@ class ProjectStore:
                 if row["duration_ms"] is not None:
                     end = min(end, int(row["duration_ms"]))
                 if end <= start:
-                    raise ValueError("INVALID_CLIP_RANGE")
+                    skipped_invalid += 1
+                    continue
                 connection.execute(
                     "UPDATE candidates SET review_start_ms = ?, review_end_ms = ?, updated_at = ? WHERE id = ?",
                     (start, end, now, row["id"]),
                 )
                 updated += 1
-        return {"updated": updated, "skipped_manual": skipped_manual, "total": len(rows)}
+        return {
+            "updated": updated,
+            "skipped_manual": skipped_manual,
+            "skipped_invalid": skipped_invalid,
+            "total": len(rows),
+        }
 
     def create_job(self, project_id: str, video_id: str | None, job_type: str, checkpoint: Dict[str, Any] | None = None) -> Dict[str, Any]:
         job_id = new_id("job")

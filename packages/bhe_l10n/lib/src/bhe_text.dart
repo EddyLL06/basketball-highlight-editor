@@ -84,6 +84,12 @@ String? _translateDynamic(String source) {
   if (batchRangeSummary != null) {
     return 'Update ${batchRangeSummary.group(1)} clips; keep ${batchRangeSummary.group(2)} manually adjusted clips.';
   }
+  final skippedBatchRange = RegExp(
+    r'^已更新片段时长，(\d+) 个片段靠近视频结尾未调整$',
+  ).firstMatch(source);
+  if (skippedBatchRange != null) {
+    return 'Clip duration updated; ${skippedBatchRange.group(1)} clips near the end of the video were left unchanged';
+  }
   final overwriteBatchRangeSummary = RegExp(
     r'^将覆盖全部 (\d+) 个片段，其中 (\d+) 个曾手动调整。$',
   ).firstMatch(source);

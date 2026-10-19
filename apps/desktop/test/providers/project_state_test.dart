@@ -835,6 +835,42 @@ void main() {
     });
   });
 
+  test('批量时长跳过结尾片段时在提示中说明数量', () async {
+    final fakeSession = _FakeProjectSession()
+      ..seedCandidates(<JsonMap>[
+        <String, dynamic>{'id': 'c1', 'review_status': 'pending'},
+        <String, dynamic>{'id': 'c2', 'review_status': 'pending'},
+      ])
+      ..clipRangesResult = <String, dynamic>{
+        'updated': 1,
+        'skipped_manual': 0,
+        'skipped_invalid': 1,
+        'total': 2,
+      };
+    final container = ProviderContainer(
+      overrides: <Override>[
+        projectSessionProvider.overrideWithValue(fakeSession),
+        engineBootstrapProvider.overrideWith(_StubEngineBootstrap.new),
+      ],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(projectProvider.notifier);
+    await notifier.refreshCandidates();
+
+    final result = await notifier.updateClipRanges(
+      candidateIds: const ['c1', 'c2'],
+      beforeMs: 0,
+      afterMs: 3000,
+    );
+
+    expect(result?['skipped_invalid'], 1);
+    expect(
+      container.read(noticeProvider).last.title,
+      '已更新片段时长，1 个片段靠近视频结尾未调整',
+    );
+    expect(container.read(projectProvider).busy, isFalse);
+  });
+
   group('ProjectNotifier 错误路径', () {
     test('action 抛错时 push error notice,busy 复位 false', () async {
       final fakeSession = _FakeProjectSession()
@@ -1202,6 +1238,16 @@ class _FakeProjectSession extends ProjectSession {
     setCandidatesPlayerCalls.add(List<String>.from(candidateIds));
     return <String, dynamic>{'updated': candidateIds.length};
   }
+
+  JsonMap clipRangesResult = <String, dynamic>{};
+
+  @override
+  Future<JsonMap> updateClipRanges({
+    required List<String> candidateIds,
+    required int beforeMs,
+    required int afterMs,
+    bool overwriteManual = false,
+  }) async => clipRangesResult;
 
   @override
   Future<JsonMap> updateClipRange({

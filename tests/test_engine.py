@@ -146,14 +146,49 @@ def test_update_clip_ranges_preserves_manual_ranges_unless_overwritten(tmp_path:
     payload = {"project_root": str(project_root), "candidate_ids": ["auto", "manual"],
                "before_ms": 6_000, "after_ms": 3_000}
     result = service.handle("update_clip_ranges", payload)
-    assert result == {"updated": 1, "skipped_manual": 1, "total": 2}
+    assert result == {"updated": 1, "skipped_manual": 1, "skipped_invalid": 0, "total": 2}
     rows = {row["id"]: row for row in store.list_candidates(video["id"])}
     assert (rows["auto"]["review_start_ms"], rows["auto"]["review_end_ms"]) == (4_000, 13_000)
     assert (rows["manual"]["review_start_ms"], rows["manual"]["review_end_ms"]) == (8_000, 12_000)
     result = service.handle("update_clip_ranges", {**payload, "overwrite_manual": True})
-    assert result == {"updated": 2, "skipped_manual": 0, "total": 2}
+    assert result == {"updated": 2, "skipped_manual": 0, "skipped_invalid": 0, "total": 2}
     rows = {row["id"]: row for row in store.list_candidates(video["id"])}
     assert (rows["manual"]["review_start_ms"], rows["manual"]["review_end_ms"]) == (4_000, 13_000)
+
+
+def test_update_clip_ranges_skips_clips_that_cannot_fit(tmp_path: Path):
+    project_root = tmp_path / "project"
+    service = EngineService()
+    service.handle("create_project", {"name": "批量时长边界", "root_path": str(project_root)})
+    store = ProjectStore(project_root)
+    video = store.link_video({
+        "source_path": str(tmp_path / "source.mp4"),
+        "source_size_bytes": 1,
+        "source_mtime_ns": 1,
+        "duration_ms": 20_000,
+        "width": 960,
+        "height": 720,
+    })
+    store.replace_candidates(video["id"], [
+        {"id": "normal", "video_id": video["id"], "event_time_ms": 10_000,
+         "default_start_ms": 4_000, "default_end_ms": 13_000,
+         "review_start_ms": 4_000, "review_end_ms": 13_000,
+         "detector_version": "test", "evidence_json": "{}"},
+        {"id": "at-end", "video_id": video["id"], "event_time_ms": 20_000,
+         "default_start_ms": 17_000, "default_end_ms": 20_000,
+         "review_start_ms": 17_000, "review_end_ms": 20_000,
+         "detector_version": "test", "evidence_json": "{}"},
+    ])
+    result = service.handle("update_clip_ranges", {
+        "project_root": str(project_root),
+        "candidate_ids": ["normal", "at-end"],
+        "before_ms": 0,
+        "after_ms": 3_000,
+    })
+    assert result == {"updated": 1, "skipped_manual": 0, "skipped_invalid": 1, "total": 2}
+    rows = {row["id"]: row for row in store.list_candidates(video["id"])}
+    assert (rows["normal"]["review_start_ms"], rows["normal"]["review_end_ms"]) == (10_000, 13_000)
+    assert (rows["at-end"]["review_start_ms"], rows["at-end"]["review_end_ms"]) == (17_000, 20_000)
 
 
 def test_delete_project_removes_project_files_but_not_source_video(tmp_path: Path):
