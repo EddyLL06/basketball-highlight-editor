@@ -2097,6 +2097,7 @@ class _AnalysisRangeEditorState extends State<_AnalysisRangeEditor> {
           ),
           const SizedBox(height: Spacing.sm),
           AspectRatio(
+            key: const Key('analysis-range-video-frame'),
             aspectRatio: widget.aspectRatio,
             child: DecoratedBox(
               decoration: const BoxDecoration(color: Colors.black),
@@ -2118,6 +2119,7 @@ class _AnalysisRangeEditorState extends State<_AnalysisRangeEditor> {
                           child: IgnorePointer(
                             child: Video(
                               controller: controller,
+                              fit: BoxFit.contain,
                               controls: NoVideoControls,
                             ),
                           ),

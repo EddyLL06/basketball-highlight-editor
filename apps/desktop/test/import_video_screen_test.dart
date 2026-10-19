@@ -1,8 +1,41 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:desktop/providers/project_state.dart';
 
 import 'package:desktop/features/import_video/import_video_screen.dart';
 
 void main() {
+  for (final frame in [
+    const Size(1440, 1080),
+    const Size(1920, 1080),
+    const Size(1080, 1920),
+  ]) {
+    testWidgets('analysis range preview follows source ratio $frame', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1100, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            projectProvider.overrideWith(() => _RangeNotifier(frame)),
+          ],
+          child: const MaterialApp(home: Scaffold(body: ImportVideoScreen())),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      final preview = find.byKey(const Key('analysis-range-video-frame'));
+      expect(preview, findsOneWidget);
+      final size = tester.getSize(preview);
+      expect(size.aspectRatio, closeTo(frame.aspectRatio, 0.001));
+      expect(size.width, greaterThan(700));
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   test(
     'estimates standard analysis from the selected range and resolution',
     () {
@@ -55,4 +88,20 @@ void main() {
 
     expect(estimate.label, '约 1 分钟');
   });
+}
+
+class _RangeNotifier extends ProjectNotifier {
+  _RangeNotifier(this.frame);
+  final Size frame;
+
+  @override
+  ProjectState build() => ProjectState(
+    video: {
+      'id': 'v1',
+      'duration_ms': 60000,
+      'width': frame.width,
+      'height': frame.height,
+    },
+    workflowDraft: const {'step': 1},
+  );
 }

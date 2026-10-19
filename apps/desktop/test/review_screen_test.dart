@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:desktop/features/review/review_screen.dart';
 import 'package:desktop/features/review/media_readiness.dart';
@@ -10,6 +11,120 @@ import 'package:desktop/providers/project_state.dart';
 import 'package:desktop/theme/tokens.dart';
 
 void main() {
+  for (final frame in [
+    const Size(1440, 1080),
+    const Size(1920, 1080),
+    const Size(1080, 1920),
+    Size.zero,
+  ]) {
+    testWidgets('range dialog preserves source ratio $frame without overflow', (
+      tester,
+    ) async {
+      await _pumpReview(
+        tester,
+        ProjectState(
+          video: {
+            'width': frame.width,
+            'height': frame.height,
+            'duration_ms': 60000,
+          },
+          candidates: const [
+            {
+              'id': 'c1',
+              'event_time_ms': 12000,
+              'default_start_ms': 8000,
+              'default_end_ms': 16000,
+            },
+          ],
+        ),
+        size: const Size(1100, 700),
+      );
+      await tester.tap(find.byTooltip('调整片段范围'));
+      await tester.pumpAndSettle();
+      final preview = find.byKey(const Key('clip-range-video-frame'));
+      final size = tester.getSize(preview);
+      final expected = frame.isEmpty ? 16 / 9 : frame.aspectRatio;
+      expect(size.aspectRatio, closeTo(expected, 0.001));
+      expect(size.width, greaterThan(700));
+      expect(
+        tester.getTopLeft(preview).dx,
+        tester.getTopLeft(find.text('调整片段范围')).dx,
+      );
+      expect(tester.takeException(), isNull);
+      // Tall source frames must scroll rather than clipping the controls.
+      await tester.ensureVisible(find.text('应用'));
+      await tester.pumpAndSettle();
+      expect(find.text('应用').hitTestable(), findsOneWidget);
+    });
+  }
+
+  testWidgets(
+    'saving a player tag preserves list geometry, scroll and selected clip',
+    (tester) async {
+      final notifier = _PlayerLayoutNotifier(
+        ProjectState(
+          video: const {'id': 'v1'},
+          job: const {'state': 'completed'},
+          players: const [
+            {'id': 'p1', 'name': '小夏'},
+          ],
+          candidates: List.generate(
+            389,
+            (i) => <String, dynamic>{
+              'id': 'c$i',
+              'event_time_ms': i * 3000,
+              'default_start_ms': i * 3000,
+              'default_end_ms': i * 3000 + 3000,
+              'review_status': 'pending',
+            },
+          ),
+        ),
+      );
+      await _pumpReview(tester, notifier.initialState, notifier: notifier);
+      final panel = find.byKey(const Key('candidate-panel-inset'));
+      final scroll = tester.state<ScrollableState>(
+        find.descendant(of: panel, matching: find.byType(Scrollable)).first,
+      );
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('player-chip-c388')),
+        1500,
+        maxScrolls: 100,
+        scrollable: find
+            .descendant(of: panel, matching: find.byType(Scrollable))
+            .first,
+      );
+      await tester.tap(find.text('#389 19:24'));
+      await tester.pumpAndSettle();
+      final chip = find.byKey(const ValueKey('player-chip-c388'));
+      final bounds = tester.getRect(panel);
+      final rowBounds = tester.getRect(chip);
+      final offset = scroll.position.pixels;
+      final viewport = scroll.position.viewportDimension;
+      await tester.tap(chip);
+      await tester.pumpAndSettle();
+      expect(scroll.position.pixels, offset, reason: 'opening the player menu must not scroll the candidate list');
+      await tester.tap(find.text('小夏'));
+      await tester.pump();
+      expect(find.text('正在保存球员标签…'), findsOneWidget);
+      expect(tester.widget<IconButton>(find.byKey(const Key('create-manual-candidate'))).onPressed, isNull);
+      expect(find.byTooltip('重新分析当前视频'), findsOneWidget);
+      expect(tester.getRect(panel), bounds);
+      expect(scroll.position.pixels, offset);
+      expect(scroll.position.viewportDimension, viewport);
+      expect(tester.getRect(chip), rowBounds);
+      expect(find.text('候选 19:24'), findsOneWidget);
+      notifier.saved.complete();
+      await tester.pumpAndSettle();
+      expect(tester.getRect(panel), bounds);
+      expect(scroll.position.pixels, offset);
+      expect(scroll.position.viewportDimension, viewport);
+      expect(tester.getRect(chip).top, rowBounds.top);
+      expect(find.text('候选 19:24'), findsOneWidget);
+      expect(notifier.current.candidates.last['player_id'], 'p1');
+      expect(notifier.current.candidates.last['review_status'], 'pending');
+    },
+  );
+
   testWidgets('shows saving feedback while player changes are pending', (
     tester,
   ) async {
@@ -671,12 +786,25 @@ void main() {
 
     await tester.tap(find.byTooltip('筛选候选'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('已排除').last);
+    expect(find.text('待审核'), findsNothing);
+    expect(find.text('已确认'), findsNothing);
+    await tester.tap(find.text('排除').last);
     await tester.pump();
 
     expect(find.text('#1 00:09'), findsOneWidget);
     expect(find.text('#1 00:03'), findsNothing);
     expect(find.text('#1 00:15'), findsNothing);
+    await tester.tap(find.byTooltip('筛选候选'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保留').last);
+    await tester.pumpAndSettle();
+    expect(find.text('#1 00:03'), findsOneWidget);
+    expect(find.text('#2 00:15'), findsOneWidget);
+    expect(find.text('#1 00:09'), findsNothing);
+    await tester.tap(find.byTooltip('保留片段 (C / Enter)').first);
+    await tester.pumpAndSettle();
+    expect(find.text('#1 00:03'), findsOneWidget);
+    expect(find.text('#2 00:15'), findsOneWidget);
   });
 
   testWidgets('exposes direct candidate editing actions below the video', (
@@ -685,6 +813,7 @@ void main() {
     await _pumpReview(
       tester,
       const ProjectState(
+        videoPath: '/tmp/bhe-widget-missing.mp4',
         job: {'state': 'completed'},
         candidates: [
           {
@@ -886,5 +1015,34 @@ class _PreviewTrackingNotifier extends _ReviewNotifier {
     await Future<void>.delayed(const Duration(milliseconds: 20));
     activePreviewLoads--;
     return null;
+  }
+}
+
+class _PlayerLayoutNotifier extends _ReviewNotifier {
+  _PlayerLayoutNotifier(super.initialState);
+  final saved = Completer<void>();
+  ProjectState get current => state;
+
+  @override
+  Future<void> startReview(String id) async {}
+
+  @override
+  Future<String?> loadCandidatePreview(String candidateId, int timeMs) async => null;
+
+  @override
+  Future<void> setCandidatePlayer(String candidateId, String? playerId) async {
+    state = state.copyWith(busy: true, busyMessage: '正在保存球员标签…');
+    await saved.future;
+    state = state.copyWith(
+      busy: false,
+      busyMessage: null,
+      candidates: [
+        for (final c in state.candidates)
+          if (c['id'] == candidateId)
+            {...c, 'player_id': playerId, 'player_name': '小夏'}
+          else
+            c,
+      ],
+    );
   }
 }

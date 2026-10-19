@@ -432,6 +432,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       context: context,
       builder: (dialogContext) => _ClipRangeDialog(
         videoPath: ref.read(projectProvider).videoPath,
+        frameSize: _videoFrameSize(ref.read(projectProvider).video),
         startMs: _clipStart(candidate),
         endMs: _clipEnd(candidate),
         durationMs: _number(
@@ -466,6 +467,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       context: context,
       builder: (dialogContext) => _ClipRangeDialog(
         videoPath: state.videoPath,
+        frameSize: _videoFrameSize(state.video),
         startMs: startMs,
         endMs: endMs,
         durationMs: durationMs,
@@ -667,29 +669,6 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                   checkpoint: _decodeJobCheckpoint(job),
                 ),
               ),
-            if (state.busy && state.busyMessage != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: Spacing.md,
-                  vertical: Spacing.sm,
-                ),
-                child: Row(
-                  children: [
-                    const SizedBox(
-                      width: 12,
-                      height: 12,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const SizedBox(width: Spacing.sm),
-                    Expanded(
-                      child: Text(
-                        context.bheText(state.busyMessage!),
-                        style: Theme.of(context).textTheme.labelSmall,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
@@ -736,6 +715,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     totalCount: allCandidates.length,
                     filter: _candidateFilter,
                     busy: reviewLocked,
+                    busyMessage: state.busyMessage,
                     hydrating: state.hydrating,
                     hydrateError: state.hydrateError,
                     analyzing: analyzing,
@@ -3006,7 +2986,7 @@ class _CandidateEvidencePanel extends StatelessWidget {
                     tooltip: context.bheText(
                       '检测篮球撞框后向上或向外回弹；出现反弹通常降低进球可能性。',
                     ),
-                  ),
+                        ),
                   _EvidenceCell(
                     label: context.bheText('系统说明'),
                     value: context.bheText(_reviewReasonLabel(reason)),
@@ -3071,6 +3051,7 @@ class _CandidateEvidencePanel extends StatelessWidget {
 class _ClipRangeDialog extends StatefulWidget {
   const _ClipRangeDialog({
     required this.videoPath,
+    required this.frameSize,
     required this.startMs,
     required this.endMs,
     required this.durationMs,
@@ -3080,6 +3061,7 @@ class _ClipRangeDialog extends StatefulWidget {
   });
 
   final String? videoPath;
+  final Size frameSize;
   final int startMs;
   final int endMs;
   final int durationMs;
@@ -3316,190 +3298,197 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
         side: BorderSide(color: c.borderStrong),
       ),
       insetPadding: const EdgeInsets.all(Spacing.lg),
-      child: SizedBox(
-        width: 860,
-        child: Padding(
-          padding: const EdgeInsets.all(Spacing.md),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                widget.title,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: Spacing.xs),
-              Text(
-                widget.description,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: c.textSecondary),
-              ),
-              const SizedBox(height: Spacing.sm),
-              AspectRatio(
-                aspectRatio: 16 / 9,
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(color: Colors.black),
-                  child: _error != null
-                      ? Center(
-                          child: Text(
-                            context.bheText(_error!),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: c.error),
-                          ),
-                        )
-                      : controller == null || !_ready
-                      ? const Center(
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : GestureDetector(
-                          // 与主审核面板一致:点击视频切换播放/暂停。
-                          behavior: HitTestBehavior.translucent,
-                          onTap: _ready
-                              ? () => unawaited(_togglePlayback())
-                              : null,
-                          child: MouseRegion(
-                            cursor: SystemMouseCursors.click,
-                            child: Video(
-                              controller: controller,
-                              controls: NoVideoControls,
+      child: SingleChildScrollView(
+        child: SizedBox(
+          width: 860,
+          child: Padding(
+            padding: const EdgeInsets.all(Spacing.md),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.title,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: Spacing.xs),
+                Text(
+                  widget.description,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: c.textSecondary),
+                ),
+                const SizedBox(height: Spacing.sm),
+                AspectRatio(
+                  key: const Key('clip-range-video-frame'),
+                  aspectRatio: widget.frameSize.aspectRatio,
+                  child: DecoratedBox(
+                    decoration: const BoxDecoration(color: Colors.black),
+                    child: _error != null
+                        ? Center(
+                            child: Text(
+                              context.bheText(_error!),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: c.error),
+                            ),
+                          )
+                        : controller == null || !_ready
+                        ? const Center(
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : GestureDetector(
+                            // 与主审核面板一致:点击视频切换播放/暂停。
+                            behavior: HitTestBehavior.translucent,
+                            onTap: _ready
+                                ? () => unawaited(_togglePlayback())
+                                : null,
+                            child: MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              child: Video(
+                                controller: controller,
+                                fit: BoxFit.contain,
+                                controls: NoVideoControls,
+                              ),
                             ),
                           ),
-                        ),
+                  ),
                 ),
-              ),
-              const SizedBox(height: Spacing.xs),
-              Row(
-                children: [
-                  IconButton(
-                    tooltip: context.bheText('播放/暂停'),
-                    onPressed: _ready
-                        ? () => unawaited(_togglePlayback())
-                        : null,
-                    icon: StreamBuilder<bool>(
-                      stream: _player?.stream.playing,
-                      initialData: _player?.state.playing ?? false,
-                      builder: (context, snapshot) => Icon(
-                        snapshot.data == true
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
+                const SizedBox(height: Spacing.xs),
+                Row(
+                  children: [
+                    IconButton(
+                      tooltip: context.bheText('播放/暂停'),
+                      onPressed: _ready
+                          ? () => unawaited(_togglePlayback())
+                          : null,
+                      icon: StreamBuilder<bool>(
+                        stream: _player?.stream.playing,
+                        initialData: _player?.state.playing ?? false,
+                        builder: (context, snapshot) => Icon(
+                          snapshot.data == true
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                        ),
                       ),
                     ),
-                  ),
-                  Text(
-                    context.bheText('当前位置 ${_formatMs(_positionMs)}'),
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: c.textSecondary,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                    Text(
+                      context.bheText('当前位置 ${_formatMs(_positionMs)}'),
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: c.textSecondary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    context.bheText(
-                      '片段 ${_formatMs(start)} - ${_formatMs(end)} · '
-                      '${_formatClipDuration(end - start)}',
+                    const Spacer(),
+                    Text(
+                      context.bheText(
+                        '片段 ${_formatMs(start)} - ${_formatMs(end)} · '
+                        '${_formatClipDuration(end - start)}',
+                      ),
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: c.textSecondary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: c.textSecondary,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                  ],
+                ),
+                RangeSlider(
+                  min: contextStart.toDouble(),
+                  max: contextEnd.toDouble(),
+                  divisions: ((contextEnd - contextStart) ~/ 100).clamp(
+                    10,
+                    600,
+                  ),
+                  values: RangeValues(start.toDouble(), end.toDouble()),
+                  onChanged: _ready
+                      ? (value) {
+                          final nextStart = value.start.round();
+                          final nextEnd = value.end.round();
+                          _setRange(nextStart, nextEnd);
+                        }
+                      : null,
+                  onChangeStart: _ready ? _startRangeDrag : null,
+                  onChangeEnd: _ready ? _endRangeDrag : null,
+                ),
+                Row(
+                  children: [
+                    Text(
+                      _formatMs(contextStart),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(color: c.textTertiary),
                     ),
-                  ),
-                ],
-              ),
-              RangeSlider(
-                min: contextStart.toDouble(),
-                max: contextEnd.toDouble(),
-                divisions: ((contextEnd - contextStart) ~/ 100).clamp(10, 600),
-                values: RangeValues(start.toDouble(), end.toDouble()),
-                onChanged: _ready
-                    ? (value) {
-                        final nextStart = value.start.round();
-                        final nextEnd = value.end.round();
-                        _setRange(nextStart, nextEnd);
-                      }
-                    : null,
-                onChangeStart: _ready ? _startRangeDrag : null,
-                onChangeEnd: _ready ? _endRangeDrag : null,
-              ),
-              Row(
-                children: [
-                  Text(
-                    _formatMs(contextStart),
-                    style: Theme.of(
-                      context,
-                    ).textTheme.labelSmall?.copyWith(color: c.textTertiary),
-                  ),
-                  const Spacer(),
-                  Text(
-                    _formatMs(contextEnd),
-                    style: Theme.of(
-                      context,
-                    ).textTheme.labelSmall?.copyWith(color: c.textTertiary),
-                  ),
-                ],
-              ),
-              const SizedBox(height: Spacing.sm),
-              Row(
-                children: [
-                  Expanded(
-                    child: _ClipTimeField(
-                      label: context.bheText('开始'),
-                      controller: _startController,
-                      onSubmitted: () => _submitTimeField(isStart: true),
+                    const Spacer(),
+                    Text(
+                      _formatMs(contextEnd),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(color: c.textTertiary),
                     ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: Spacing.sm),
-                    child: Icon(Icons.arrow_forward, size: 16),
-                  ),
-                  Expanded(
-                    child: _ClipTimeField(
-                      label: context.bheText('结束'),
-                      controller: _endController,
-                      onSubmitted: () => _submitTimeField(isStart: false),
+                  ],
+                ),
+                const SizedBox(height: Spacing.sm),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _ClipTimeField(
+                        label: context.bheText('开始'),
+                        controller: _startController,
+                        onSubmitted: () => _submitTimeField(isStart: true),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: Spacing.md),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: _restoreDefault,
-                    style: TextButton.styleFrom(
-                      foregroundColor: c.textSecondary,
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: Spacing.sm),
+                      child: Icon(Icons.arrow_forward, size: 16),
                     ),
-                    child: Text(context.bheText('恢复默认')),
-                  ),
-                  const SizedBox(width: Spacing.xs),
-                  OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: c.textPrimary,
-                      side: BorderSide(color: c.borderStrong),
+                    Expanded(
+                      child: _ClipTimeField(
+                        label: context.bheText('结束'),
+                        controller: _endController,
+                        onSubmitted: () => _submitTimeField(isStart: false),
+                      ),
                     ),
-                    child: Text(context.bheText('取消')),
-                  ),
-                  const SizedBox(width: Spacing.sm),
-                  FilledButton(
-                    onPressed: end > start
-                        ? () => Navigator.pop(context, (
-                            startMs: start,
-                            endMs: end,
-                          ))
-                        : null,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: c.orange,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: c.surface3,
-                      disabledForegroundColor: c.textTertiary,
+                  ],
+                ),
+                const SizedBox(height: Spacing.md),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: _restoreDefault,
+                      style: TextButton.styleFrom(
+                        foregroundColor: c.textSecondary,
+                      ),
+                      child: Text(context.bheText('恢复默认')),
                     ),
-                    child: Text(widget.confirmLabel),
-                  ),
-                ],
-              ),
-            ],
+                    const SizedBox(width: Spacing.xs),
+                    OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: c.textPrimary,
+                        side: BorderSide(color: c.borderStrong),
+                      ),
+                      child: Text(context.bheText('取消')),
+                    ),
+                    const SizedBox(width: Spacing.sm),
+                    FilledButton(
+                      onPressed: end > start
+                          ? () => Navigator.pop(context, (
+                              startMs: start,
+                              endMs: end,
+                            ))
+                          : null,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: c.orange,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: c.surface3,
+                        disabledForegroundColor: c.textTertiary,
+                      ),
+                      child: Text(widget.confirmLabel),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -3619,6 +3608,7 @@ class _CandidatePanel extends StatelessWidget {
     required this.totalCount,
     required this.filter,
     required this.busy,
+    required this.busyMessage,
     required this.hydrating,
     required this.hydrateError,
     required this.analyzing,
@@ -3658,6 +3648,7 @@ class _CandidatePanel extends StatelessWidget {
   final int totalCount;
   final String filter;
   final bool busy;
+  final String? busyMessage;
   final bool hydrating;
   final String? hydrateError;
   final bool analyzing;
@@ -3730,36 +3721,53 @@ class _CandidatePanel extends StatelessWidget {
         children: [
           LayoutBuilder(
             builder: (context, constraints) {
-              final heading = Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    context.bheText('候选片段'),
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(width: Spacing.sm),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: c.surface3,
-                      borderRadius: BorderRadius.circular(CsRadius.full),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      child: Text(
-                        context.bheText('已选 $includedCount / $totalCount'),
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: c.textSecondary,
-                          fontWeight: FontWeight.w600,
+              final heading = SizedBox(
+                height: 28,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Semantics(
+                        liveRegion: busy && busyMessage != null,
+                        child: Text(
+                          context.bheText(busyMessage ?? '候选片段'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: Spacing.sm),
+                    if (busy && busyMessage != null) ...[
+                      const SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: Spacing.sm),
+                    ],
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: c.surface3,
+                        borderRadius: BorderRadius.circular(CsRadius.full),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        child: Text(
+                          context.bheText('保留 $includedCount / $totalCount'),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: c.textSecondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               );
               final actions = Wrap(
                 alignment: WrapAlignment.end,
@@ -3815,20 +3823,12 @@ class _CandidatePanel extends StatelessWidget {
                         child: Text(context.bheText('全部候选')),
                       ),
                       PopupMenuItem(
-                        value: 'pending',
-                        child: Text(context.bheText('待审核')),
-                      ),
-                      PopupMenuItem(
-                        value: 'confirmed',
-                        child: Text(context.bheText('已确认')),
+                        value: 'included',
+                        child: Text(context.bheText('保留')),
                       ),
                       PopupMenuItem(
                         value: 'excluded',
-                        child: Text(context.bheText('已排除')),
-                      ),
-                      PopupMenuItem(
-                        value: 'low',
-                        child: Text(context.bheText('低置信度')),
+                        child: Text(context.bheText('排除')),
                       ),
                     ],
                     child: Container(
@@ -3965,7 +3965,7 @@ class _CandidatePanel extends StatelessWidget {
                     onPressed: onExport,
                   ),
                 ),
-                if (onCreateManualCandidate != null) ...[
+                if (hasVideo) ...[
                   const SizedBox(width: Spacing.xs),
                   Tooltip(
                     message: context.bheText('从原视频当前时间补漏候选'),
@@ -3987,7 +3987,7 @@ class _CandidatePanel extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                   ),
                 ],
-                if (onReanalyze != null) ...[
+                if (hasVideo) ...[
                   const SizedBox(width: Spacing.xs),
                   IconButton(
                     tooltip: context.bheText('重新分析当前视频'),
@@ -4724,29 +4724,14 @@ bool _isExcluded(Map<String, dynamic> candidate) =>
     candidate['selection_status']?.toString() == 'excluded' ||
     candidate['review_status']?.toString() == 'excluded';
 
-bool _isConfirmed(Map<String, dynamic> candidate) =>
-    candidate['review_status']?.toString() == 'goal' ||
-    candidate['status']?.toString() == 'goal';
-
-bool _isPending(Map<String, dynamic> candidate) =>
-    !_isExcluded(candidate) && !_isConfirmed(candidate);
-
-bool _isLowConfidence(Map<String, dynamic> candidate) {
-  final confidence = candidate['confidence']?.toString().toLowerCase();
-  if (confidence == 'low' || confidence == 'review') return true;
-  final score = candidate['score'];
-  return score is num && score < 0.48;
-}
-
 List<Map<String, dynamic>> _filterCandidates(
   List<Map<String, dynamic>> candidates,
   String filter,
 ) {
   return switch (filter) {
-    'pending' => candidates.where(_isPending).toList(),
-    'confirmed' => candidates.where(_isConfirmed).toList(),
+    'included' =>
+      candidates.where((candidate) => !_isExcluded(candidate)).toList(),
     'excluded' => candidates.where(_isExcluded).toList(),
-    'low' => candidates.where(_isLowConfidence).toList(),
     _ => candidates,
   };
 }
@@ -4754,10 +4739,8 @@ List<Map<String, dynamic>> _filterCandidates(
 String _candidateFilterLabel(String filter) =>
     const <String, String>{
       'all': '全部',
-      'pending': '待审核',
-      'confirmed': '已确认',
-      'excluded': '已排除',
-      'low': '低置信度',
+      'included': '保留',
+      'excluded': '排除',
     }[filter] ??
     '全部';
 

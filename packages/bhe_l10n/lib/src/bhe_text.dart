@@ -103,7 +103,7 @@ String? _translateDynamic(String source) {
   final reviewCount = RegExp(r'^审核 (\d+)/(\d+)$').firstMatch(source);
   if (reviewCount != null)
     return 'Review ${reviewCount.group(1)}/${reviewCount.group(2)}';
-  final includedCount = RegExp(r'^已选 (\d+) / (\d+)$').firstMatch(source);
+  final includedCount = RegExp(r'^(?:已选|保留) (\d+) / (\d+)$').firstMatch(source);
   if (includedCount != null) {
     return 'Included ${includedCount.group(1)} / ${includedCount.group(2)}';
   }
@@ -509,6 +509,8 @@ const _englishText = <String, String>{
   '重试加载': 'Retry loading',
   '显示全部': 'Show all',
   '全部候选': 'All candidates',
+  '保留': 'Included',
+  '排除': 'Excluded',
   '待审核': 'Pending review',
   '已确认': 'Confirmed',
   '已排除': 'Excluded',

@@ -5,6 +5,8 @@ import 'package:bhe_l10n/bhe_l10n.dart';
 import '../theme/app_colors.dart';
 import '../theme/tokens.dart';
 
+// Persisted audit states are kept intact: pending and goal both mean included
+// in the selection UI; only excluded removes a clip from export.
 enum ReviewStatus { goal, pending, excluded }
 
 class CsStatusChip extends StatelessWidget {
@@ -15,20 +17,14 @@ class CsStatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
-    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
     final (label, color, icon) = switch (status) {
-      ReviewStatus.goal => (
-        l10n?.statusConfirmed ?? '已确认',
+      ReviewStatus.goal || ReviewStatus.pending => (
+        context.bheText('保留'),
         c.goal,
         LucideIcons.check,
       ),
-      ReviewStatus.pending => (
-        l10n?.statusPending ?? '待审核',
-        c.pending,
-        LucideIcons.hourglass,
-      ),
       ReviewStatus.excluded => (
-        l10n?.excludedCount ?? '已排除',
+        context.bheText('排除'),
         c.excluded,
         LucideIcons.ban,
       ),

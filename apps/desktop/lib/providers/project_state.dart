@@ -1574,7 +1574,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
             'goal' || 'included' => '已保留片段',
             'deferred' => '已暂缓审核',
             'second_review' => '已标记二次复核',
-            'pending' => '已恢复待审核',
+            'pending' => '已保留片段',
             _ => '已排除候选',
           }, NoticeSeverity.success);
         }

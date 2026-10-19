@@ -37,6 +37,9 @@ void main() {
     );
     expect(english.text('视频解码不完整'), 'Video decoding was incomplete');
     expect(english.text('正在添加球员…'), 'Adding player…');
+    expect(english.text('保留'), 'Included');
+    expect(english.text('排除'), 'Excluded');
+    expect(english.text('保留 380 / 389'), 'Included 380 / 389');
     expect(english.text('正在保存球员标签…'), 'Saving player tags…');
     expect(english.text('正在删除球员…'), 'Deleting player…');
     expect(
