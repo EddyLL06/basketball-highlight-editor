@@ -1231,6 +1231,114 @@ abstract class BheLocalizations {
   /// In zh, this message translates to:
   /// **'片段时间轴'**
   String get rangeTimelineLabel;
+
+  /// No description provided for @reviewStatusAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部'**
+  String get reviewStatusAll;
+
+  /// No description provided for @reviewStatusKept.
+  ///
+  /// In zh, this message translates to:
+  /// **'保留'**
+  String get reviewStatusKept;
+
+  /// No description provided for @reviewStatusExcluded.
+  ///
+  /// In zh, this message translates to:
+  /// **'排除'**
+  String get reviewStatusExcluded;
+
+  /// No description provided for @reviewStatusFilter.
+  ///
+  /// In zh, this message translates to:
+  /// **'按保留／排除筛选'**
+  String get reviewStatusFilter;
+
+  /// No description provided for @reviewClearFilters.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除筛选'**
+  String get reviewClearFilters;
+
+  /// No description provided for @reviewMoreActions.
+  ///
+  /// In zh, this message translates to:
+  /// **'更多操作'**
+  String get reviewMoreActions;
+
+  /// No description provided for @reviewAddMissed.
+  ///
+  /// In zh, this message translates to:
+  /// **'补漏片段'**
+  String get reviewAddMissed;
+
+  /// No description provided for @reviewKeepAction.
+  ///
+  /// In zh, this message translates to:
+  /// **'保留'**
+  String get reviewKeepAction;
+
+  /// No description provided for @reviewExcludeAction.
+  ///
+  /// In zh, this message translates to:
+  /// **'排除'**
+  String get reviewExcludeAction;
+
+  /// No description provided for @reviewWillExport.
+  ///
+  /// In zh, this message translates to:
+  /// **'会导出'**
+  String get reviewWillExport;
+
+  /// No description provided for @reviewWillNotExport.
+  ///
+  /// In zh, this message translates to:
+  /// **'不会导出'**
+  String get reviewWillNotExport;
+
+  /// No description provided for @reviewUndoLast.
+  ///
+  /// In zh, this message translates to:
+  /// **'撤销上一步'**
+  String get reviewUndoLast;
+
+  /// No description provided for @reviewAdjustRange.
+  ///
+  /// In zh, this message translates to:
+  /// **'调整范围'**
+  String get reviewAdjustRange;
+
+  /// No description provided for @reviewNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'备注'**
+  String get reviewNote;
+
+  /// No description provided for @reviewScores.
+  ///
+  /// In zh, this message translates to:
+  /// **'评分'**
+  String get reviewScores;
+
+  /// No description provided for @reviewSignals.
+  ///
+  /// In zh, this message translates to:
+  /// **'信号'**
+  String get reviewSignals;
+
+  /// No description provided for @reviewCurrentClip.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前片段'**
+  String get reviewCurrentClip;
+
+  /// No description provided for @reviewAnalysisDetails.
+  ///
+  /// In zh, this message translates to:
+  /// **'分析详情'**
+  String get reviewAnalysisDetails;
 }
 
 class _BheLocalizationsDelegate

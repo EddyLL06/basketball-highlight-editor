@@ -644,4 +644,58 @@ class BheLocalizationsEn extends BheLocalizations {
 
   @override
   String get rangeTimelineLabel => 'Clip timeline';
+
+  @override
+  String get reviewStatusAll => 'All';
+
+  @override
+  String get reviewStatusKept => 'Kept';
+
+  @override
+  String get reviewStatusExcluded => 'Excluded';
+
+  @override
+  String get reviewStatusFilter => 'Filter by kept / excluded';
+
+  @override
+  String get reviewClearFilters => 'Clear filters';
+
+  @override
+  String get reviewMoreActions => 'More actions';
+
+  @override
+  String get reviewAddMissed => 'Add missed clip';
+
+  @override
+  String get reviewKeepAction => 'Keep';
+
+  @override
+  String get reviewExcludeAction => 'Exclude';
+
+  @override
+  String get reviewWillExport => 'Will export';
+
+  @override
+  String get reviewWillNotExport => 'Won\'t export';
+
+  @override
+  String get reviewUndoLast => 'Undo last';
+
+  @override
+  String get reviewAdjustRange => 'Adjust range';
+
+  @override
+  String get reviewNote => 'Note';
+
+  @override
+  String get reviewScores => 'Scores';
+
+  @override
+  String get reviewSignals => 'Signals';
+
+  @override
+  String get reviewCurrentClip => 'Current clip';
+
+  @override
+  String get reviewAnalysisDetails => 'Analysis details';
 }

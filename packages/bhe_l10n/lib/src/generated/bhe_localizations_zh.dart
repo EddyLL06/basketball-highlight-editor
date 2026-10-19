@@ -622,4 +622,58 @@ class BheLocalizationsZh extends BheLocalizations {
 
   @override
   String get rangeTimelineLabel => '片段时间轴';
+
+  @override
+  String get reviewStatusAll => '全部';
+
+  @override
+  String get reviewStatusKept => '保留';
+
+  @override
+  String get reviewStatusExcluded => '排除';
+
+  @override
+  String get reviewStatusFilter => '按保留／排除筛选';
+
+  @override
+  String get reviewClearFilters => '清除筛选';
+
+  @override
+  String get reviewMoreActions => '更多操作';
+
+  @override
+  String get reviewAddMissed => '补漏片段';
+
+  @override
+  String get reviewKeepAction => '保留';
+
+  @override
+  String get reviewExcludeAction => '排除';
+
+  @override
+  String get reviewWillExport => '会导出';
+
+  @override
+  String get reviewWillNotExport => '不会导出';
+
+  @override
+  String get reviewUndoLast => '撤销上一步';
+
+  @override
+  String get reviewAdjustRange => '调整范围';
+
+  @override
+  String get reviewNote => '备注';
+
+  @override
+  String get reviewScores => '评分';
+
+  @override
+  String get reviewSignals => '信号';
+
+  @override
+  String get reviewCurrentClip => '当前片段';
+
+  @override
+  String get reviewAnalysisDetails => '分析详情';
 }

@@ -24,17 +24,13 @@ void main() {
       expect(find.text('显示 2 / 4'), findsOneWidget);
       expect(find.text('导出 3 个片段'), findsOneWidget);
 
-      await tester.tap(find.byTooltip('筛选候选'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('保留').last);
+      await tester.tap(find.byKey(const ValueKey('review-status-included')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('player-chip-c1')), findsOneWidget);
       expect(find.byKey(const ValueKey('player-chip-c3')), findsNothing);
       expect(find.text('显示 1 / 4'), findsOneWidget);
       expect(find.text('导出 3 个片段'), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('review-player-filter')));
-      await tester.pumpAndSettle();
       for (final entry in {
         'all': '3',
         'tagged': '2',
@@ -44,14 +40,17 @@ void main() {
       }.entries) {
         expect(
           find.descendant(
-            of: find.byKey(ValueKey('review-tag-option-${entry.key}')),
+            of: await _tagOption(tester, entry.key),
             matching: find.text(entry.value),
           ),
           findsOneWidget,
         );
+        if (find.byType(PopupMenuItem<String>).evaluate().isNotEmpty) {
+          await tester.tapAt(Offset.zero);
+          await tester.pumpAndSettle();
+        }
       }
-      await tester.tap(find.byKey(const ValueKey('review-tag-option-tagged')));
-      await tester.pumpAndSettle();
+      await _chooseTagFilter(tester, 'tagged');
       expect(find.text('#1 00:03'), findsOneWidget);
       expect(find.text('#2 00:12'), findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
@@ -75,7 +74,7 @@ void main() {
       await tester.tap(find.text('显示全部'));
       await tester.pumpAndSettle();
       expect(find.text('全部标签'), findsOneWidget);
-      expect(find.text('显示 4 / 4'), findsOneWidget);
+      expect(find.byKey(const Key('review-filter-banner')), findsNothing);
       expect(find.text('导出 3 个片段'), findsOneWidget);
     },
   );
@@ -114,17 +113,41 @@ void main() {
   ) async {
     final notifier = _TagReviewNotifier(_tagReviewState());
     await _pumpReview(tester, notifier.initialState, notifier: notifier);
-    await tester.tap(find.byTooltip('筛选候选'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('排除').last);
+    await tester.tap(find.byKey(const ValueKey('review-status-excluded')));
     await tester.pumpAndSettle();
     await _chooseTagFilter(tester, 'player:p2');
     expect(find.text('没有匹配的候选'), findsOneWidget);
     await tester.tap(find.text('显示全部'));
     await tester.pumpAndSettle();
-    expect(find.text('显示 4 / 4'), findsOneWidget);
+    expect(find.byKey(const Key('review-filter-banner')), findsNothing);
     expect(find.text('全部标签'), findsOneWidget);
     expect(find.text('全部'), findsOneWidget);
+  });
+
+  testWidgets('extra players collapse into +N and stay visible once picked', (
+    tester,
+  ) async {
+    final base = _tagReviewState();
+    final notifier = _TagReviewNotifier(
+      base.copyWith(
+        players: [
+          ...base.players,
+          for (var i = 4; i <= 12; i++) {'id': 'p$i', 'name': '球员$i'},
+        ],
+      ),
+    );
+    await _pumpReview(tester, notifier.initialState, notifier: notifier);
+    expect(find.byKey(const Key('review-tag-more')), findsOneWidget);
+    expect(find.byKey(const ValueKey('review-tag-option-player:p12')), findsNothing);
+
+    await _chooseTagFilter(tester, 'player:p12');
+    expect(find.byType(PopupMenuItem<String>), findsNothing);
+    expect(
+      find.byKey(const ValueKey('review-tag-option-player:p12')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('review-tag-more')), findsOneWidget);
+    expect(find.text('没有匹配的候选'), findsOneWidget);
   });
 
   testWidgets('number keys tag the selected clip in player menu order', (
@@ -199,17 +222,15 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('全部标签'), findsOneWidget);
-      expect(find.text('显示 4 / 4'), findsOneWidget);
+      expect(find.byKey(const Key('review-filter-banner')), findsNothing);
       await _chooseTagFilter(tester, 'player:p1');
-      await tester.tap(find.byTooltip('筛选候选'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('保留').last);
+      await tester.tap(find.byKey(const ValueKey('review-status-included')));
       await tester.pumpAndSettle();
       notifier.replaceState(_tagReviewState(projectId: 'v2'));
       await tester.pumpAndSettle();
       expect(find.text('全部标签'), findsOneWidget);
       expect(find.text('全部'), findsOneWidget);
-      expect(find.text('显示 4 / 4'), findsOneWidget);
+      expect(find.byKey(const Key('review-filter-banner')), findsNothing);
     },
   );
 
@@ -308,7 +329,7 @@ void main() {
       await _pumpReview(tester, notifier.initialState, notifier: notifier);
       final panel = find.byKey(const Key('candidate-panel-inset'));
       final scroll = tester.state<ScrollableState>(
-        find.descendant(of: panel, matching: find.byType(Scrollable)).first,
+        find.descendant(of: panel, matching: find.byType(Scrollable)).last,
       );
       await tester.scrollUntilVisible(
         find.byKey(const ValueKey('player-chip-c388')),
@@ -316,7 +337,7 @@ void main() {
         maxScrolls: 100,
         scrollable: find
             .descendant(of: panel, matching: find.byType(Scrollable))
-            .first,
+            .last,
       );
       await tester.tap(find.text('#389 19:24'));
       await tester.pumpAndSettle();
@@ -331,8 +352,8 @@ void main() {
       await tester.tap(find.text('小夏'));
       await tester.pump();
       expect(find.text('正在保存球员标签…'), findsOneWidget);
-      expect(tester.widget<IconButton>(find.byKey(const Key('create-manual-candidate'))).onPressed, isNull);
-      expect(find.byTooltip('重新分析当前视频'), findsOneWidget);
+      expect(tester.widget<ButtonStyleButton>(find.byKey(const Key('create-manual-candidate'))).onPressed, isNull);
+      expect(find.byKey(const Key('review-more-actions')), findsOneWidget);
       expect(tester.getRect(panel), bounds);
       expect(scroll.position.pixels, offset);
       expect(scroll.position.viewportDimension, viewport);
@@ -465,7 +486,7 @@ void main() {
 
     expect(find.text('快速分析 · 可能漏检 · 0 个候选 · 用时 00:08'), findsOneWidget);
     expect(
-      find.text('分析详情：代理 1.3 秒 · 粗扫 2.3 秒 · 精筛 4.7 秒 · 缓存命中 2'),
+      find.byTooltip('分析详情：代理 1.3 秒 · 粗扫 2.3 秒 · 精筛 4.7 秒 · 缓存命中 2'),
       findsOneWidget,
     );
   });
@@ -584,7 +605,7 @@ void main() {
       size: const Size(612, 927),
     );
 
-    expect(find.byType(SingleChildScrollView), findsOneWidget);
+    expect(find.byType(SingleChildScrollView), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
@@ -667,9 +688,9 @@ void main() {
     expect(find.text('候选 00:12'), findsOneWidget);
     expect(find.text('按时间'), findsNothing);
     expect(find.text('默认保留'), findsNothing);
-    expect(find.text('保留'), findsNothing);
     expect(find.text('已排除'), findsNothing);
-    expect(find.text('时长 9 秒'), findsOneWidget);
+    expect(find.text('会导出'), findsOneWidget);
+    expect(find.text('9 秒'), findsOneWidget);
     expect(find.byTooltip('保留片段 (C / Enter)'), findsOneWidget);
     expect(find.byTooltip('排除片段 (X / Backspace)'), findsOneWidget);
   });
@@ -695,7 +716,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byTooltip('设置球员标签'));
+    await tester.tap(find.byKey(const ValueKey('player-chip-candidate-1')));
     await tester.pumpAndSettle();
 
     expect(find.byType(AlertDialog), findsNothing);
@@ -1009,19 +1030,15 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byTooltip('筛选候选'));
-    await tester.pumpAndSettle();
     expect(find.text('待审核'), findsNothing);
     expect(find.text('已确认'), findsNothing);
-    await tester.tap(find.text('排除').last);
+    await tester.tap(find.byKey(const ValueKey('review-status-excluded')));
     await tester.pump();
 
     expect(find.text('#1 00:09'), findsOneWidget);
     expect(find.text('#1 00:03'), findsNothing);
     expect(find.text('#1 00:15'), findsNothing);
-    await tester.tap(find.byTooltip('筛选候选'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('保留').last);
+    await tester.tap(find.byKey(const ValueKey('review-status-included')));
     await tester.pumpAndSettle();
     expect(find.text('#1 00:03'), findsOneWidget);
     expect(find.text('#2 00:15'), findsOneWidget);
@@ -1053,7 +1070,7 @@ void main() {
 
     expect(find.byTooltip('调整片段范围'), findsOneWidget);
     expect(find.byTooltip('编辑备注'), findsOneWidget);
-    expect(find.byTooltip('补漏'), findsOneWidget);
+    expect(find.text('补漏片段'), findsOneWidget);
     expect(find.byTooltip('从原视频当前时间补漏候选'), findsOneWidget);
     expect(find.byTooltip('撤销上一次审核 (Cmd/Ctrl+Z)'), findsOneWidget);
     expect(find.byTooltip('候选操作'), findsNothing);
@@ -1209,10 +1226,22 @@ Future<void> _pumpReview(
   await tester.pump();
 }
 
-Future<void> _chooseTagFilter(WidgetTester tester, String value) async {
-  await tester.tap(find.byKey(const Key('review-player-filter')));
+Future<Finder> _tagOption(WidgetTester tester, String value) async {
+  final option = find.byKey(ValueKey('review-tag-option-$value'));
+  if (option.evaluate().isEmpty) {
+    final more = find.byKey(const Key('review-tag-more'));
+    await tester.ensureVisible(more);
+    await tester.pumpAndSettle();
+    await tester.tap(more);
+    await tester.pumpAndSettle();
+  }
+  await tester.ensureVisible(option);
   await tester.pumpAndSettle();
-  await tester.tap(find.byKey(ValueKey('review-tag-option-$value')));
+  return option;
+}
+
+Future<void> _chooseTagFilter(WidgetTester tester, String value) async {
+  await tester.tap(await _tagOption(tester, value));
   await tester.pumpAndSettle();
 }
 

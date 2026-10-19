@@ -779,6 +779,36 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     onUndo: () {
                       if (!reviewLocked) unawaited(notifier.undoReview());
                     },
+                    excluded: selected != null && _isExcluded(selected),
+                    reviewLocked: reviewLocked,
+                    players: state.players,
+                    playerColor: selected == null
+                        ? AppColors.of(context).textTertiary
+                        : _playerColor(
+                            selected['player_id']?.toString(),
+                            _playerIndex(selected, state.players),
+                          ),
+                    onInclude: () {
+                      final id = selectedId;
+                      if (id != null) unawaited(_setCandidateStatus(id, 'included'));
+                    },
+                    onExclude: () {
+                      final id = selectedId;
+                      if (id != null) unawaited(_setCandidateStatus(id, 'excluded'));
+                    },
+                    onSetPlayer: (playerId) {
+                      if (selected != null) {
+                        unawaited(
+                          _setPlayerForCandidate(selected, notifier, playerId),
+                        );
+                      }
+                    },
+                    onCreatePlayer: () {
+                      if (selected != null) {
+                        unawaited(_createPlayerForCandidate(selected, notifier));
+                      }
+                    },
+                    onDeletePlayer: _deletePlayer,
                   );
                   final queueWidth = (constraints.maxWidth * 0.30)
                       .clamp(360.0, 460.0)
@@ -868,9 +898,13 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     child: Column(
                       children: [
                         SizedBox(
-                          height: (constraints.maxWidth * 0.5625)
-                              .clamp(240.0, 520.0)
-                              .toDouble(),
+                          // The transport and the current-clip card stack
+                          // under the frame on narrow screens.
+                          height:
+                              (constraints.maxWidth * 0.5625)
+                                  .clamp(240.0, 520.0)
+                                  .toDouble() +
+                              420,
                           child: video,
                         ),
                         const SizedBox(height: Spacing.sm),
@@ -938,7 +972,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     final position = _candidateScrollController.position;
     unawaited(
       _candidateScrollController.animateTo(
-        (index * 92.0).clamp(0.0, position.maxScrollExtent),
+        (index * 80.0).clamp(0.0, position.maxScrollExtent),
         duration: DurationD.fast,
         curve: Curves.easeOut,
       ),
@@ -1202,42 +1236,41 @@ class _CompletedLine extends StatelessWidget {
     final detail = _analysisDetailLabel(checkpoint, l10n);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 9),
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: c.surface2,
-        border: Border(bottom: BorderSide(color: c.borderStrong)),
+        border: Border(bottom: BorderSide(color: c.border)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Icon(Icons.check_circle_outline, size: 14, color: c.goal),
-              const SizedBox(width: Spacing.xs),
-              Expanded(
-                child: Text(
-                  context.bheText(
-                    '$modeLabel · $candidateCount 个候选${duration.isEmpty ? '' : ' · 用时 $duration'}',
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelSmall?.copyWith(color: c.textSecondary),
-                ),
+          Icon(Icons.check_circle_outline, size: 14, color: c.goal),
+          const SizedBox(width: Spacing.xs),
+          Flexible(
+            child: Text(
+              context.bheText(
+                '$modeLabel · $candidateCount 个候选${duration.isEmpty ? '' : ' · 用时 $duration'}',
               ),
-            ],
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: c.textSecondary),
+            ),
           ),
           if (detail.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 22, top: 2),
-              child: Text(
-                detail,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.labelSmall?.copyWith(color: c.textTertiary),
+            Tooltip(
+              message: detail,
+              child: Semantics(
+                label: l10n?.reviewAnalysisDetails ?? '分析详情',
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(
+                    Icons.info_outline,
+                    size: 14,
+                    color: c.textTertiary,
+                  ),
+                ),
               ),
             ),
         ],
@@ -1354,6 +1387,15 @@ class _VideoPane extends ConsumerStatefulWidget {
     required this.onEditNote,
     required this.onCreateManualCandidate,
     required this.onUndo,
+    required this.excluded,
+    required this.reviewLocked,
+    required this.players,
+    required this.playerColor,
+    required this.onInclude,
+    required this.onExclude,
+    required this.onSetPlayer,
+    required this.onCreatePlayer,
+    required this.onDeletePlayer,
   });
 
   final _VideoPaneController controller;
@@ -1373,6 +1415,15 @@ class _VideoPane extends ConsumerStatefulWidget {
   final VoidCallback? onEditNote;
   final VoidCallback? onCreateManualCandidate;
   final VoidCallback onUndo;
+  final bool excluded;
+  final bool reviewLocked;
+  final List<Map<String, dynamic>> players;
+  final Color playerColor;
+  final VoidCallback onInclude;
+  final VoidCallback onExclude;
+  final ValueChanged<String?> onSetPlayer;
+  final VoidCallback onCreatePlayer;
+  final Future<void> Function(String, String) onDeletePlayer;
 
   @override
   ConsumerState<_VideoPane> createState() => _VideoPaneState();
@@ -1992,23 +2043,11 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
                           onPressed: widget.onToggleVideoSource!,
                         ),
                       ),
-                    if (widget.candidate != null)
-                      Positioned(
+                    if (widget.candidate != null && _showAnnotationHint)
+                      const Positioned(
                         top: Spacing.sm,
                         right: Spacing.sm,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            _AnnotationToggle(
-                              enabled: _showAnnotations,
-                              onChanged: _setAnnotations,
-                            ),
-                            if (_showAnnotationHint) ...[
-                              const SizedBox(height: Spacing.xs),
-                              const _AnnotationHint(),
-                            ],
-                          ],
-                        ),
+                        child: _AnnotationHint(),
                       ),
                   ],
                 ),
@@ -2041,10 +2080,23 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
             onSetPlaybackRate: setPlaybackRate,
             loopEnabled: _loopCandidate,
             onToggleLoop: toggleCandidateLoop,
+            annotationsEnabled: _showAnnotations,
+            onToggleAnnotations: widget.candidate == null
+                ? null
+                : _setAnnotations,
           ),
           if (widget.candidate != null)
-            _CandidateEvidencePanel(
+            _CandidateInspector(
               candidate: widget.candidate!,
+              excluded: widget.excluded,
+              busy: widget.reviewLocked,
+              players: widget.players,
+              playerColor: widget.playerColor,
+              onInclude: widget.onInclude,
+              onExclude: widget.onExclude,
+              onSetPlayer: widget.onSetPlayer,
+              onCreatePlayer: widget.onCreatePlayer,
+              onDeletePlayer: widget.onDeletePlayer,
               onEditRange: widget.onEditRange,
               onEditNote: widget.onEditNote,
               onUndo: widget.onUndo,
@@ -2632,6 +2684,8 @@ class _VideoControls extends StatefulWidget {
     required this.onSetPlaybackRate,
     required this.loopEnabled,
     required this.onToggleLoop,
+    required this.annotationsEnabled,
+    required this.onToggleAnnotations,
   });
 
   final Player? player;
@@ -2650,6 +2704,8 @@ class _VideoControls extends StatefulWidget {
   final Future<void> Function(double) onSetPlaybackRate;
   final bool loopEnabled;
   final VoidCallback onToggleLoop;
+  final bool annotationsEnabled;
+  final ValueChanged<bool>? onToggleAnnotations;
 
   @override
   State<_VideoControls> createState() => _VideoControlsState();
@@ -2670,15 +2726,27 @@ class _VideoControlsState extends State<_VideoControls> {
     final theme = Theme.of(context);
     final player = widget.player;
     if (player == null) {
-      return const Padding(
-        key: Key('review-video-controls-inset'),
-        padding: EdgeInsets.fromLTRB(
+      return Padding(
+        key: const Key('review-video-controls-inset'),
+        padding: const EdgeInsets.fromLTRB(
           Spacing.md,
           Spacing.xs,
           Spacing.md,
           Spacing.xs,
         ),
-        child: SizedBox(height: 32),
+        child: SizedBox(
+          height: 40,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (widget.onToggleAnnotations != null)
+                _AnnotationToggle(
+                  enabled: widget.annotationsEnabled,
+                  onChanged: widget.onToggleAnnotations!,
+                ),
+            ],
+          ),
+        ),
       );
     }
     return StreamBuilder<Duration>(
@@ -2721,6 +2789,208 @@ class _VideoControlsState extends State<_VideoControls> {
                     await widget.onSeek(Duration(milliseconds: next.round()));
                   },
           );
+          final event = widget.eventTimeMs;
+          final eventRatio =
+              event == null || event < rangeStart || event > rangeEnd
+              ? null
+              : (event - rangeStart) / (rangeEnd - rangeStart);
+          const compact = BoxConstraints.tightFor(width: 34, height: 34);
+          final labelStyle = theme.textTheme.labelSmall?.copyWith(
+            color: c.textSecondary,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          );
+          final playback = <Widget>[
+            IconButton(
+              tooltip: '${context.bheText('上一个候选')} (↑)',
+              onPressed: widget.enabled && widget.hasPrevious
+                  ? widget.onPrevious
+                  : null,
+              icon: const Icon(Icons.skip_previous, size: 19),
+              constraints: compact,
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+            ),
+            StreamBuilder<bool>(
+              stream: player.stream.playing,
+              initialData: false,
+              builder: (context, snapshot) => IconButton(
+                tooltip: snapshot.data == true
+                    ? '${context.bheText('暂停')} (Space)'
+                    : '${context.bheText('播放')} (Space)',
+                onPressed: !widget.enabled
+                    ? null
+                    : () => unawaited(widget.onTogglePlayback()),
+                style: IconButton.styleFrom(
+                  backgroundColor: c.textPrimary,
+                  foregroundColor: c.background,
+                  disabledBackgroundColor: c.surface3,
+                ),
+                icon: Icon(
+                  snapshot.data == true ? Icons.pause : Icons.play_arrow,
+                  size: 20,
+                ),
+                constraints: const BoxConstraints.tightFor(
+                  width: 36,
+                  height: 36,
+                ),
+                padding: EdgeInsets.zero,
+              ),
+            ),
+            IconButton(
+              tooltip: '${context.bheText('下一个候选')} (↓)',
+              onPressed: widget.enabled && widget.hasNext
+                  ? widget.onNext
+                  : null,
+              icon: const Icon(Icons.skip_next, size: 19),
+              constraints: compact,
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+            ),
+          ];
+          final time = Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.isOriginalVideo) ...[
+                Text(context.bheText('原视频'), style: labelStyle),
+                const SizedBox(width: Spacing.sm),
+              ],
+              Text(
+                '${_formatDuration(Duration(milliseconds: positionMs - rangeStart))} / '
+                '${_formatDuration(Duration(milliseconds: rangeEnd - rangeStart))}',
+                style: labelStyle?.copyWith(color: c.textPrimary),
+              ),
+            ],
+          );
+          final track = SizedBox(
+            height: 22,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // The slider insets its track by the thumb radius.
+                const inset = 5.0;
+                return Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned.fill(
+                      child: SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: 3,
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: inset,
+                          ),
+                          overlayShape: SliderComponentShape.noOverlay,
+                        ),
+                        child: Platform.isWindows
+                            ? ExcludeSemantics(child: slider)
+                            : slider,
+                      ),
+                    ),
+                    if (eventRatio != null)
+                      Positioned(
+                        left:
+                            inset +
+                            eventRatio * (constraints.maxWidth - inset * 2) -
+                            1,
+                        top: 0,
+                        child: IgnorePointer(
+                          child: Container(
+                            width: 2,
+                            height: 7,
+                            color: c.warning,
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          );
+          final extras = <Widget>[
+            if (event != null) ...[
+              IconButton(
+                tooltip: '${context.bheText('重播当前片段')} (R)',
+                onPressed: widget.enabled
+                    ? () => unawaited(widget.onReplayCandidate())
+                    : null,
+                icon: const Icon(Icons.replay, size: 18),
+                constraints: compact,
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+              ),
+              IconButton(
+                tooltip: widget.loopEnabled
+                    ? context.bheText('关闭循环播放 (L)')
+                    : context.bheText('循环当前片段 (L)'),
+                onPressed: widget.enabled ? widget.onToggleLoop : null,
+                style: IconButton.styleFrom(
+                  backgroundColor: widget.loopEnabled
+                      ? c.orange.withValues(alpha: 0.14)
+                      : null,
+                ),
+                icon: Icon(
+                  Icons.repeat,
+                  size: 18,
+                  color: widget.loopEnabled ? c.orange : null,
+                ),
+                constraints: compact,
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+            if (widget.onToggleAnnotations != null) ...[
+              const SizedBox(width: Spacing.xs),
+              _AnnotationToggle(
+                enabled: widget.annotationsEnabled,
+                onChanged: widget.onToggleAnnotations!,
+              ),
+            ],
+            StreamBuilder<double>(
+              stream: player.stream.rate,
+              initialData: player.state.rate,
+              builder: (context, snapshot) {
+                final rate = snapshot.data ?? 1.0;
+                return PopupMenuButton<double>(
+                  tooltip:
+                      '${context.bheText('播放速度')}：${_playbackRateLabel(rate)}',
+                  initialValue: rate,
+                  enabled: widget.enabled,
+                  onSelected: (next) =>
+                      unawaited(widget.onSetPlaybackRate(next)),
+                  itemBuilder: (context) => [
+                    for (final option in const [1.0, 1.25, 1.5, 2.0])
+                      PopupMenuItem<double>(
+                        value: option,
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 18,
+                              child: (rate - option).abs() < 0.01
+                                  ? const Icon(Icons.check, size: 16)
+                                  : null,
+                            ),
+                            Text(_playbackRateLabel(option)),
+                          ],
+                        ),
+                      ),
+                  ],
+                  padding: EdgeInsets.zero,
+                  child: SizedBox(
+                    width: 44,
+                    height: 34,
+                    child: Center(
+                      child: Text(
+                        _playbackRateLabel(rate),
+                        style: labelStyle?.copyWith(
+                          color: widget.enabled
+                              ? c.textSecondary
+                              : c.textTertiary,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ];
           return Padding(
             key: const Key('review-video-controls-inset'),
             padding: const EdgeInsets.fromLTRB(
@@ -2729,189 +2999,41 @@ class _VideoControlsState extends State<_VideoControls> {
               Spacing.md,
               Spacing.xs,
             ),
-            child: Column(
-              children: [
-                SizedBox(
-                  height: 22,
-                  child: SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      trackHeight: 2,
-                      thumbShape: const RoundSliderThumbShape(
-                        enabledThumbRadius: 4,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth < 600) {
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      track,
+                      Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: Spacing.sm,
+                        children: [
+                          Row(mainAxisSize: MainAxisSize.min, children: playback),
+                          time,
+                          Row(mainAxisSize: MainAxisSize.min, children: extras),
+                        ],
                       ),
-                      overlayShape: SliderComponentShape.noOverlay,
-                    ),
-                    child: Platform.isWindows
-                        ? ExcludeSemantics(child: slider)
-                        : slider,
+                    ],
+                  );
+                }
+                return SizedBox(
+                  height: 40,
+                  child: Row(
+                    children: [
+                      ...playback,
+                      const SizedBox(width: Spacing.sm),
+                      time,
+                      const SizedBox(width: Spacing.md),
+                      Expanded(child: track),
+                      const SizedBox(width: Spacing.sm),
+                      ...extras,
+                    ],
                   ),
-                ),
-                Row(
-                  children: [
-                    if (widget.isOriginalVideo) ...[
-                      Text(
-                        context.bheText('原视频'),
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: c.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(width: Spacing.sm),
-                    ] else if (widget.eventTimeMs != null) ...[
-                      Text(
-                        context.bheText(
-                          '候选 ${_formatMs(widget.eventTimeMs!)}',
-                        ),
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: c.textSecondary,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                      const SizedBox(width: Spacing.sm),
-                    ],
-                    Text(
-                      '${_formatDuration(Duration(milliseconds: positionMs - rangeStart))} / '
-                      '${_formatDuration(Duration(milliseconds: rangeEnd - rangeStart))}',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: c.textSecondary,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                    const Spacer(),
-                    StreamBuilder<double>(
-                      stream: player.stream.rate,
-                      initialData: player.state.rate,
-                      builder: (context, snapshot) {
-                        final rate = snapshot.data ?? 1.0;
-                        return PopupMenuButton<double>(
-                          tooltip:
-                              '${context.bheText('播放速度')}：${_playbackRateLabel(rate)}',
-                          initialValue: rate,
-                          enabled: widget.enabled,
-                          onSelected: (next) =>
-                              unawaited(widget.onSetPlaybackRate(next)),
-                          itemBuilder: (context) => [
-                            for (final option in const [1.0, 1.25, 1.5, 2.0])
-                              PopupMenuItem<double>(
-                                value: option,
-                                child: Row(
-                                  children: [
-                                    SizedBox(
-                                      width: 18,
-                                      child: (rate - option).abs() < 0.01
-                                          ? const Icon(Icons.check, size: 16)
-                                          : null,
-                                    ),
-                                    Text(_playbackRateLabel(option)),
-                                  ],
-                                ),
-                              ),
-                          ],
-                          padding: EdgeInsets.zero,
-                          child: SizedBox(
-                            width: 44,
-                            height: 34,
-                            child: Center(
-                              child: Text(
-                                _playbackRateLabel(rate),
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: widget.enabled
-                                      ? c.textSecondary
-                                      : c.textTertiary,
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                    IconButton(
-                      tooltip: '${context.bheText('上一个候选')} (↑)',
-                      onPressed: widget.enabled && widget.hasPrevious
-                          ? widget.onPrevious
-                          : null,
-                      icon: const Icon(Icons.skip_previous, size: 19),
-                      constraints: const BoxConstraints.tightFor(
-                        width: 34,
-                        height: 34,
-                      ),
-                      padding: EdgeInsets.zero,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    StreamBuilder<bool>(
-                      stream: player.stream.playing,
-                      initialData: false,
-                      builder: (context, snapshot) => IconButton(
-                        tooltip: snapshot.data == true
-                            ? '${context.bheText('暂停')} (Space)'
-                            : '${context.bheText('播放')} (Space)',
-                        onPressed: !widget.enabled
-                            ? null
-                            : () => unawaited(widget.onTogglePlayback()),
-                        icon: Icon(
-                          snapshot.data == true
-                              ? Icons.pause
-                              : Icons.play_arrow,
-                          size: 22,
-                        ),
-                        constraints: const BoxConstraints.tightFor(
-                          width: 36,
-                          height: 36,
-                        ),
-                        padding: EdgeInsets.zero,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: '${context.bheText('下一个候选')} (↓)',
-                      onPressed: widget.enabled && widget.hasNext
-                          ? widget.onNext
-                          : null,
-                      icon: const Icon(Icons.skip_next, size: 19),
-                      constraints: const BoxConstraints.tightFor(
-                        width: 34,
-                        height: 34,
-                      ),
-                      padding: EdgeInsets.zero,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    if (widget.eventTimeMs != null) ...[
-                      IconButton(
-                        tooltip: '${context.bheText('重播当前片段')} (R)',
-                        onPressed: widget.enabled
-                            ? () => unawaited(widget.onReplayCandidate())
-                            : null,
-                        icon: const Icon(Icons.replay, size: 18),
-                        constraints: const BoxConstraints.tightFor(
-                          width: 34,
-                          height: 34,
-                        ),
-                        padding: EdgeInsets.zero,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      IconButton(
-                        tooltip: widget.loopEnabled
-                            ? context.bheText('关闭循环播放 (L)')
-                            : context.bheText('循环当前片段 (L)'),
-                        onPressed: widget.enabled ? widget.onToggleLoop : null,
-                        icon: Icon(
-                          Icons.repeat,
-                          size: 18,
-                          color: widget.loopEnabled ? c.orange : null,
-                        ),
-                        constraints: const BoxConstraints.tightFor(
-                          width: 34,
-                          height: 34,
-                        ),
-                        padding: EdgeInsets.zero,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ],
-                  ],
-                ),
-              ],
+                );
+              },
             ),
           );
         },
@@ -2920,15 +3042,33 @@ class _VideoControlsState extends State<_VideoControls> {
   }
 }
 
-class _CandidateEvidencePanel extends StatelessWidget {
-  const _CandidateEvidencePanel({
+class _CandidateInspector extends StatelessWidget {
+  const _CandidateInspector({
     required this.candidate,
+    required this.excluded,
+    required this.busy,
+    required this.players,
+    required this.playerColor,
+    required this.onInclude,
+    required this.onExclude,
+    required this.onSetPlayer,
+    required this.onCreatePlayer,
+    required this.onDeletePlayer,
     required this.onEditRange,
     required this.onEditNote,
     required this.onUndo,
   });
 
   final Map<String, dynamic> candidate;
+  final bool excluded;
+  final bool busy;
+  final List<Map<String, dynamic>> players;
+  final Color playerColor;
+  final VoidCallback onInclude;
+  final VoidCallback onExclude;
+  final ValueChanged<String?> onSetPlayer;
+  final VoidCallback onCreatePlayer;
+  final Future<void> Function(String, String) onDeletePlayer;
   final VoidCallback? onEditRange;
   final VoidCallback? onEditNote;
   final VoidCallback onUndo;
@@ -2936,6 +3076,8 @@ class _CandidateEvidencePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
     final evidence = _candidateEvidence(candidate);
     final trajectory = _candidateEvidenceValue(candidate, evidence, const [
       ['verification', 'trajectory_cross'],
@@ -2988,172 +3130,530 @@ class _CandidateEvidencePanel extends StatelessWidget {
       ['review_reason_suggestion', 'primary'],
       ['review_reason'],
     ]);
-    final clip =
-        context.bheText(
-          '片段 ${_formatMs(_clipStart(candidate))} - ${_formatMs(_clipEnd(candidate))} · '
-          '时长 ${_formatClipDuration(_clipEnd(candidate) - _clipStart(candidate))}',
-        );
+    final clip = context.bheText(
+      '片段 ${_formatMs(_clipStart(candidate))} - ${_formatMs(_clipEnd(candidate))} · '
+      '时长 ${_formatClipDuration(_clipEnd(candidate) - _clipStart(candidate))}',
+    );
+    final note = candidate['note']?.toString().trim() ?? '';
+    final statusColor = excluded ? c.error : c.goal;
+    final mono = theme.textTheme.labelSmall?.copyWith(
+      color: c.textSecondary,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
 
-    return Container(
-      width: double.infinity,
-      height: 46,
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border(top: BorderSide(color: c.border)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(
-                horizontal: Spacing.sm,
-                vertical: 1,
-              ),
-              child: Row(
-                children: [
-                  _EvidenceCell(
-                    label: context.bheText('候选 ${_formatMs(_candidateTime(candidate))}'),
-                    value: clip,
-                    width: 190,
-                    color: c.textPrimary,
-                  ),
-                  _EvidenceCell(
-                    label: context.bheText('备注'),
-                    value:
-                        candidate['note']?.toString().trim().isNotEmpty == true
-                        ? candidate['note']!.toString()
-                        : '—',
-                    width: 112,
-                    color: c.textSecondary,
-                  ),
-                  _EvidenceCell(
-                    label: context.bheText('候选置信度'),
-                    value: context.bheText(
-                      _candidateConfidence(candidate, evidence) ?? '—',
-                    ),
-                    width: 72,
-                    color: c.textPrimary,
-                    tooltip: context.bheText(
-                      '综合轨迹穿框、篮网运动和反弹等信号得出，只用于排序和辅助审核。',
-                    ),
-                  ),
-                  _EvidenceCell(
-                    label: context.bheText('轨迹评分'),
-                    value: _formatScore(trajectoryScore),
-                    width: 72,
-                    color: c.textSecondary,
-                  ),
-                  _EvidenceCell(
-                    label: context.bheText('预测评分'),
-                    value: context.bheText(_formatPredictionScore(
-                      prediction,
-                      isCoarse: isCoarse,
-                      isManual: isManual,
-                    )),
-                    width: 112,
-                    color: prediction is num ? c.textSecondary : c.textTertiary,
-                    tooltip: context.bheText(_predictionScoreTooltip(
-                      prediction,
-                      isCoarse: isCoarse,
-                      isManual: isManual,
-                    )),
-                  ),
-                  _EvidenceCell(
-                    label: context.bheText('轨迹穿框'),
-                    value: isCoarse && crossingState == _CrossingDisplay.unknown
-                        ? context.bheText('粗扫通过')
-                        : context.bheText(_formatCrossing(crossingState)),
-                    width: 92,
-                    color: isCoarse && crossingState == _CrossingDisplay.unknown
-                        ? c.warning
-                        : _crossingColor(c, crossingState),
-                    tooltip: context.bheText(
-                      '判断篮球轨迹是否从篮筐上方进入，并在篮筐横向范围内向下穿过。',
-                    ),
-                  ),
-                  _EvidenceCell(
-                    label: context.bheText('篮网运动'),
-                    value: net == null && isCoarse
-                        ? context.bheText('未计算')
-                        : context.bheText(_formatSignal(net)),
-                    width: 82,
-                    color: net == null && isCoarse
-                        ? c.textTertiary
-                        : _signalColor(c, net),
-                    tooltip: context.bheText(
-                      '检测白色篮网区域在球经过后的运动强度；光线、球员遮挡会影响该信号。',
-                    ),
-                  ),
-                  _EvidenceCell(
-                    label: context.bheText('反弹判断'),
-                    value: rebound == null && isCoarse
-                        ? context.bheText('未计算')
-                        : context.bheText(_formatRebound(rebound)),
-                    width: 82,
-                    color: rebound == null && isCoarse
-                        ? c.textTertiary
-                        : _reboundColor(c, rebound),
-                    tooltip: context.bheText(
-                      '检测篮球撞框后向上或向外回弹；出现反弹通常降低进球可能性。',
-                    ),
-                        ),
-                  _EvidenceCell(
-                    label: context.bheText('系统说明'),
-                    value: context.bheText(_reviewReasonLabel(reason)),
-                    width: 118,
-                    color: c.textSecondary,
-                    tooltip: context.bheText('当前候选被纳入审核列表的主要原因。'),
-                  ),
-                ],
+    final summary = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Flexible(
+              child: Text(
+                context.bheText('候选 ${_formatMs(_candidateTime(candidate))}'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
               ),
             ),
+            const SizedBox(width: Spacing.sm),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: statusColor.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(CsRadius.xs),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: Text(
+                  excluded
+                      ? l10n?.reviewWillNotExport ?? '不会导出'
+                      : l10n?.reviewWillExport ?? '会导出',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: statusColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(clip, maxLines: 1, overflow: TextOverflow.ellipsis, style: mono),
+        if (note.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(Icons.sticky_note_2_outlined, size: 13, color: c.textTertiary),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  note,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: c.textSecondary,
+                  ),
+                ),
+              ),
+            ],
           ),
-          Container(
-            decoration: BoxDecoration(color: c.surface3),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: Spacing.xs),
-              child: Row(
+        ],
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            _PlayerChip(
+              key: const ValueKey('inspector-player-chip'),
+              name: candidate['player_name']?.toString(),
+              color: playerColor,
+              players: players,
+              onSelected: onSetPlayer,
+              onCreate: onCreatePlayer,
+              onDelete: onDeletePlayer,
+            ),
+            Tooltip(
+              message: context.bheText('调整片段范围'),
+              child: _InspectorAction(
+                icon: Icons.tune_rounded,
+                label: l10n?.reviewAdjustRange ?? '调整范围',
+                onPressed: onEditRange,
+              ),
+            ),
+            Tooltip(
+              message: context.bheText('编辑备注'),
+              child: _InspectorAction(
+                icon: Icons.edit_outlined,
+                label: l10n?.reviewNote ?? '备注',
+                onPressed: onEditNote,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+
+    final crossingUnknown =
+        isCoarse && crossingState == _CrossingDisplay.unknown;
+    final metrics = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _InspectorMetricRow(
+          label: l10n?.reviewScores ?? '评分',
+          cells: [
+            _InspectorMetric(
+              label: context.bheText('候选置信度'),
+              value: context.bheText(
+                _candidateConfidence(candidate, evidence) ?? '—',
+              ),
+              color: c.textPrimary,
+              tooltip: context.bheText('综合轨迹穿框、篮网运动和反弹等信号得出，只用于排序和辅助审核。'),
+            ),
+            _InspectorMetric(
+              label: context.bheText('轨迹评分'),
+              value: _formatScore(trajectoryScore),
+              color: c.textPrimary,
+              ratio: trajectoryScore is num ? trajectoryScore.toDouble() : null,
+            ),
+            _InspectorMetric(
+              label: context.bheText('预测评分'),
+              value: context.bheText(
+                _formatPredictionScore(
+                  prediction,
+                  isCoarse: isCoarse,
+                  isManual: isManual,
+                ),
+              ),
+              color: prediction is num ? c.textPrimary : c.textTertiary,
+              ratio: prediction is num ? prediction.toDouble() : null,
+              tooltip: context.bheText(
+                _predictionScoreTooltip(
+                  prediction,
+                  isCoarse: isCoarse,
+                  isManual: isManual,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _InspectorMetricRow(
+          label: l10n?.reviewSignals ?? '信号',
+          cells: [
+            _InspectorMetric(
+              label: context.bheText('轨迹穿框'),
+              value: crossingUnknown
+                  ? context.bheText('粗扫通过')
+                  : context.bheText(_formatCrossing(crossingState)),
+              color: crossingUnknown
+                  ? c.warning
+                  : _crossingColor(c, crossingState),
+              dot: true,
+              tooltip: context.bheText('判断篮球轨迹是否从篮筐上方进入，并在篮筐横向范围内向下穿过。'),
+            ),
+            _InspectorMetric(
+              label: context.bheText('篮网运动'),
+              value: net == null && isCoarse
+                  ? context.bheText('未计算')
+                  : context.bheText(_formatSignal(net)),
+              color: net == null && isCoarse
+                  ? c.textTertiary
+                  : _signalColor(c, net),
+              dot: true,
+              tooltip: context.bheText('检测白色篮网区域在球经过后的运动强度；光线、球员遮挡会影响该信号。'),
+            ),
+            _InspectorMetric(
+              label: context.bheText('反弹判断'),
+              value: rebound == null && isCoarse
+                  ? context.bheText('未计算')
+                  : context.bheText(_formatRebound(rebound)),
+              color: rebound == null && isCoarse
+                  ? c.textTertiary
+                  : _reboundColor(c, rebound),
+              dot: true,
+              tooltip: context.bheText('检测篮球撞框后向上或向外回弹；出现反弹通常降低进球可能性。'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Tooltip(
+          message: context.bheText('当前候选被纳入审核列表的主要原因。'),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline, size: 13, color: c.textTertiary),
+              const SizedBox(width: 4),
+              Text(
+                context.bheText('系统说明'),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: c.textTertiary,
+                ),
+              ),
+              const SizedBox(width: Spacing.xs),
+              Expanded(
+                child: Text(
+                  context.bheText(_reviewReasonLabel(reason)),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: c.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    final keep = _InspectorDecision(
+      key: const Key('inspector-keep'),
+      icon: Icons.check_rounded,
+      label: l10n?.reviewKeepAction ?? '保留',
+      shortcut: 'C',
+      active: !excluded,
+      color: c.goal,
+      onPressed: busy ? null : onInclude,
+    );
+    final exclude = _InspectorDecision(
+      key: const Key('inspector-exclude'),
+      icon: Icons.close_rounded,
+      label: l10n?.reviewExcludeAction ?? '排除',
+      shortcut: 'X',
+      active: excluded,
+      color: c.error,
+      onPressed: busy ? null : onExclude,
+    );
+    final undo = Tooltip(
+      message: context.bheText('撤销上一次审核 (Cmd/Ctrl+Z)'),
+      child: TextButton.icon(
+        onPressed: busy ? null : onUndo,
+        icon: const Icon(Icons.undo_rounded, size: 15),
+        label: Text(l10n?.reviewUndoLast ?? '撤销上一步'),
+        style: TextButton.styleFrom(
+          foregroundColor: c.textSecondary,
+          visualDensity: VisualDensity.compact,
+        ),
+      ),
+    );
+
+    return Semantics(
+      container: true,
+      label: l10n?.reviewCurrentClip ?? '当前片段',
+      child: Container(
+        key: const Key('candidate-inspector'),
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(Spacing.md, 12, Spacing.md, 14),
+        decoration: BoxDecoration(
+          color: c.surface2,
+          border: Border(top: BorderSide(color: c.border)),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < 680) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  IconButton(
-                    tooltip: context.bheText('调整片段范围'),
-                    onPressed: onEditRange,
-                    icon: const Icon(Icons.tune_rounded, size: 17),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 34,
-                      height: 34,
-                    ),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  IconButton(
-                    tooltip: context.bheText('编辑备注'),
-                    onPressed: onEditNote,
-                    icon: const Icon(Icons.edit_outlined, size: 17),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 34,
-                      height: 34,
-                    ),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  IconButton(
-                    tooltip: context.bheText('撤销上一次审核 (Cmd/Ctrl+Z)'),
-                    onPressed: onUndo,
-                    icon: const Icon(Icons.undo_rounded, size: 17),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 34,
-                      height: 34,
-                    ),
-                    visualDensity: VisualDensity.compact,
+                  summary,
+                  const SizedBox(height: 12),
+                  metrics,
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(child: keep),
+                      const SizedBox(width: Spacing.sm),
+                      Expanded(child: exclude),
+                      undo,
+                    ],
                   ),
                 ],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 10, child: summary),
+                const SizedBox(width: 20),
+                Expanded(flex: 14, child: metrics),
+                const SizedBox(width: 20),
+                SizedBox(
+                  width: 156,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      keep,
+                      const SizedBox(height: Spacing.sm),
+                      exclude,
+                      const SizedBox(height: 4),
+                      undo,
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _InspectorAction extends StatelessWidget {
+  const _InspectorAction({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 15),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: c.textPrimary,
+        side: BorderSide(color: c.borderStrong),
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        textStyle: Theme.of(context).textTheme.labelMedium,
+      ),
+    );
+  }
+}
+
+class _InspectorMetricRow extends StatelessWidget {
+  const _InspectorMetricRow({required this.label, required this.cells});
+
+  final String label;
+  final List<Widget> cells;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 40,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: c.textTertiary, fontSize: 11),
+            ),
+          ),
+        ),
+        for (var index = 0; index < cells.length; index++) ...[
+          if (index > 0) const SizedBox(width: 12),
+          Expanded(child: cells[index]),
+        ],
+      ],
+    );
+  }
+}
+
+class _InspectorMetric extends StatelessWidget {
+  const _InspectorMetric({
+    required this.label,
+    required this.value,
+    required this.color,
+    this.tooltip,
+    this.ratio,
+    this.dot = false,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+  final String? tooltip;
+  final double? ratio;
+  final bool dot;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final labelText = Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(color: c.textTertiary, fontSize: 11),
+    );
+    // 空态(未计算/无数据)用空心圆点+更轻字重标记,
+    // 与"有数值但信号弱"的中性灰一眼区分。
+    final empty = value == '—' || value == '未计算';
+    final bar = ratio;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        tooltip == null
+            ? labelText
+            : Tooltip(message: tooltip, child: labelText),
+        const SizedBox(height: 3),
+        Row(
+          children: [
+            if (dot && !empty) ...[
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
               ),
+              const SizedBox(width: 5),
+            ],
+            Flexible(
+              child: Text(
+                empty ? '○ $value' : value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: empty ? FontWeight.w400 : FontWeight.w600,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (bar != null) ...[
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: bar.clamp(0.0, 1.0),
+              minHeight: 3,
+              backgroundColor: c.surface3,
+              color: c.indigo,
             ),
           ),
         ],
+      ],
+    );
+  }
+}
+
+class _InspectorDecision extends StatelessWidget {
+  const _InspectorDecision({
+    required this.icon,
+    required this.label,
+    required this.shortcut,
+    required this.active,
+    required this.color,
+    required this.onPressed,
+    super.key,
+  });
+
+  final IconData icon;
+  final String label;
+  final String shortcut;
+  final bool active;
+  final Color color;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final foreground = active ? color : c.textSecondary;
+    return Semantics(
+      button: true,
+      selected: active,
+      child: Material(
+        color: active ? color.withValues(alpha: 0.14) : c.surface3,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(CsRadius.md),
+          side: BorderSide(
+            color: active ? color.withValues(alpha: 0.5) : c.border,
+          ),
+        ),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(CsRadius.md),
+          child: SizedBox(
+            height: 40,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  Icon(icon, size: 17, color: foreground),
+                  const SizedBox(width: Spacing.sm),
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: foreground,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    shortcut,
+                    style: TextStyle(
+                      color: c.textTertiary,
+                      fontSize: 11,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -4063,74 +4563,6 @@ class _ClipTimeField extends StatelessWidget {
   }
 }
 
-class _EvidenceCell extends StatelessWidget {
-  const _EvidenceCell({
-    required this.label,
-    required this.value,
-    required this.width,
-    required this.color,
-    this.tooltip,
-  });
-
-  final String label;
-  final String value;
-  final double width;
-  final Color color;
-  final String? tooltip;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = AppColors.of(context);
-    return SizedBox(
-      width: width,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: Spacing.xs),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            tooltip == null
-                ? Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: c.textTertiary, fontSize: 9),
-                  )
-                : Tooltip(
-                    message: tooltip,
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: c.textTertiary, fontSize: 9),
-                    ),
-                  ),
-            const SizedBox(height: 2),
-            Builder(
-              builder: (context) {
-                // 空态(未计算/无数据)用空心圆点+更轻字重标记,
-                // 与"有数值但信号弱"的中性灰一眼区分。
-                final empty = value == '—' || value == '未计算';
-                return Text(
-                  empty ? '○ $value' : value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 10,
-                    fontWeight: empty ? FontWeight.w400 : FontWeight.w500,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _CandidatePanel extends StatelessWidget {
   const _CandidatePanel({
     required this.candidates,
@@ -4225,169 +4657,143 @@ class _CandidatePanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final heading = SizedBox(
-                height: 28,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Semantics(
-                        liveRegion: busy && busyMessage != null,
-                        child: Text(
-                          context.bheText(busyMessage ?? '候选片段'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+          SizedBox(
+            height: 34,
+            child: Row(
+              children: [
+                Flexible(
+                  child: Semantics(
+                    liveRegion: busy && busyMessage != null,
+                    child: Text(
+                      context.bheText(busyMessage ?? '候选片段'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(width: Spacing.sm),
-                    if (busy && busyMessage != null) ...[
-                      const SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      const SizedBox(width: Spacing.sm),
-                    ],
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: c.surface3,
-                        borderRadius: BorderRadius.circular(CsRadius.full),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        child: Text(
-                          context.bheText('保留 $includedCount / $totalCount'),
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: c.textSecondary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-              final actions = Wrap(
-                alignment: WrapAlignment.end,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 0,
-                runSpacing: 0,
-                children: [
-                  IconButton(
-                    tooltip: context.bheText('批量设置片段时长'),
-                    onPressed: busy ? null : onBatchRange,
-                    icon: const Icon(Icons.schedule_outlined, size: 18),
-                    visualDensity: VisualDensity.compact,
                   ),
+                ),
+                const SizedBox(width: Spacing.sm),
+                if (busy && busyMessage != null)
+                  const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  Text(
+                    '$totalCount',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: c.textTertiary,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                const Spacer(),
+                IconButton(
+                  tooltip: context.bheText('批量设置片段时长'),
+                  onPressed: busy ? null : onBatchRange,
+                  icon: const Icon(Icons.schedule_outlined, size: 18),
+                  visualDensity: VisualDensity.compact,
+                ),
+                Tooltip(
+                  message: context.bheText(
+                    '快捷键\nSpace  播放/暂停\nR  重播当前\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒\nC / Enter  保留\nX / Backspace  排除\n1–9  设置球员标签 · 0  清除\nCmd/Ctrl+Z  撤销',
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      Icons.keyboard_outlined,
+                      size: 17,
+                      color: c.textSecondary,
+                    ),
+                  ),
+                ),
+                if (hasVideo)
                   PopupMenuButton<String>(
-                    tooltip: context.bheText('筛选候选'),
-                    initialValue: filter,
-                    onSelected: onFilterChanged,
+                    key: const Key('review-more-actions'),
+                    tooltip: l10n?.reviewMoreActions ?? '更多操作',
+                    icon: Icon(
+                      Icons.more_horiz,
+                      size: 18,
+                      color: c.textSecondary,
+                    ),
+                    onSelected: (value) => switch (value) {
+                      'reanalyze' => onReanalyze?.call(),
+                      _ => onGoImport(),
+                    },
                     itemBuilder: (context) => [
                       PopupMenuItem(
-                        value: 'all',
-                        child: Text(context.bheText('全部候选')),
+                        value: 'reanalyze',
+                        enabled: onReanalyze != null,
+                        child: Text(context.bheText('重新分析当前视频')),
                       ),
                       PopupMenuItem(
-                        value: 'included',
-                        child: Text(context.bheText('保留')),
-                      ),
-                      PopupMenuItem(
-                        value: 'excluded',
-                        child: Text(context.bheText('排除')),
+                        value: 'reconfigure',
+                        enabled: !busy,
+                        child: Text(context.bheText('重新配置分析区域和范围')),
                       ),
                     ],
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: c.surface2,
-                        borderRadius: BorderRadius.circular(CsRadius.sm),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            context.bheText(_candidateFilterLabel(filter)),
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: c.textSecondary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          Icon(
-                            Icons.expand_more,
-                            size: 15,
-                            color: c.textSecondary,
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
-                  Tooltip(
-                    message: context.bheText(
-                      '快捷键\nSpace  播放/暂停\nR  重播当前\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒\nC / Enter  保留\nX / Backspace  排除\n1–9  设置球员标签 · 0  清除\nCmd/Ctrl+Z  撤销',
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Icon(
-                        Icons.keyboard_outlined,
-                        size: 17,
-                        color: c.textSecondary,
-                      ),
-                    ),
-                  ),
-                ],
-              );
-              if (constraints.maxWidth < 430) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    heading,
-                    const SizedBox(height: Spacing.xs),
-                    actions,
-                  ],
-                );
-              }
-              return Row(
+              ],
+            ),
+          ),
+          const SizedBox(height: Spacing.sm),
+          _StatusSegments(
+            value: filter,
+            total: totalCount,
+            included: includedCount,
+            onChanged: onFilterChanged,
+          ),
+          const SizedBox(height: Spacing.sm),
+          _PlayerTagChips(
+            value: playerFilter,
+            candidates: statusCandidates,
+            players: players,
+            onChanged: onPlayerFilterChanged,
+          ),
+          if (filter != 'all' || playerFilter != 'all') ...[
+            const SizedBox(height: Spacing.sm),
+            Container(
+              key: const Key('review-filter-banner'),
+              padding: const EdgeInsets.fromLTRB(10, 2, 2, 2),
+              decoration: BoxDecoration(
+                color: c.surface2,
+                borderRadius: BorderRadius.circular(CsRadius.sm),
+              ),
+              child: Row(
                 children: [
-                  Expanded(child: heading),
-                  actions,
+                  Icon(
+                    Icons.filter_alt_outlined,
+                    size: 14,
+                    color: c.textSecondary,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      l10n?.reviewFilterCount(candidates.length, totalCount) ??
+                          '显示 ${candidates.length} / $totalCount',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: c.textSecondary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: onClearFilters,
+                    style: TextButton.styleFrom(
+                      foregroundColor: c.textPrimary,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text(l10n?.reviewClearFilters ?? '清除筛选'),
+                  ),
                 ],
-              );
-            },
-          ),
-          const SizedBox(height: Spacing.xs),
-          Row(
-            children: [
-              Expanded(
-                child: _PlayerTagFilterMenu(
-                  value: playerFilter,
-                  candidates: statusCandidates,
-                  players: players,
-                  onChanged: onPlayerFilterChanged,
-                ),
               ),
-              const SizedBox(width: Spacing.sm),
-              Text(
-                l10n?.reviewFilterCount(candidates.length, totalCount) ??
-                    '显示 ${candidates.length} / $totalCount',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: c.textSecondary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: Spacing.xs),
+            ),
+          ],
+          const SizedBox(height: Spacing.sm),
           Expanded(
             child: candidates.isEmpty
                 ? _EmptyCandidates(
@@ -4448,6 +4854,7 @@ class _CandidatePanel extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
+                  flex: 3,
                   child: CsButton(
                     label: Flexible(
                       child: Text(
@@ -4457,39 +4864,31 @@ class _CandidatePanel extends StatelessWidget {
                       ),
                     ),
                     icon: Icons.file_upload_outlined,
-                    size: CsButtonSize.sm,
                     onPressed: onExport,
                   ),
                 ),
                 if (hasVideo) ...[
-                  const SizedBox(width: Spacing.xs),
-                  Tooltip(
+                  const SizedBox(width: Spacing.sm),
+                  Flexible(
+                    flex: 2,
+                    child: Tooltip(
                     message: context.bheText('从原视频当前时间补漏候选'),
-                    child: IconButton(
+                    child: OutlinedButton.icon(
                       key: const Key('create-manual-candidate'),
-                      tooltip: context.bheText('补漏'),
                       onPressed: onCreateManualCandidate,
                       icon: const Icon(Icons.playlist_add_rounded, size: 18),
-                      visualDensity: VisualDensity.compact,
+                      label: Text(
+                        l10n?.reviewAddMissed ?? '补漏片段',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: c.textPrimary,
+                        side: BorderSide(color: c.borderStrong),
+                        minimumSize: const Size(0, 40),
+                      ),
                     ),
-                  ),
-                ],
-                if (hasVideo) ...[
-                  const SizedBox(width: Spacing.xs),
-                  IconButton(
-                    tooltip: context.bheText('重新配置分析区域和范围'),
-                    onPressed: busy ? null : onGoImport,
-                    icon: const Icon(Icons.tune_rounded, size: 18),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
-                if (hasVideo) ...[
-                  const SizedBox(width: Spacing.xs),
-                  IconButton(
-                    tooltip: context.bheText('重新分析当前视频'),
-                    onPressed: onReanalyze,
-                    icon: const Icon(Icons.replay, size: 18),
-                    visualDensity: VisualDensity.compact,
+                    ),
                   ),
                 ],
               ],
@@ -4501,8 +4900,97 @@ class _CandidatePanel extends StatelessWidget {
   }
 }
 
-class _PlayerTagFilterMenu extends StatelessWidget {
-  const _PlayerTagFilterMenu({
+class _StatusSegments extends StatelessWidget {
+  const _StatusSegments({
+    required this.value,
+    required this.total,
+    required this.included,
+    required this.onChanged,
+  });
+
+  final String value;
+  final int total;
+  final int included;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
+    final options = [
+      ('all', l10n?.reviewStatusAll ?? '全部', total),
+      ('included', l10n?.reviewStatusKept ?? '保留', included),
+      ('excluded', l10n?.reviewStatusExcluded ?? '排除', total - included),
+    ];
+    return Semantics(
+      container: true,
+      label: l10n?.reviewStatusFilter ?? '按保留／排除筛选',
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: c.surface2,
+          borderRadius: BorderRadius.circular(CsRadius.md),
+        ),
+        child: Row(
+          children: [
+            for (final (key, label, count) in options)
+              Expanded(
+                child: Semantics(
+                  button: true,
+                  selected: value == key,
+                  child: Material(
+                    key: ValueKey('review-status-$key'),
+                    color: value == key ? c.surface3 : Colors.transparent,
+                    borderRadius: BorderRadius.circular(CsRadius.sm),
+                    child: InkWell(
+                      onTap: () => onChanged(key),
+                      borderRadius: BorderRadius.circular(CsRadius.sm),
+                      child: SizedBox(
+                        height: 30,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: value == key
+                                      ? c.textPrimary
+                                      : c.textSecondary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              '$count',
+                              style: TextStyle(
+                                color: c.textTertiary,
+                                fontSize: 11,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlayerTagChips extends StatelessWidget {
+  const _PlayerTagChips({
     required this.value,
     required this.candidates,
     required this.players,
@@ -4518,13 +5006,6 @@ class _PlayerTagFilterMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
     final c = AppColors.of(context);
-    final labels = <String, String>{
-      'all': l10n?.reviewAllTags ?? '全部标签',
-      'tagged': l10n?.reviewTagged ?? '已标记',
-      'untagged': l10n?.reviewUntagged ?? '未标记',
-      for (final player in players)
-        'player:${player['id']}': player['name']?.toString() ?? '',
-    };
     final counts = <String, int>{'all': candidates.length};
     for (final candidate in candidates) {
       final id = candidate['player_id']?.toString() ?? '';
@@ -4534,61 +5015,289 @@ class _PlayerTagFilterMenu extends StatelessWidget {
         counts.update('player:$id', (count) => count + 1, ifAbsent: () => 1);
       }
     }
-    final currentLabel = labels[value] ?? labels['all']!;
+    final options = <(String, String, Color?)>[
+      ('all', l10n?.reviewAllTags ?? '全部标签', null),
+      ('tagged', l10n?.reviewTagged ?? '已标记', null),
+      ('untagged', l10n?.reviewUntagged ?? '未标记', null),
+      for (var index = 0; index < players.length; index++)
+        (
+          'player:${players[index]['id']}',
+          // The number is the shortcut that assigns this player.
+          index < 9
+              ? '${index + 1} · ${players[index]['name'] ?? ''}'
+              : players[index]['name']?.toString() ?? '',
+          _playerColor(players[index]['id']?.toString(), index),
+        ),
+    ];
+    return Semantics(
+      container: true,
+      label: l10n?.reviewFilterPlayerTags ?? '筛选球员标签',
+      child: SizedBox(
+        key: const Key('review-player-filter'),
+        height: 30,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final fixed = options.take(3).toList();
+            final playerOptions = options.skip(3).toList();
+            final visible = _visiblePlayers(
+              context,
+              constraints.maxWidth,
+              fixed,
+              playerOptions,
+              counts,
+            );
+            final hidden = [
+              for (final option in playerOptions)
+                if (!visible.contains(option)) option,
+            ];
+            final shown = [...fixed, ...visible];
+            // Only scrolls when even the fixed chips do not fit.
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+              children: [
+                for (var index = 0; index < shown.length; index++) ...[
+                  if (index > 0) const SizedBox(width: 6),
+                  _tagChip(context, c, shown[index], counts),
+                ],
+                if (hidden.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  _moreChip(context, c, hidden, counts),
+                ],
+              ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  static const _chipGap = 6.0;
+  static const _labelStyle = TextStyle(fontSize: 12, fontWeight: FontWeight.w600);
+  static const _countStyle = TextStyle(
+    fontSize: 11,
+    fontFeatures: [FontFeature.tabularFigures()],
+  );
+
+  double _textWidth(BuildContext context, String text, TextStyle style) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: DefaultTextStyle.of(context).style.merge(style),
+      ),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    return painter.width;
+  }
+
+  double _chipWidth(
+    BuildContext context,
+    (String, String, Color?) option,
+    Map<String, int> counts,
+  ) {
+    final (key, label, color) = option;
+    final labelWidth = _textWidth(context, label, _labelStyle);
+    return 22 +
+        (color == null ? 0 : 13) +
+        (labelWidth > 140 ? 140 : labelWidth) +
+        6 +
+        _textWidth(context, '${counts[key] ?? 0}', _countStyle);
+  }
+
+  /// Players that fit after the fixed chips, leaving room for "+N".
+  /// A selected player always stays visible so the active filter is legible.
+  List<(String, String, Color?)> _visiblePlayers(
+    BuildContext context,
+    double maxWidth,
+    List<(String, String, Color?)> fixed,
+    List<(String, String, Color?)> players,
+    Map<String, int> counts,
+  ) {
+    final moreWidth =
+        _chipGap + 40 + _textWidth(context, '+${players.length}', _labelStyle);
+    double widthOf(List<(String, String, Color?)> chips) {
+      var total = 0.0;
+      for (final chip in chips) {
+        total += _chipWidth(context, chip, counts) + _chipGap;
+      }
+      return total - _chipGap;
+    }
+
+    bool fits(List<(String, String, Color?)> chosen) {
+      final rest = players.length - chosen.length;
+      return widthOf([...fixed, ...chosen]) + (rest > 0 ? moreWidth : 0) <=
+          maxWidth;
+    }
+
+    final visible = <(String, String, Color?)>[];
+    for (final player in players) {
+      if (!fits([...visible, player])) break;
+      visible.add(player);
+    }
+    final selected = players.where((option) => option.$1 == value).toList();
+    if (selected.isNotEmpty && !visible.contains(selected.first)) {
+      while (visible.isNotEmpty && !fits([...visible, selected.first])) {
+        visible.removeLast();
+      }
+      visible.add(selected.first);
+    }
+    return [
+      for (final player in players)
+        if (visible.contains(player)) player,
+    ];
+  }
+
+  Widget _moreChip(
+    BuildContext context,
+    AppColors c,
+    List<(String, String, Color?)> hidden,
+    Map<String, int> counts,
+  ) {
+    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
     return PopupMenuButton<String>(
-      key: const Key('review-player-filter'),
+      key: const Key('review-tag-more'),
       tooltip: l10n?.reviewFilterPlayerTags ?? '筛选球员标签',
-      initialValue: value,
       onSelected: onChanged,
       constraints: const BoxConstraints(maxWidth: 320),
       itemBuilder: (context) => [
-        for (final entry in labels.entries)
+        for (final (key, label, color) in hidden)
           PopupMenuItem<String>(
-            key: ValueKey('review-tag-option-${entry.key}'),
-            value: entry.key,
+            key: ValueKey('review-tag-option-$key'),
+            value: key,
             child: Row(
               children: [
-                Expanded(
-                  child: Tooltip(
-                    message: entry.value,
-                    child: Text(
-                      entry.value,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                if (color != null) ...[
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 const SizedBox(width: Spacing.md),
-                Text('${counts[entry.key] ?? 0}'),
+                Text(
+                  '${counts[key] ?? 0}',
+                  style: TextStyle(
+                    color: c.textTertiary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
               ],
             ),
           ),
       ],
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: Spacing.sm,
-          vertical: 6,
-        ),
+        height: 30,
+        padding: const EdgeInsets.only(left: 10, right: 6),
         decoration: BoxDecoration(
-          color: c.surface2,
-          borderRadius: BorderRadius.circular(CsRadius.sm),
+          borderRadius: BorderRadius.circular(CsRadius.full),
+          border: Border.all(color: c.border),
         ),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.person_outline, size: 16, color: c.textSecondary),
-            const SizedBox(width: Spacing.xs),
-            Expanded(
-              child: Text(
-                currentLabel,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            Text(
+              '+${hidden.length}',
+              style: TextStyle(
+                color: c.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
               ),
             ),
-            Icon(Icons.expand_more, size: 15, color: c.textSecondary),
+            Icon(Icons.expand_more, size: 16, color: c.textSecondary),
           ],
         ),
       ),
     );
+  }
+
+  Widget _tagChip(
+    BuildContext context,
+    AppColors c,
+    (String, String, Color?) option,
+    Map<String, int> counts,
+  ) {
+            final (key, label, color) = option;
+            final selected = value == key;
+            return Semantics(
+              button: true,
+              selected: selected,
+              child: Material(
+                key: ValueKey('review-tag-option-$key'),
+                color: selected ? c.surface3 : Colors.transparent,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(CsRadius.full),
+                  side: BorderSide(
+                    color: selected ? c.borderStrong : c.border,
+                  ),
+                ),
+                child: InkWell(
+                  onTap: () => onChanged(key),
+                  customBorder: const StadiumBorder(),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (color != null) ...[
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 140),
+                          child: Tooltip(
+                            message: label,
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: selected
+                                    ? c.textPrimary
+                                    : c.textSecondary,
+                                fontSize: 12,
+                                fontWeight: selected
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '${counts[key] ?? 0}',
+                          style: TextStyle(
+                            color: c.textTertiary,
+                            fontSize: 11,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
   }
 }
 
@@ -4776,15 +5485,17 @@ class _CandidateRow extends StatelessWidget {
                     ),
                     borderRadius: BorderRadius.circular(CsRadius.sm),
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 8, 6, 8),
+                      padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
                       child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: _CandidateCover(
-                              future: coverFuture,
-                              excluded: excluded,
+                          _CandidateCover(
+                            future: coverFuture,
+                            excluded: excluded,
+                            durationLabel: context.bheText(
+                              _formatClipDuration(
+                                _clipEnd(candidate) - _clipStart(candidate),
+                              ),
                             ),
                           ),
                           const SizedBox(width: Spacing.sm),
@@ -4793,74 +5504,65 @@ class _CandidateRow extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(
-                                  '#${index + 1} ${_formatMs(_candidateTime(candidate))}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: excluded
-                                        ? c.textTertiary
-                                        : c.textPrimary,
-                                    fontFeatures: const [
-                                      FontFeature.tabularFigures(),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    final duration = Text(
-                                      context.bheText(
-                                        '时长 ${_formatClipDuration(_clipEnd(candidate) - _clipStart(candidate))}',
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.labelSmall
-                                          ?.copyWith(
-                                            color: c.textTertiary,
-                                            fontFeatures: const [
-                                              FontFeature.tabularFigures(),
-                                            ],
-                                          ),
-                                    );
-                                    final playerChip = _PlayerChip(
-                                      key: ValueKey(
-                                        'player-chip-${candidate['id']}',
-                                      ),
-                                      name: candidate['player_name']
-                                          ?.toString(),
-                                      color: playerColor,
-                                      players: players,
-                                      onSelected: onSetPlayer,
-                                      onCreate: onCreatePlayer,
-                                      onDelete: onDeletePlayer,
-                                    );
-                                    if (constraints.maxWidth < 190) {
-                                      return Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          duration,
-                                          const SizedBox(height: 3),
-                                          Align(
-                                            alignment: Alignment.centerLeft,
-                                            child: playerChip,
-                                          ),
-                                        ],
-                                      );
-                                    }
-                                    return Row(
-                                      children: [
-                                        Expanded(child: duration),
-                                        const SizedBox(width: Spacing.xs),
-                                        Flexible(
-                                          fit: FlexFit.loose,
-                                          child: playerChip,
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text.rich(
+                                        TextSpan(
+                                          children: [
+                                            TextSpan(
+                                              text: '#${index + 1} ',
+                                              style: TextStyle(
+                                                color: c.textTertiary,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                            TextSpan(
+                                              text: _formatMs(
+                                                _candidateTime(candidate),
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                      ],
-                                    );
-                                  },
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                              color: excluded
+                                                  ? c.textTertiary
+                                                  : c.textPrimary,
+                                              fontFeatures: const [
+                                                FontFeature.tabularFigures(),
+                                              ],
+                                            ),
+                                      ),
+                                    ),
+                                    if (excluded) ...[
+                                      const SizedBox(width: Spacing.xs),
+                                      Text(
+                                        context.bheText('已排除'),
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(color: c.error),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: _PlayerChip(
+                                    key: ValueKey(
+                                      'player-chip-${candidate['id']}',
+                                    ),
+                                    name: candidate['player_name']?.toString(),
+                                    color: playerColor,
+                                    players: players,
+                                    onSelected: onSetPlayer,
+                                    onCreate: onCreatePlayer,
+                                    onDelete: onDeletePlayer,
+                                  ),
                                 ),
                               ],
                             ),
@@ -4932,7 +5634,7 @@ class _DecisionButton extends StatelessWidget {
     final c = AppColors.of(context);
     final background = active
         ? color.withValues(alpha: 0.16)
-        : c.surface3.withValues(alpha: 0.72);
+        : Colors.transparent;
     final foreground = active ? color : c.textTertiary;
     return Semantics(
       button: true,
@@ -4948,9 +5650,9 @@ class _DecisionButton extends StatelessWidget {
             onTap: enabled ? onPressed : null,
             borderRadius: BorderRadius.circular(CsRadius.sm),
             child: SizedBox(
-              width: 48,
-              height: 44,
-              child: Icon(icon, size: 21, color: foreground),
+              width: 40,
+              height: 38,
+              child: Icon(icon, size: 19, color: foreground),
             ),
           ),
         ),
@@ -5250,10 +5952,15 @@ int _playerIndex(
 }
 
 class _CandidateCover extends StatefulWidget {
-  const _CandidateCover({required this.future, required this.excluded});
+  const _CandidateCover({
+    required this.future,
+    required this.excluded,
+    required this.durationLabel,
+  });
 
   final Future<String?>? future;
   final bool excluded;
+  final String durationLabel;
 
   @override
   State<_CandidateCover> createState() => _CandidateCoverState();
@@ -5293,11 +6000,47 @@ class _CandidateCoverState extends State<_CandidateCover> {
         return Opacity(
           opacity: widget.excluded ? 0.45 : 1,
           child: SizedBox(
-            width: 112,
-            height: 68,
+            width: 96,
+            height: 56,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(CsRadius.sm),
-              child: cover,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  widget.excluded
+                      ? ColorFiltered(
+                          colorFilter: const ColorFilter.matrix(<double>[
+                            0.2126, 0.7152, 0.0722, 0, 0,
+                            0.2126, 0.7152, 0.0722, 0, 0,
+                            0.2126, 0.7152, 0.0722, 0, 0,
+                            0, 0, 0, 1, 0,
+                          ]),
+                          child: cover,
+                        )
+                      : cover,
+                  Positioned(
+                    right: 4,
+                    bottom: 3,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: c.background.withValues(alpha: 0.82),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Text(
+                          widget.durationLabel,
+                          style: TextStyle(
+                            color: c.textPrimary,
+                            fontSize: 10,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -5332,14 +6075,6 @@ List<Map<String, dynamic>> _filterCandidates(
     };
   }).toList();
 }
-
-String _candidateFilterLabel(String filter) =>
-    const <String, String>{
-      'all': '全部',
-      'included': '保留',
-      'excluded': '排除',
-    }[filter] ??
-    '全部';
 
 int _candidateTime(Map<String, dynamic> candidate) {
   final value = candidate['event_time_ms'];
