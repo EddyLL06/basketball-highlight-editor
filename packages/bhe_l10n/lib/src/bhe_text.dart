@@ -74,14 +74,6 @@ String? _translateDynamic(String source) {
   final allCandidates = RegExp(r'^全部 (\d+) 个候选片段$').firstMatch(source);
   if (allCandidates != null)
     return 'All ${allCandidates.group(1)} candidate clips';
-  final allReviewCandidates = RegExp(r'^全部候选 · (\d+) 个$').firstMatch(source);
-  if (allReviewCandidates != null) {
-    return 'All candidates · ${allReviewCandidates.group(1)}';
-  }
-  final checkedCandidates = RegExp(r'^已勾选候选 · (\d+) 个$').firstMatch(source);
-  if (checkedCandidates != null) {
-    return 'Checked candidates · ${checkedCandidates.group(1)}';
-  }
   final candidateCount = RegExp(r'^候选 (\d+)$').firstMatch(source);
   if (candidateCount != null) return 'Candidates ${candidateCount.group(1)}';
   final applyToClips = RegExp(r'^应用到 (\d+) 个片段$').firstMatch(source);
@@ -201,16 +193,10 @@ String? _translateDynamic(String source) {
   if (candidateAt != null) return 'Candidate ${candidateAt.group(1)}';
   final duration = RegExp(r'^时长 (.+)$').firstMatch(source);
   if (duration != null) return 'Duration ${_englishDuration(duration.group(1)!)}';
-  final batchCount = RegExp(r'^批量 (\d+) 个$').firstMatch(source);
-  if (batchCount != null) return 'Bulk ${batchCount.group(1)}';
-  final selectedBatch = RegExp(r'^已勾选候选 · (\d+) 个$').firstMatch(source);
-  if (selectedBatch != null) return 'Checked candidates · ${selectedBatch.group(1)}';
   final selectedCount = RegExp(r'^已选 (\d+) / (\d+)$').firstMatch(source);
   if (selectedCount != null) {
     return 'Included ${selectedCount.group(1)} / ${selectedCount.group(2)}';
   }
-  final appliedBatch = RegExp(r'^已更新 (\d+) 个片段的球员标签$').firstMatch(source);
-  if (appliedBatch != null) return 'Updated player tags for ${appliedBatch.group(1)} clips';
   final timeWithUnit = RegExp(r'^(\d+) 秒$').firstMatch(source);
   if (timeWithUnit != null) return '${timeWithUnit.group(1)} sec';
   final estimatedMinutes = RegExp(r'^约 (.+) 分钟$').firstMatch(source);
@@ -399,8 +385,6 @@ const _englishText = <String, String>{
   '排除片段 (X / Backspace)': 'Exclude clip (X / Backspace)',
   '设置球员标签': 'Set player tag',
   '未标记': 'Untagged',
-  '退出批量选择': 'Exit batch selection',
-  '批量选择候选': 'Select candidates in bulk',
   '上次分析没有完成': 'The previous analysis did not finish',
   '已有候选可以继续使用，也可以重新分析': 'Existing candidates can be used or analyzed again',
   '分析进行中': 'Analysis in progress',
@@ -522,7 +506,6 @@ const _englishText = <String, String>{
   '撤销上一次审核 (Cmd/Ctrl+Z)': 'Undo the previous review (Cmd/Ctrl+Z)',
   '调整片段范围': 'Adjust clip range',
   '筛选候选': 'Filter candidates',
-  '设置批量球员标签': 'Set player tags in bulk',
   '候选预览': 'Candidate preview',
   '原视频': 'Original video',
   'ONNX Runtime 初始化失败': 'ONNX Runtime initialization failed',
@@ -642,8 +625,8 @@ const _englishText = <String, String>{
       'Orange: ball trajectory, current position, or estimated crossing point',
   '最终是否保留由你审核决定，算法结果只是候选建议。':
       'You decide whether to keep the clip; algorithm results are only suggestions.',
-  '快捷键\nSpace  播放/暂停\nR  重播当前\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒\nC / Enter  保留\nX / Backspace  排除\nCmd/Ctrl+Z  撤销':
-      'Shortcuts\nSpace  Play/pause\nR  Replay current\nL  Loop current\nA  Show/hide annotations\n↑ / ↓  Switch candidates\n← / →  Rewind/forward 2 sec\nC / Enter  Include\nX / Backspace  Exclude\nCmd/Ctrl+Z  Undo',
+  '快捷键\nSpace  播放/暂停\nR  重播当前\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒\nC / Enter  保留\nX / Backspace  排除\n1–9  设置球员标签 · 0  清除\nCmd/Ctrl+Z  撤销':
+      'Shortcuts\nSpace  Play/pause\nR  Replay current\nL  Loop current\nA  Show/hide annotations\n↑ / ↓  Switch candidates\n← / →  Rewind/forward 2 sec\nC / Enter  Include\nX / Backspace  Exclude\n1–9  Set player tag · 0  Clear\nCmd/Ctrl+Z  Undo',
   '未命名项目': 'Untitled project',
   '新建项目': 'New project',
   '原始视频不可用，无法预览片段范围':
@@ -717,7 +700,6 @@ const _englishText = <String, String>{
   '系统会先自动识别篮筐。橙色区域用于球轨迹，白色区域只覆盖篮网摆动范围；拖动或缩放后会自动保存到草稿。':
       'The hoop is detected automatically. The orange region tracks the ball and the white region covers net motion; changes save to the draft automatically.',
   '候选片段长度': 'Candidate clip length',
-  '应用范围': 'Apply to',
   '标准分析': 'Standard analysis',
   '快速分析': 'Fast analysis',
   '快速分析使用低规格代理，可能漏检少量片段。':

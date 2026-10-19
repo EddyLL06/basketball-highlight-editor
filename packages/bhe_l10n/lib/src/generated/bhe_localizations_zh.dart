@@ -9,6 +9,14 @@ class BheLocalizationsZh extends BheLocalizations {
   BheLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get reviewInvalidClipRange => '请输入有效时间：范围须在视频内，且时长至少为 1 秒。';
+
+  @override
+  String reviewRangeOpenFailed(String error) {
+    return '无法暂停预览并打开范围编辑：$error';
+  }
+
+  @override
   String get appName => 'BHE';
 
   @override
@@ -215,6 +223,28 @@ class BheLocalizationsZh extends BheLocalizations {
 
   @override
   String get unassigned => '未标记';
+
+  @override
+  String get reviewFilterPlayerTags => '筛选球员标签';
+
+  @override
+  String get reviewAllTags => '全部标签';
+
+  @override
+  String get reviewTagged => '已标记';
+
+  @override
+  String get reviewUntagged => '未标记';
+
+  @override
+  String reviewBatchRangeScope(int count) {
+    return '应用范围：当前列表的 $count 个候选（随状态和球员标签筛选变化）';
+  }
+
+  @override
+  String reviewFilterCount(int count, int total) {
+    return '显示 $count / $total';
+  }
 
   @override
   String get currentFilter => '当前筛选';
@@ -533,4 +563,63 @@ class BheLocalizationsZh extends BheLocalizations {
 
   @override
   String get close => '关闭';
+
+  @override
+  String get rangeEditorHint =>
+      '播放片段会在范围内循环；拖动两端、拖到边缘可继续延长，或用 I / O 把当前位置设为开始 / 结束。原视频不会被修改。';
+
+  @override
+  String get rangeManualHint => '已定位到原视频当前时间。用 I / O 设定开始和结束后加入候选。';
+
+  @override
+  String get rangePlayClip => '播放片段（Space）';
+
+  @override
+  String get rangePause => '暂停（Space）';
+
+  @override
+  String get rangePreviewEnding => '预览结尾';
+
+  @override
+  String get rangeStatusInside => '范围内';
+
+  @override
+  String get rangeStatusBefore => '范围前';
+
+  @override
+  String get rangeStatusAfter => '范围后';
+
+  @override
+  String rangePosition(String time) {
+    return '当前位置 $time';
+  }
+
+  @override
+  String rangeSummary(String start, String end, String duration) {
+    return '片段 $start – $end · $duration';
+  }
+
+  @override
+  String get rangeSetStart => '设为开始（I）';
+
+  @override
+  String get rangeSetEnd => '设为结束（O）';
+
+  @override
+  String get rangeExtendStart => '开头 −2 秒';
+
+  @override
+  String get rangeExtendEnd => '结尾 +2 秒';
+
+  @override
+  String get rangeExtendBoth => '前后各 +2 秒';
+
+  @override
+  String get rangeLegendEvent => '进球时刻';
+
+  @override
+  String get rangeLegendOriginal => '原范围';
+
+  @override
+  String get rangeTimelineLabel => '片段时间轴';
 }

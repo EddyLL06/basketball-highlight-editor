@@ -237,6 +237,13 @@ class _ReviewSnapshot {
   final String? note;
 }
 
+/// 同一候选的排队请求共享保存基线，仅在引擎确认成功后推进。
+class _ReviewBaseline {
+  _ReviewBaseline(this.snapshot);
+
+  _ReviewSnapshot? snapshot;
+}
+
 /// 迁移自 app.dart:_BasketballHighlightAppState 的全部业务方法。
 ///
 /// - `_session` → `ref.read(projectSessionProvider)`
@@ -254,6 +261,18 @@ class ProjectNotifier extends Notifier<ProjectState> {
   Future<void> _busyOperation = Future<void>.value();
   bool _closingProject = false;
   final Map<String, int> _reviewRevisions = <String, int>{};
+  final Map<
+    String,
+    ({
+      int generation,
+      String status,
+      String? reason,
+      Future<bool> result,
+      _ReviewBaseline baseline,
+    })
+  >
+  _pendingReviews = {};
+  Future<void>? _undoOperation;
   bool _disposed = false;
   int _projectLoadGeneration = 0;
   int _noticeCounter = 0;
@@ -1523,38 +1542,59 @@ class ProjectNotifier extends Notifier<ProjectState> {
     String status, {
     String? reason,
     bool showNotice = true,
-  }) async {
-    final result = Completer<bool>();
+  }) {
+    if (_disposed) return Future<bool>.value(false);
     final generation = _projectLoadGeneration;
-    final revision = (_reviewRevisions[id] ?? 0) + 1;
-    _reviewRevisions[id] = revision;
+    final engineStatus = status == 'included' ? 'goal' : status;
+    final pending = _pendingReviews[id];
+    if (pending != null &&
+        pending.generation == generation &&
+        pending.status == engineStatus &&
+        pending.reason == reason) {
+      return pending.result;
+    }
     final previous = state.candidates.cast<JsonMap?>().firstWhere(
       (item) => item?['id']?.toString() == id,
       orElse: () => null,
     );
-    final engineStatus = status == 'included' ? 'goal' : status;
-    if (previous != null &&
+    if ((pending == null || pending.generation != generation) &&
+        previous != null &&
         previous['review_status']?.toString() == engineStatus &&
         (reason == null || previous['review_reason']?.toString() == reason)) {
-      return true;
+      return Future<bool>.value(true);
     }
-    final snapshot = previous == null
-        ? null
-        : _ReviewSnapshot(
-            candidateId: id,
-            status: previous['review_status']?.toString() ?? 'pending',
-            reason: previous['review_reason']?.toString(),
-            note: previous['note']?.toString(),
+    final result = Completer<bool>();
+    final revision = (_reviewRevisions[id] ?? 0) + 1;
+    _reviewRevisions[id] = revision;
+    final baseline = pending != null && pending.generation == generation
+        ? pending.baseline
+        : _ReviewBaseline(
+            previous == null
+                ? null
+                : _ReviewSnapshot(
+                    candidateId: id,
+                    status: previous['review_status']?.toString() ?? 'pending',
+                    reason: previous['review_reason']?.toString(),
+                    note: previous['note']?.toString(),
+                  ),
           );
+    _pendingReviews[id] = (
+      generation: generation,
+      status: engineStatus,
+      reason: reason,
+      result: result.future,
+      baseline: baseline,
+    );
     if (previous != null) {
       _setLocalReviewState(id, engineStatus, reason: reason);
     }
     _reviewQueue = _reviewQueue.then((_) async {
-      if (_disposed || generation != _projectLoadGeneration) {
-        result.complete(false);
-        return;
-      }
+      final snapshot = baseline.snapshot;
       try {
+        if (_disposed || generation != _projectLoadGeneration) {
+          result.complete(false);
+          return;
+        }
         await ref
             .read(projectSessionProvider)
             .reviewCandidate(
@@ -1568,6 +1608,12 @@ class ProjectNotifier extends Notifier<ProjectState> {
           return;
         }
         if (snapshot != null) _reviewHistory.add(snapshot);
+        baseline.snapshot = _ReviewSnapshot(
+          candidateId: id,
+          status: engineStatus,
+          reason: reason,
+          note: snapshot?.note,
+        );
         unawaited(refreshStatistics(generation: generation));
         if (showNotice) {
           _pushNotice(switch (status) {
@@ -1598,6 +1644,10 @@ class ProjectNotifier extends Notifier<ProjectState> {
           _pushNotice(error.toString(), NoticeSeverity.error);
         }
         result.complete(false);
+      } finally {
+        if (identical(_pendingReviews[id]?.result, result.future)) {
+          _pendingReviews.remove(id);
+        }
       }
     });
     return result.future;
@@ -1656,24 +1706,39 @@ class ProjectNotifier extends Notifier<ProjectState> {
   }
 
   /// 等价 app.dart:_undoReview(599)。
-  Future<void> undoReview() async {
-    if (_reviewHistory.isEmpty) return;
-    final snapshot = _reviewHistory.last;
-    var succeeded = false;
-    await _runBusy(() async {
-      await flushReviewQueue();
-      await ref
-          .read(projectSessionProvider)
-          .reviewCandidate(
-            snapshot.candidateId,
-            status: snapshot.status,
-            reason: snapshot.reason,
-            note: snapshot.note,
-          );
-      await refreshCandidates();
-      succeeded = true;
-    }, successMessage: '已撤销上一次审核');
-    if (succeeded) _reviewHistory.removeLast();
+  Future<void> undoReview() {
+    final pending = _undoOperation;
+    if (pending != null) return pending;
+    final generation = _projectLoadGeneration;
+    late final Future<void> operation;
+    operation =
+        _runBusy(() async {
+          await flushReviewQueue();
+          if (_disposed ||
+              generation != _projectLoadGeneration ||
+              _reviewHistory.isEmpty) {
+            return;
+          }
+          final snapshot = _reviewHistory.last;
+          await ref
+              .read(projectSessionProvider)
+              .reviewCandidate(
+                snapshot.candidateId,
+                status: snapshot.status,
+                reason: snapshot.reason,
+                note: snapshot.note,
+              );
+          if (_disposed || generation != _projectLoadGeneration) return;
+          // 保存已生效；刷新候选失败也不能再次消费这条撤销记录。
+          _reviewHistory.remove(snapshot);
+          await refreshCandidates(generation: generation);
+          if (_disposed || generation != _projectLoadGeneration) return;
+          _pushNotice('已撤销上一次审核', NoticeSeverity.success);
+        }).whenComplete(() {
+          if (identical(_undoOperation, operation)) _undoOperation = null;
+        });
+    _undoOperation = operation;
+    return operation;
   }
 
   /// 等价 app.dart:_updateClipRange(612)。
@@ -1793,27 +1858,6 @@ class ProjectNotifier extends Notifier<ProjectState> {
     }, busyMessage: '正在保存球员标签…');
   }
 
-  Future<void> setCandidatesPlayer(
-    List<String> candidateIds,
-    String? playerId,
-  ) async {
-    if (candidateIds.isEmpty) return;
-    await _runPlayerChange(
-      (generation) async {
-        await ref
-            .read(projectSessionProvider)
-            .setCandidatesPlayer(
-              candidateIds: candidateIds,
-              playerId: playerId,
-            );
-        if (_disposed || generation != _projectLoadGeneration) return;
-        _setLocalCandidatePlayer(candidateIds, playerId);
-      },
-      successMessage: '已更新 ${candidateIds.length} 个片段的球员标签',
-      busyMessage: '正在保存球员标签…',
-    );
-  }
-
   Future<void> _runPlayerChange(
     Future<void> Function(int generation) action, {
     String? successMessage,
@@ -1888,6 +1932,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
             playerIds: playerIds,
             includeUnassigned: includeUnassigned,
           );
+      if (_disposed) return;
       final job = (result['job'] as Map?)?.cast<String, dynamic>();
       state = state.copyWith(exportJob: job);
       final jobId = job?['id'];
@@ -1898,6 +1943,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
       state = state.copyWith(busy: false);
       unawaited(pollExportJob(jobId));
     } catch (error) {
+      if (_disposed) return;
       _pushNotice(error.toString(), NoticeSeverity.error);
       state = state.copyWith(busy: false);
     }
@@ -1988,6 +2034,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
       final result = await ref
           .read(projectSessionProvider)
           .retryExport(jobId: jobId);
+      if (_disposed) return;
       state = state.copyWith(
         exportJob: (result['job'] as Map?)?.cast<String, dynamic>(),
       );
@@ -1995,6 +2042,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
       state = state.copyWith(busy: false);
       if (newJobId is String) unawaited(pollExportJob(newJobId));
     } catch (error) {
+      if (_disposed) return;
       _pushNotice(error.toString(), NoticeSeverity.error);
       state = state.copyWith(busy: false);
     }

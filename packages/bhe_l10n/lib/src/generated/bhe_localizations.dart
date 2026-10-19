@@ -98,6 +98,18 @@ abstract class BheLocalizations {
     Locale('zh'),
   ];
 
+  /// No description provided for @reviewInvalidClipRange.
+  ///
+  /// In zh, this message translates to:
+  /// **'请输入有效时间：范围须在视频内，且时长至少为 1 秒。'**
+  String get reviewInvalidClipRange;
+
+  /// No description provided for @reviewRangeOpenFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法暂停预览并打开范围编辑：{error}'**
+  String reviewRangeOpenFailed(String error);
+
   /// No description provided for @appName.
   ///
   /// In zh, this message translates to:
@@ -505,6 +517,42 @@ abstract class BheLocalizations {
   /// In zh, this message translates to:
   /// **'未标记'**
   String get unassigned;
+
+  /// No description provided for @reviewFilterPlayerTags.
+  ///
+  /// In zh, this message translates to:
+  /// **'筛选球员标签'**
+  String get reviewFilterPlayerTags;
+
+  /// No description provided for @reviewAllTags.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部标签'**
+  String get reviewAllTags;
+
+  /// No description provided for @reviewTagged.
+  ///
+  /// In zh, this message translates to:
+  /// **'已标记'**
+  String get reviewTagged;
+
+  /// No description provided for @reviewUntagged.
+  ///
+  /// In zh, this message translates to:
+  /// **'未标记'**
+  String get reviewUntagged;
+
+  /// No description provided for @reviewBatchRangeScope.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用范围：当前列表的 {count} 个候选（随状态和球员标签筛选变化）'**
+  String reviewBatchRangeScope(int count);
+
+  /// No description provided for @reviewFilterCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示 {count} / {total}'**
+  String reviewFilterCount(int count, int total);
 
   /// No description provided for @currentFilter.
   ///
@@ -1075,6 +1123,114 @@ abstract class BheLocalizations {
   /// In zh, this message translates to:
   /// **'关闭'**
   String get close;
+
+  /// No description provided for @rangeEditorHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放片段会在范围内循环；拖动两端、拖到边缘可继续延长，或用 I / O 把当前位置设为开始 / 结束。原视频不会被修改。'**
+  String get rangeEditorHint;
+
+  /// No description provided for @rangeManualHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'已定位到原视频当前时间。用 I / O 设定开始和结束后加入候选。'**
+  String get rangeManualHint;
+
+  /// No description provided for @rangePlayClip.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放片段（Space）'**
+  String get rangePlayClip;
+
+  /// No description provided for @rangePause.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂停（Space）'**
+  String get rangePause;
+
+  /// No description provided for @rangePreviewEnding.
+  ///
+  /// In zh, this message translates to:
+  /// **'预览结尾'**
+  String get rangePreviewEnding;
+
+  /// No description provided for @rangeStatusInside.
+  ///
+  /// In zh, this message translates to:
+  /// **'范围内'**
+  String get rangeStatusInside;
+
+  /// No description provided for @rangeStatusBefore.
+  ///
+  /// In zh, this message translates to:
+  /// **'范围前'**
+  String get rangeStatusBefore;
+
+  /// No description provided for @rangeStatusAfter.
+  ///
+  /// In zh, this message translates to:
+  /// **'范围后'**
+  String get rangeStatusAfter;
+
+  /// No description provided for @rangePosition.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前位置 {time}'**
+  String rangePosition(String time);
+
+  /// No description provided for @rangeSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'片段 {start} – {end} · {duration}'**
+  String rangeSummary(String start, String end, String duration);
+
+  /// No description provided for @rangeSetStart.
+  ///
+  /// In zh, this message translates to:
+  /// **'设为开始（I）'**
+  String get rangeSetStart;
+
+  /// No description provided for @rangeSetEnd.
+  ///
+  /// In zh, this message translates to:
+  /// **'设为结束（O）'**
+  String get rangeSetEnd;
+
+  /// No description provided for @rangeExtendStart.
+  ///
+  /// In zh, this message translates to:
+  /// **'开头 −2 秒'**
+  String get rangeExtendStart;
+
+  /// No description provided for @rangeExtendEnd.
+  ///
+  /// In zh, this message translates to:
+  /// **'结尾 +2 秒'**
+  String get rangeExtendEnd;
+
+  /// No description provided for @rangeExtendBoth.
+  ///
+  /// In zh, this message translates to:
+  /// **'前后各 +2 秒'**
+  String get rangeExtendBoth;
+
+  /// No description provided for @rangeLegendEvent.
+  ///
+  /// In zh, this message translates to:
+  /// **'进球时刻'**
+  String get rangeLegendEvent;
+
+  /// No description provided for @rangeLegendOriginal.
+  ///
+  /// In zh, this message translates to:
+  /// **'原范围'**
+  String get rangeLegendOriginal;
+
+  /// No description provided for @rangeTimelineLabel.
+  ///
+  /// In zh, this message translates to:
+  /// **'片段时间轴'**
+  String get rangeTimelineLabel;
 }
 
 class _BheLocalizationsDelegate

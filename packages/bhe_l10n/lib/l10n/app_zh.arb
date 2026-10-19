@@ -1,5 +1,8 @@
 {
   "@@locale": "zh",
+  "reviewInvalidClipRange": "请输入有效时间：范围须在视频内，且时长至少为 1 秒。",
+  "reviewRangeOpenFailed": "无法暂停预览并打开范围编辑：{error}",
+  "@reviewRangeOpenFailed": {"placeholders": {"error": {"type": "String"}}},
   "appName": "BHE",
   "navProject": "项目",
   "navImport": "导入",
@@ -68,6 +71,19 @@
   "exportScope": "导出范围",
   "allPlayers": "全部球员",
   "unassigned": "未标记",
+  "reviewFilterPlayerTags": "筛选球员标签",
+  "reviewAllTags": "全部标签",
+  "reviewTagged": "已标记",
+  "reviewUntagged": "未标记",
+  "reviewBatchRangeScope": "应用范围：当前列表的 {count} 个候选（随状态和球员标签筛选变化）",
+  "@reviewBatchRangeScope": {"placeholders": {"count": {"type": "int"}}},
+  "reviewFilterCount": "显示 {count} / {total}",
+  "@reviewFilterCount": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "total": {"type": "int"}
+    }
+  },
   "currentFilter": "当前筛选",
   "cancelExport": "取消导出",
   "analysisStillRunning": "视频仍在分析，分析完成后才能导出新的候选结果。",
@@ -162,5 +178,25 @@
   "detectRegionStep": "检测区域",
   "confirm": "确认",
   "cancel": "取消",
-  "close": "关闭"
+  "close": "关闭",
+  "rangeEditorHint": "播放片段会在范围内循环；拖动两端、拖到边缘可继续延长，或用 I / O 把当前位置设为开始 / 结束。原视频不会被修改。",
+  "rangeManualHint": "已定位到原视频当前时间。用 I / O 设定开始和结束后加入候选。",
+  "rangePlayClip": "播放片段（Space）",
+  "rangePause": "暂停（Space）",
+  "rangePreviewEnding": "预览结尾",
+  "rangeStatusInside": "范围内",
+  "rangeStatusBefore": "范围前",
+  "rangeStatusAfter": "范围后",
+  "rangePosition": "当前位置 {time}",
+  "@rangePosition": {"placeholders": {"time": {"type": "String"}}},
+  "rangeSummary": "片段 {start} – {end} · {duration}",
+  "@rangeSummary": {"placeholders": {"start": {"type": "String"}, "end": {"type": "String"}, "duration": {"type": "String"}}},
+  "rangeSetStart": "设为开始（I）",
+  "rangeSetEnd": "设为结束（O）",
+  "rangeExtendStart": "开头 −2 秒",
+  "rangeExtendEnd": "结尾 +2 秒",
+  "rangeExtendBoth": "前后各 +2 秒",
+  "rangeLegendEvent": "进球时刻",
+  "rangeLegendOriginal": "原范围",
+  "rangeTimelineLabel": "片段时间轴"
 }

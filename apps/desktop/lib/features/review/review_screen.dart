@@ -17,6 +17,7 @@ import '../../providers/project_state.dart';
 import '../../providers/playback_coordinator.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
+import 'clip_range_timeline.dart';
 import 'media_readiness.dart';
 import 'review_video_viewport.dart';
 
@@ -38,10 +39,9 @@ class ReviewScreen extends ConsumerStatefulWidget {
 class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   String? _selectedCandidateId;
   bool _showOriginalVideo = false;
-  final Set<String> _selectedForBatch = <String>{};
-  bool _batchMode = false;
   final Set<String> _reviewStartedCandidateIds = <String>{};
   String _candidateFilter = 'all';
+  String _playerFilter = 'all';
   final _VideoPaneController _videoController = _VideoPaneController();
   int _videoSourceSwitchToken = 0;
   final FocusNode _shortcutFocusNode = FocusNode(
@@ -128,7 +128,13 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     String? playerId,
   ) async {
     if (!mounted) return;
+    final before = _filterCandidates(
+      _orderedCandidates(ref.read(projectProvider).candidates),
+      _candidateFilter,
+      playerFilter: _playerFilter,
+    );
     await notifier.setCandidatePlayer(candidate['id'].toString(), playerId);
+    _keepSelectionVisibleAfterEdit(candidate['id'].toString(), before);
   }
 
   Future<String?> _promptPlayerName() async {
@@ -149,49 +155,48 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   ) async {
     final name = await _promptPlayerName();
     if (!mounted || name == null) return;
+    final before = _filterCandidates(
+      _orderedCandidates(ref.read(projectProvider).candidates),
+      _candidateFilter,
+      playerFilter: _playerFilter,
+    );
     await notifier.createPlayer(
       name,
       candidateIds: [candidate['id'].toString()],
     );
+    _keepSelectionVisibleAfterEdit(candidate['id'].toString(), before);
   }
 
-  void _toggleBatchMode() {
+  void _changeFilters({String? status, String? player}) {
     setState(() {
-      _batchMode = !_batchMode;
-      _selectedForBatch.clear();
+      _candidateFilter = status ?? _candidateFilter;
+      _playerFilter = player ?? _playerFilter;
+      final candidates = _filterCandidates(
+        _orderedCandidates(ref.read(projectProvider).candidates),
+        _candidateFilter,
+        playerFilter: _playerFilter,
+      );
+      _selectedCandidateId = _selectedCandidate(candidates)?['id']?.toString();
     });
-    _focusReviewShortcuts();
-  }
-
-  void _toggleBatchCandidate(String id) {
-    setState(() {
-      if (!_selectedForBatch.add(id)) _selectedForBatch.remove(id);
-    });
-  }
-
-  Future<void> _setPlayerForBatch(
-    ProjectNotifier notifier,
-    String? playerId,
-  ) async {
-    if (_selectedForBatch.isEmpty) return;
-    await notifier.setCandidatesPlayer(_selectedForBatch.toList(), playerId);
-    if (mounted) setState(() => _selectedForBatch.clear());
+    final id = _selectedCandidateId;
+    if (id != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _ensureCandidateVisible(id);
+      });
+    }
   }
 
   Future<void> _showBatchRangeDialog(
     BuildContext context,
     ProjectNotifier notifier,
-    List<Map<String, dynamic>> allCandidates,
+    List<Map<String, dynamic>> candidates,
   ) async {
-    if (allCandidates.isEmpty) return;
+    if (candidates.isEmpty) return;
     final beforeController = TextEditingController(text: '6');
     final afterController = TextEditingController(text: '3');
     var overwriteManual = false;
-    var applyToSelected = _selectedForBatch.isNotEmpty;
     final result =
-        await showDialog<
-          ({int before, int after, bool overwrite, bool selected})
-        >(
+        await showDialog<({int before, int after, bool overwrite})>(
           context: context,
           builder: (dialogContext) => StatefulBuilder(
             builder: (context, setDialogState) => AlertDialog(
@@ -204,34 +209,15 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                   children: [
                     Text(context.bheText('进球前后时间会以每个候选的进球时刻为中心计算。')),
                     const SizedBox(height: 16),
-                    if (_selectedForBatch.isNotEmpty)
-                      DropdownButtonFormField<bool>(
-                        key: ValueKey(applyToSelected),
-                        initialValue: applyToSelected,
-                        decoration: InputDecoration(
-                          labelText: context.bheText('应用范围'),
-                        ),
-                        items: [
-                          DropdownMenuItem(
-                            value: false,
-                            child: Text(
-                              context.bheText(
-                                '全部候选 · ${allCandidates.length} 个',
-                              ),
-                            ),
-                          ),
-                          DropdownMenuItem(
-                            value: true,
-                            child: Text(
-                              context.bheText('已勾选候选 · ${_selectedForBatch.length} 个'),
-                            ),
-                          ),
-                        ],
-                        onChanged: (value) => setDialogState(
-                          () => applyToSelected = value ?? false,
-                        ),
-                      ),
-                    if (_selectedForBatch.isNotEmpty) const SizedBox(height: 8),
+                    Text(
+                      Localizations.of<BheLocalizations>(
+                            context,
+                            BheLocalizations,
+                          )?.reviewBatchRangeScope(candidates.length) ??
+                          '应用范围：当前列表的 ${candidates.length} 个候选（随状态和球员标签筛选变化）',
+                      key: const Key('batch-range-scope'),
+                    ),
+                    const SizedBox(height: 8),
                     Row(
                       children: [
                         SizedBox(
@@ -286,19 +272,19 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     if (before == null ||
                         after == null ||
                         before < 0 ||
-                        after < 0) {
+                        after < 0 ||
+                        before + after == 0) {
                       return;
                     }
                     Navigator.pop(dialogContext, (
                       before: before,
                       after: after,
                       overwrite: overwriteManual,
-                      selected: applyToSelected,
                     ));
                   },
                   child: Text(
                     context.bheText(
-                      '应用到 ${applyToSelected ? _selectedForBatch.length : allCandidates.length} 个片段',
+                      '应用到 ${candidates.length} 个片段',
                     ),
                   ),
                 ),
@@ -309,32 +295,16 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     beforeController.dispose();
     afterController.dispose();
     if (result == null || !mounted) return;
-    final ids =
-        (result.selected
-                ? _selectedForBatch
-                : allCandidates.map(
-                    (candidate) => candidate['id']?.toString() ?? '',
-                  ))
-            .where((id) => id.isNotEmpty)
-            .toList();
+    final ids = candidates
+        .map((candidate) => candidate['id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toList();
     await notifier.updateClipRanges(
       candidateIds: ids,
       beforeMs: result.before * 1000,
       afterMs: result.after * 1000,
       overwriteManual: result.overwrite,
     );
-  }
-
-  Future<void> _createPlayerForBatch(ProjectNotifier notifier) async {
-    if (_selectedForBatch.isEmpty) return;
-    final name = await _promptPlayerName();
-    if (!mounted || name == null) return;
-    final playerId = await notifier.createPlayer(
-      name,
-      candidateIds: _selectedForBatch.toList(),
-    );
-    if (!mounted || playerId == null) return;
-    setState(() => _selectedForBatch.clear());
   }
 
   Future<void> _deletePlayer(String playerId, String playerName) async {
@@ -390,6 +360,13 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   }) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
+    final keyboard = HardwareKeyboard.instance;
+    final commandPressed = keyboard.isControlPressed || keyboard.isMetaPressed;
+    // System combos such as Cmd+C must not trigger single-key review actions.
+    if ((commandPressed || keyboard.isAltPressed) &&
+        !(commandPressed && key == LogicalKeyboardKey.keyZ)) {
+      return KeyEventResult.ignored;
+    }
     if (key == LogicalKeyboardKey.arrowUp) {
       _moveCandidate(candidates, -1);
     } else if (key == LogicalKeyboardKey.arrowDown) {
@@ -406,9 +383,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       _requestReplay();
     } else if (key == LogicalKeyboardKey.keyL) {
       _toggleCandidateLoop();
-    } else if (key == LogicalKeyboardKey.keyZ &&
-        (HardwareKeyboard.instance.isControlPressed ||
-            HardwareKeyboard.instance.isMetaPressed)) {
+    } else if (key == LogicalKeyboardKey.keyZ && commandPressed) {
       if (!reviewLocked) unawaited(notifier.undoReview());
     } else if (key == LogicalKeyboardKey.keyX ||
         key == LogicalKeyboardKey.backspace) {
@@ -422,27 +397,100 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       if (!reviewLocked && id != null) {
         unawaited(_setCandidateStatus(id, 'included'));
       }
+    } else if (_playerShortcutIndex(key) case final int index) {
+      // 0 clears the tag; 1-9 follow the player order shown in the tag menu.
+      final players = ref.read(projectProvider).players;
+      if (index > players.length) return KeyEventResult.ignored;
+      if (!reviewLocked && selected != null) {
+        final playerId = index == 0
+            ? null
+            : players[index - 1]['id']?.toString();
+        unawaited(_setPlayerForCandidate(selected, notifier, playerId));
+      }
     } else {
       return KeyEventResult.ignored;
     }
     return KeyEventResult.handled;
   }
 
+  static const List<(LogicalKeyboardKey, LogicalKeyboardKey)> _playerKeys = [
+    (LogicalKeyboardKey.digit0, LogicalKeyboardKey.numpad0),
+    (LogicalKeyboardKey.digit1, LogicalKeyboardKey.numpad1),
+    (LogicalKeyboardKey.digit2, LogicalKeyboardKey.numpad2),
+    (LogicalKeyboardKey.digit3, LogicalKeyboardKey.numpad3),
+    (LogicalKeyboardKey.digit4, LogicalKeyboardKey.numpad4),
+    (LogicalKeyboardKey.digit5, LogicalKeyboardKey.numpad5),
+    (LogicalKeyboardKey.digit6, LogicalKeyboardKey.numpad6),
+    (LogicalKeyboardKey.digit7, LogicalKeyboardKey.numpad7),
+    (LogicalKeyboardKey.digit8, LogicalKeyboardKey.numpad8),
+    (LogicalKeyboardKey.digit9, LogicalKeyboardKey.numpad9),
+  ];
+
+  int? _playerShortcutIndex(LogicalKeyboardKey key) {
+    final index = _playerKeys.indexWhere(
+      (pair) => pair.$1 == key || pair.$2 == key,
+    );
+    return index < 0 ? null : index;
+  }
+
+  Future<({int startMs, int endMs})?> _showRangeDialog(
+    WidgetBuilder builder,
+  ) async {
+    try {
+      return await ref.read(playbackCoordinatorProvider).withPausedPlayback(() {
+        if (!mounted) return Future<({int startMs, int endMs})?>.value();
+        return showDialog<({int startMs, int endMs})>(
+          context: context,
+          builder: builder,
+        );
+      });
+    } catch (error) {
+      if (mounted) {
+        final l10n = Localizations.of<BheLocalizations>(
+          context,
+          BheLocalizations,
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              l10n?.reviewRangeOpenFailed(error.toString()) ??
+                  '无法暂停预览并打开范围编辑：$error',
+            ),
+          ),
+        );
+      }
+      return null;
+    }
+  }
+
   Future<void> _editClipRange(Map<String, dynamic> candidate) async {
-    final result = await showDialog<({int startMs, int endMs})>(
-      context: context,
-      builder: (dialogContext) => _ClipRangeDialog(
+    final clipEnd = _clipEnd(candidate);
+    final videoDurationMs = _number(
+      ref.read(projectProvider).video?['duration_ms'],
+    ).round();
+    // Missing duration metadata must not leave the dialog without a valid axis.
+    final durationMs = videoDurationMs >= 1000
+        ? videoDurationMs
+        : clipEnd > 1000
+        ? clipEnd
+        : 1000;
+    final result = await _showRangeDialog(
+      (dialogContext) => _ClipRangeDialog(
         videoPath: ref.read(projectProvider).videoPath,
         frameSize: _videoFrameSize(ref.read(projectProvider).video),
         startMs: _clipStart(candidate),
-        endMs: _clipEnd(candidate),
-        durationMs: _number(
-          ref.read(projectProvider).video?['duration_ms'],
-        ).round(),
+        endMs: clipEnd,
+        defaultStartMs: candidate['default_start_ms'] == null
+            ? null
+            : _number(candidate['default_start_ms']).round(),
+        defaultEndMs: candidate['default_end_ms'] == null
+            ? null
+            : _number(candidate['default_end_ms']).round(),
+        durationMs: durationMs,
         title: context.bheText('调整片段范围'),
-        description: context.bheText(
-          '拖动时间轴两端即可调整。视频会跳到正在拖动的一端；原视频不会被修改。',
-        ),
+        eventMs: candidate['event_time_ms'] == null
+            ? null
+            : _candidateTime(candidate),
         confirmLabel: context.bheText('应用'),
       ),
     );
@@ -460,20 +508,25 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     final state = ref.read(projectProvider);
     if (state.videoPath == null || state.videoPath!.isEmpty) return;
     final durationMs = _number(state.video?['duration_ms']).round();
-    if (durationMs <= 0) return;
+    if (durationMs < 1000) return;
     final positionMs = _videoController.currentPositionMs.clamp(0, durationMs);
     final startMs = (positionMs - 4000).clamp(0, durationMs - 1000).toInt();
     final endMs = (positionMs + 5000).clamp(startMs + 1000, durationMs).toInt();
-    final result = await showDialog<({int startMs, int endMs})>(
-      context: context,
-      builder: (dialogContext) => _ClipRangeDialog(
+    final result = await _showRangeDialog(
+      (dialogContext) => _ClipRangeDialog(
         videoPath: state.videoPath,
         frameSize: _videoFrameSize(state.video),
         startMs: startMs,
         endMs: endMs,
         durationMs: durationMs,
         title: context.bheText('补漏片段'),
-        description: context.bheText('已定位到原视频当前时间。调整起止时间后加入候选。'),
+        eventMs: positionMs.toInt(),
+        description:
+            Localizations.of<BheLocalizations>(
+              context,
+              BheLocalizations,
+            )?.rangeManualHint ??
+            '已定位到原视频当前时间。用 I / O 设定开始和结束后加入候选。',
         confirmLabel: context.bheText('加入候选'),
       ),
     );
@@ -512,16 +565,27 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     final before = _filterCandidates(
       _orderedCandidates(ref.read(projectProvider).candidates),
       _candidateFilter,
-    );
-    final previousIndex = before.indexWhere(
-      (candidate) => candidate['id']?.toString() == id,
+      playerFilter: _playerFilter,
     );
     final future = ref
         .read(projectProvider.notifier)
         .reviewCandidate(id, status, showNotice: false);
+    _keepSelectionVisibleAfterEdit(id, before);
+    await future;
+  }
+
+  void _keepSelectionVisibleAfterEdit(
+    String id,
+    List<Map<String, dynamic>> before,
+  ) {
+    if (!mounted) return;
+    final previousIndex = before.indexWhere(
+      (candidate) => candidate['id']?.toString() == id,
+    );
     final after = _filterCandidates(
       _orderedCandidates(ref.read(projectProvider).candidates),
       _candidateFilter,
+      playerFilter: _playerFilter,
     );
     if (mounted &&
         _selectedCandidateId == id &&
@@ -537,7 +601,6 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
         });
       }
     }
-    await future;
   }
 
   Future<void> _confirmReanalyze() async {
@@ -586,7 +649,18 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     final notifier = ref.read(projectProvider.notifier);
     _syncPreviewScope(state);
     final allCandidates = _orderedCandidates(state.candidates);
-    final candidates = _filterCandidates(allCandidates, _candidateFilter);
+    if (_playerFilter.startsWith('player:') &&
+        !state.players.any(
+          (player) => 'player:${player['id']}' == _playerFilter,
+        )) {
+      _playerFilter = 'all';
+    }
+    final statusCandidates = _filterCandidates(allCandidates, _candidateFilter);
+    final candidates = _filterCandidates(
+      statusCandidates,
+      'all',
+      playerFilter: _playerFilter,
+    );
     final selected = _selectedCandidate(candidates);
     final selectedId = selected?['id']?.toString();
     final job = state.job;
@@ -715,6 +789,8 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     includedCount: includedCount,
                     totalCount: allCandidates.length,
                     filter: _candidateFilter,
+                    playerFilter: _playerFilter,
+                    statusCandidates: statusCandidates,
                     busy: reviewLocked,
                     busyMessage: state.busyMessage,
                     hydrating: state.hydrating,
@@ -731,25 +807,20 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     onCreatePlayer: (candidate) =>
                         _createPlayerForCandidate(candidate, notifier),
                     players: state.players,
-                    batchMode: _batchMode,
-                    selectedForBatch: _selectedForBatch,
-                    onToggleBatch: _toggleBatchMode,
-                    onToggleBatchCandidate: _toggleBatchCandidate,
-                    onSetPlayerForBatch: (playerId) =>
-                        _setPlayerForBatch(notifier, playerId),
-                    onCreatePlayerForBatch: () =>
-                        _createPlayerForBatch(notifier),
                     onDeletePlayer: _deletePlayer,
                     onBatchRange: () =>
-                        _showBatchRangeDialog(context, notifier, allCandidates),
+                        _showBatchRangeDialog(context, notifier, candidates),
                     onSetStatus: (id, status) =>
                         _setCandidateStatus(id, status),
                     onLoadCover: state.video == null
                         ? null
                         : (id, timeMs) =>
                               _loadCandidateCover(notifier, id, timeMs),
-                    onFilterChanged: (value) =>
-                        setState(() => _candidateFilter = value),
+                    onFilterChanged: (value) => _changeFilters(status: value),
+                    onPlayerFilterChanged: (value) =>
+                        _changeFilters(player: value),
+                    onClearFilters: () =>
+                        _changeFilters(status: 'all', player: 'all'),
                     onReanalyze: !analyzing && !state.busy && !state.hydrating
                         ? reanalyze
                         : null,
@@ -858,6 +929,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     final candidates = _filterCandidates(
       _orderedCandidates(state.candidates),
       _candidateFilter,
+      playerFilter: _playerFilter,
     );
     final index = candidates.indexWhere(
       (candidate) => candidate['id']?.toString() == id,
@@ -895,9 +967,8 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     _coverCache.clear();
     _reviewStartedCandidateIds.clear();
     _selectedCandidateId = null;
-    _selectedForBatch.clear();
-    _batchMode = false;
     _candidateFilter = 'all';
+    _playerFilter = 'all';
     _showOriginalVideo = false;
     _videoSourceSwitchToken++;
   }
@@ -1335,11 +1406,12 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
   Player? _player;
   VideoController? _controller;
   StreamSubscription<Duration>? _positionSubscription;
+  StreamSubscription<bool>? _playingSubscription;
   String? _error;
   bool _ready = false;
   bool _loading = false;
-  bool _showAnnotations = true;
-  bool _loopCandidate = false;
+  bool _showAnnotations = false;
+  bool _loopCandidate = true;
   bool _showAnnotationHint = false;
   int? _clipEndMs;
   bool _clipEndHandled = false;
@@ -1384,6 +1456,14 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
     if (_positionSubscription != null) {
       return;
     }
+    final player = _player!;
+    // A modal pause can be undone by a late native resume; keep the background
+    // preview silent while another player owns the screen.
+    _playingSubscription = player.stream.playing.listen((playing) {
+      if (playing && !_disposed && !_mayPlay && identical(player, _player)) {
+        unawaited(player.pause());
+      }
+    });
     _positionSubscription = _player!.stream.position.listen((position) {
       if (_disposed || !mounted || !_mayPlay) return;
       final end = _clipEndMs;
@@ -1481,6 +1561,8 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
     _annotationHintTimer?.cancel();
     final subscription = _positionSubscription;
     _positionSubscription = null;
+    unawaited(_playingSubscription?.cancel());
+    _playingSubscription = null;
     final player = _player;
     _player = null;
     unawaited(subscription?.cancel());
@@ -3084,8 +3166,11 @@ class _ClipRangeDialog extends StatefulWidget {
     required this.startMs,
     required this.endMs,
     required this.durationMs,
+    this.defaultStartMs,
+    this.defaultEndMs,
+    this.eventMs,
     this.title = '调整片段范围',
-    this.description = '拖动时间轴两端即可调整。视频会跳到正在拖动的一端；原视频不会被修改。',
+    this.description,
     this.confirmLabel = '应用',
   });
 
@@ -3094,8 +3179,11 @@ class _ClipRangeDialog extends StatefulWidget {
   final int startMs;
   final int endMs;
   final int durationMs;
+  final int? defaultStartMs;
+  final int? defaultEndMs;
+  final int? eventMs;
   final String title;
-  final String description;
+  final String? description;
   final String confirmLabel;
 
   @override
@@ -3110,19 +3198,41 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
   bool _playbackRequested = false;
   late int _startMs;
   late int _endMs;
+  late int _windowStartMs;
+  late int _windowEndMs;
   late final TextEditingController _startController;
   late final TextEditingController _endController;
   int _positionMs = 0;
   bool _ready = false;
   String? _error;
-  int? _rangeDragStartMs;
-  int? _rangeDragEndMs;
+  String? _rangeError;
+  bool _startTimeEdited = false;
+  bool _endTimeEdited = false;
+  // Playback that started inside the range stays inside it: it loops, or
+  // stops at the end for an ending preview. Playback started outside the
+  // range browses freely so a later or earlier moment can be found.
+  bool _boundedPlayback = false;
+  bool _loopRange = true;
+  bool _wrapping = false;
+  Timer? _scrubTimer;
+  int? _pendingScrubMs;
+  final FocusNode _keyFocus = FocusNode(debugLabel: 'clip-range-shortcuts');
+
+  static const int _windowPaddingMs = 15000;
+  static const int _windowStepMs = 5000;
+  static const int _minClipMs = 1000;
 
   @override
   void initState() {
     super.initState();
     _startMs = widget.startMs;
     _endMs = widget.endMs;
+    _windowStartMs = (_startMs - _windowPaddingMs)
+        .clamp(0, widget.durationMs - _minClipMs)
+        .toInt();
+    _windowEndMs = (_endMs + _windowPaddingMs)
+        .clamp(_windowStartMs + _minClipMs, widget.durationMs)
+        .toInt();
     _startController = TextEditingController(text: _formatMs(_startMs));
     _endController = TextEditingController(text: _formatMs(_endMs));
     _positionMs = _startMs;
@@ -3146,10 +3256,16 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
         ),
       );
       _positionSubscription = player.stream.position.listen((position) {
-        if (!mounted) return;
+        if (!mounted || !identical(player, _player)) return;
         final next = position.inMilliseconds;
-        if ((next - _positionMs).abs() >= 100) {
+        if (_pendingScrubMs == null && (next - _positionMs).abs() >= 40) {
           setState(() => _positionMs = next);
+        }
+        if (_boundedPlayback &&
+            !_wrapping &&
+            player.state.playing &&
+            next >= _endMs) {
+          unawaited(_handleRangeEnd(player));
         }
       });
       _playingSubscription = player.stream.playing.listen((playing) {
@@ -3182,6 +3298,8 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
   void dispose() {
     unawaited(_positionSubscription?.cancel());
     unawaited(_playingSubscription?.cancel());
+    _scrubTimer?.cancel();
+    _keyFocus.dispose();
     final player = _player;
     _player = null;
     unawaited(() async {
@@ -3212,21 +3330,122 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
     }
   }
 
-  void _startRangeDrag(RangeValues value) {
-    _rangeDragStartMs = _startMs;
-    _rangeDragEndMs = _endMs;
+  Future<void> _handleRangeEnd(Player player) async {
+    _wrapping = true;
+    try {
+      if (_loopRange) {
+        await player.seek(Duration(milliseconds: _startMs));
+      } else {
+        _playbackRequested = false;
+        _boundedPlayback = false;
+        await player.pause();
+        await player.seek(Duration(milliseconds: _endMs));
+        if (mounted) setState(() => _positionMs = _endMs);
+      }
+    } catch (error) {
+      if (mounted && identical(player, _player)) {
+        setState(() => _error = error.toString());
+      }
+    } finally {
+      _wrapping = false;
+    }
   }
 
-  void _endRangeDrag(RangeValues value) {
-    final nextStart = value.start.round();
-    final nextEnd = value.end.round();
-    final previousStart = _rangeDragStartMs ?? _startMs;
-    final previousEnd = _rangeDragEndMs ?? _endMs;
-    _rangeDragStartMs = null;
-    _rangeDragEndMs = null;
-    final startMoved = (nextStart - previousStart).abs();
-    final endMoved = (nextEnd - previousEnd).abs();
-    unawaited(_seek(startMoved >= endMoved ? nextStart : nextEnd));
+  /// Moves the playhead at once and throttles decoder seeks while dragging.
+  void _scrubTo(int position) {
+    final target = position.clamp(0, widget.durationMs).toInt();
+    setState(() => _positionMs = target);
+    _pendingScrubMs = target;
+    if (_scrubTimer != null) return;
+    unawaited(_seek(target));
+    _scrubTimer = Timer(const Duration(milliseconds: 120), () {
+      _scrubTimer = null;
+      final pending = _pendingScrubMs;
+      if (pending != null && pending != target && mounted) _scrubTo(pending);
+    });
+  }
+
+  void _finishScrub(int position) {
+    _scrubTimer?.cancel();
+    _scrubTimer = null;
+    _pendingScrubMs = null;
+    unawaited(_seek(position));
+  }
+
+  Future<void> _pauseForEditing() async {
+    final player = _player;
+    if (player == null || !player.state.playing) return;
+    _playbackRequested = false;
+    _boundedPlayback = false;
+    await player.pause();
+  }
+
+  void _onTimelineRangeChanged(ClipRangeHandle handle, int startMs, int endMs) {
+    if (_player?.state.playing == true) unawaited(_pauseForEditing());
+    _setRange(startMs, endMs, expandWindow: false);
+    _scrubTo(handle == ClipRangeHandle.start ? startMs : endMs);
+  }
+
+  void _onTimelineRangeChangeEnd(ClipRangeHandle handle) {
+    _finishScrub(handle == ClipRangeHandle.start ? _startMs : _endMs);
+  }
+
+  void _extendWindow(ClipRangeHandle handle) {
+    setState(() {
+      if (handle == ClipRangeHandle.start) {
+        _windowStartMs = (_windowStartMs - _windowStepMs)
+            .clamp(0, _windowStartMs)
+            .toInt();
+      } else {
+        _windowEndMs = (_windowEndMs + _windowStepMs)
+            .clamp(_windowEndMs, widget.durationMs)
+            .toInt();
+      }
+    });
+  }
+
+  void _nudge(ClipRangeHandle handle, int deltaMs) {
+    if (handle == ClipRangeHandle.start) {
+      final start = (_startMs + deltaMs).clamp(0, _endMs - _minClipMs).toInt();
+      _setRange(start, _endMs);
+      _finishScrub(start);
+    } else {
+      final end = (_endMs + deltaMs)
+          .clamp(_startMs + _minClipMs, widget.durationMs)
+          .toInt();
+      _setRange(_startMs, end);
+      _finishScrub(end);
+    }
+  }
+
+  void _extendBoth() {
+    final start = (_startMs - 2000).clamp(0, _startMs).toInt();
+    final end = (_endMs + 2000).clamp(_endMs, widget.durationMs).toInt();
+    _setRange(start, end);
+  }
+
+  /// Sets one end at the playhead. A playhead on the far side of the other
+  /// end slides the clip there and keeps its length.
+  void _setHandleAtPosition(ClipRangeHandle handle) {
+    final position = _positionMs.clamp(0, widget.durationMs).toInt();
+    final length = _endMs - _startMs;
+    if (handle == ClipRangeHandle.start) {
+      if (position <= _endMs - _minClipMs) {
+        _setRange(position, _endMs);
+      } else {
+        final end = (position + length).clamp(position, widget.durationMs);
+        final start = (end - length).clamp(0, position).toInt();
+        _setRange(start, end.toInt());
+      }
+    } else {
+      if (position >= _startMs + _minClipMs) {
+        _setRange(_startMs, position);
+      } else {
+        final start = (position - length).clamp(0, position).toInt();
+        final end = (start + length).clamp(position, widget.durationMs);
+        _setRange(start, end.toInt());
+      }
+    }
   }
 
   Future<void> _togglePlayback() async {
@@ -3234,50 +3453,130 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
     if (player == null) return;
     if (player.state.playing) {
       _playbackRequested = false;
+      _boundedPlayback = false;
       await player.pause();
-    } else {
-      _playbackRequested = true;
-      await player.play();
+      return;
     }
+    final position = _positionMs;
+    const tolerance = 200;
+    if (position >= _startMs && position < _endMs - tolerance) {
+      _boundedPlayback = true;
+    } else if (position < _startMs - tolerance ||
+        position > _endMs + tolerance) {
+      _boundedPlayback = false;
+    } else {
+      await _seek(_startMs);
+      _boundedPlayback = true;
+    }
+    _loopRange = true;
+    _playbackRequested = true;
+    await player.play();
+  }
+
+  Future<void> _previewEnding() async {
+    final player = _player;
+    if (player == null) return;
+    final from = (_endMs - 3000).clamp(_startMs, _endMs).toInt();
+    _playbackRequested = false;
+    await player.pause();
+    await _seek(from);
+    _boundedPlayback = true;
+    _loopRange = false;
+    _playbackRequested = true;
+    await player.play();
+  }
+
+  KeyEventResult _handleKey(KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        !_ready ||
+        clipRangeTextFieldFocused() ||
+        clipRangeCommandPressed()) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.space) {
+      unawaited(_togglePlayback());
+    } else if (key == LogicalKeyboardKey.keyI) {
+      _setHandleAtPosition(ClipRangeHandle.start);
+    } else if (key == LogicalKeyboardKey.keyO) {
+      _setHandleAtPosition(ClipRangeHandle.end);
+    } else if (key == LogicalKeyboardKey.arrowLeft) {
+      _finishScrub(_positionMs - 1000);
+    } else if (key == LogicalKeyboardKey.arrowRight) {
+      _finishScrub(_positionMs + 1000);
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
   }
 
   void _restoreDefault() {
-    _setRange(widget.startMs, widget.endMs);
+    _setRange(
+      widget.defaultStartMs ?? widget.startMs,
+      widget.defaultEndMs ?? widget.endMs,
+    );
     unawaited(_seek(_startMs));
   }
 
-  void _setRange(int startMs, int endMs) {
+  void _setRange(int startMs, int endMs, {bool expandWindow = true}) {
     setState(() {
       _startMs = startMs;
       _endMs = endMs;
+      // Programmatic edits may need a wider axis. Dragging keeps its axis
+      // stable or the handles move underneath the pointer on every update.
+      if (expandWindow) {
+        if (startMs < _windowStartMs + 1000) {
+          _windowStartMs = (startMs - _windowStepMs).clamp(0, startMs).toInt();
+        }
+        if (endMs > _windowEndMs - 1000) {
+          _windowEndMs = (endMs + _windowStepMs)
+              .clamp(endMs, widget.durationMs)
+              .toInt();
+        }
+      }
       _startController.text = _formatMs(startMs);
       _endController.text = _formatMs(endMs);
+      _startTimeEdited = false;
+      _endTimeEdited = false;
+      _rangeError = null;
     });
   }
 
   void _submitTimeField({required bool isStart}) {
-    final controller = isStart ? _startController : _endController;
-    final parsed = _parseTimeMs(controller.text);
-    if (parsed == null) {
-      controller.text = _formatMs(isStart ? _startMs : _endMs);
-      return;
+    final range = _readDraftRange();
+    if (range == null) return;
+    _setRange(range.startMs, range.endMs);
+    unawaited(_seek(isStart ? range.startMs : range.endMs));
+  }
+
+  ({int startMs, int endMs})? _readDraftRange() {
+    // Unchanged fields retain their millisecond precision despite the compact
+    // whole-second display. Both drafts are read even when only one used Enter.
+    final start = _startTimeEdited
+        ? _parseTimeMs(_startController.text)
+        : _startMs;
+    final end = _endTimeEdited ? _parseTimeMs(_endController.text) : _endMs;
+    if (start == null ||
+        end == null ||
+        start < 0 ||
+        end > widget.durationMs ||
+        end - start < 1000) {
+      final l10n = Localizations.of<BheLocalizations>(
+        context,
+        BheLocalizations,
+      );
+      setState(
+        () => _rangeError =
+            l10n?.reviewInvalidClipRange ?? '请输入有效时间：范围须在视频内，且时长至少为 1 秒。',
+      );
+      return null;
     }
-    final value = parsed.clamp(0, widget.durationMs).toInt();
-    if (isStart) {
-      if (value >= _endMs - 1000) {
-        controller.text = _formatMs(_startMs);
-        return;
-      }
-      _setRange(value, _endMs);
-      unawaited(_seek(value));
-    } else {
-      if (value <= _startMs + 1000) {
-        controller.text = _formatMs(_endMs);
-        return;
-      }
-      _setRange(_startMs, value);
-      unawaited(_seek(value));
-    }
+    return (startMs: start, endMs: end);
+  }
+
+  void _applyRange() {
+    final range = _readDraftRange();
+    if (range != null) Navigator.pop(context, range);
   }
 
   int? _parseTimeMs(String value) {
@@ -3289,7 +3588,13 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
     if (parts.length == 2) {
       final minutes = int.tryParse(parts[0]);
       final seconds = int.tryParse(parts[1]);
-      if (minutes == null || seconds == null || seconds > 59) return null;
+      if (minutes == null ||
+          seconds == null ||
+          minutes < 0 ||
+          seconds < 0 ||
+          seconds > 59) {
+        return null;
+      }
       return (minutes * 60 + seconds) * 1000;
     }
     if (parts.length == 3) {
@@ -3299,6 +3604,9 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
       if (hours == null ||
           minutes == null ||
           seconds == null ||
+          hours < 0 ||
+          minutes < 0 ||
+          seconds < 0 ||
           minutes > 59 ||
           seconds > 59) {
         return null;
@@ -3311,216 +3619,407 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
   @override
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
-    final contextStart = (widget.startMs - 15000).clamp(0, widget.durationMs);
-    final contextEnd = (widget.endMs + 15000).clamp(
-      contextStart + 1000,
-      widget.durationMs,
+    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
+    final start = _startMs;
+    final end = _endMs;
+    final inside = _positionMs >= start && _positionMs <= end;
+    final status = _positionMs < start
+        ? l10n?.rangeStatusBefore ?? '范围前'
+        : _positionMs > end
+        ? l10n?.rangeStatusAfter ?? '范围后'
+        : l10n?.rangeStatusInside ?? '范围内';
+    final statusColor = inside ? c.success : c.warning;
+    final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
+      color: c.textSecondary,
+      fontFeatures: const [FontFeature.tabularFigures()],
     );
-    final start = _startMs.clamp(contextStart, contextEnd - 1000).toInt();
-    final end = _endMs.clamp(start + 1000, contextEnd).toInt();
     final controller = _controller;
-    return Dialog(
-      backgroundColor: c.surface,
-      surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(CsRadius.md),
-        side: BorderSide(color: c.borderStrong),
-      ),
-      insetPadding: const EdgeInsets.all(Spacing.lg),
-      child: SingleChildScrollView(
-        child: SizedBox(
-          width: 860,
-          child: Padding(
-            padding: const EdgeInsets.all(Spacing.md),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.title,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: Spacing.xs),
-                Text(
-                  widget.description,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: c.textSecondary),
-                ),
-                const SizedBox(height: Spacing.sm),
-                AspectRatio(
-                  key: const Key('clip-range-video-frame'),
-                  aspectRatio: widget.frameSize.aspectRatio,
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(color: Colors.black),
-                    child: _error != null
-                        ? Center(
-                            child: Text(
-                              context.bheText(_error!),
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: c.error),
-                            ),
-                          )
-                        : controller == null || !_ready
-                        ? const Center(
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : GestureDetector(
-                            // 与主审核面板一致:点击视频切换播放/暂停。
-                            behavior: HitTestBehavior.translucent,
-                            onTap: _ready
-                                ? () => unawaited(_togglePlayback())
-                                : null,
-                            child: MouseRegion(
-                              cursor: SystemMouseCursors.click,
-                              child: Video(
-                                controller: controller,
-                                fit: BoxFit.contain,
-                                controls: NoVideoControls,
+    return Focus(
+      focusNode: _keyFocus,
+      autofocus: true,
+      onKeyEvent: (_, event) => _handleKey(event),
+      child: Dialog(
+        backgroundColor: c.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(CsRadius.md),
+          side: BorderSide(color: c.borderStrong),
+        ),
+        insetPadding: const EdgeInsets.all(Spacing.lg),
+        child: SingleChildScrollView(
+          child: SizedBox(
+            width: 860,
+            child: Padding(
+              padding: const EdgeInsets.all(Spacing.md),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: Spacing.xs),
+                  Text(
+                    widget.description ??
+                        l10n?.rangeEditorHint ??
+                        '播放片段会在范围内循环；拖动两端、拖到边缘可继续延长，或用 I / O 把当前位置设为开始 / 结束。原视频不会被修改。',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: c.textSecondary),
+                  ),
+                  const SizedBox(height: Spacing.sm),
+                  AspectRatio(
+                    key: const Key('clip-range-video-frame'),
+                    aspectRatio: widget.frameSize.aspectRatio,
+                    child: DecoratedBox(
+                      decoration: const BoxDecoration(color: Colors.black),
+                      child: _error != null
+                          ? Center(
+                              child: Text(
+                                context.bheText(_error!),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: c.error),
+                              ),
+                            )
+                          : controller == null || !_ready
+                          ? const Center(
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : GestureDetector(
+                              // 与主审核面板一致:点击视频切换播放/暂停。
+                              behavior: HitTestBehavior.translucent,
+                              onTap: _ready
+                                  ? () {
+                                      _keyFocus.requestFocus();
+                                      unawaited(_togglePlayback());
+                                    }
+                                  : null,
+                              child: MouseRegion(
+                                cursor: SystemMouseCursors.click,
+                                child: Video(
+                                  controller: controller,
+                                  fit: BoxFit.contain,
+                                  controls: NoVideoControls,
+                                ),
                               ),
                             ),
-                          ),
+                    ),
                   ),
-                ),
-                const SizedBox(height: Spacing.xs),
-                Row(
-                  children: [
-                    IconButton(
-                      tooltip: context.bheText('播放/暂停'),
-                      onPressed: _ready
-                          ? () => unawaited(_togglePlayback())
-                          : null,
-                      icon: StreamBuilder<bool>(
+                  const SizedBox(height: Spacing.xs),
+                  Row(
+                    children: [
+                      StreamBuilder<bool>(
                         stream: _player?.stream.playing,
                         initialData: _player?.state.playing ?? false,
-                        builder: (context, snapshot) => Icon(
-                          snapshot.data == true
-                              ? Icons.pause_rounded
-                              : Icons.play_arrow_rounded,
+                        builder: (context, snapshot) {
+                          final playing = snapshot.data == true;
+                          return IconButton(
+                            key: const Key('clip-range-play'),
+                            tooltip: playing
+                                ? l10n?.rangePause ?? '暂停（Space）'
+                                : l10n?.rangePlayClip ?? '播放片段（Space）',
+                            onPressed: _ready
+                                ? () => unawaited(_togglePlayback())
+                                : null,
+                            icon: Icon(
+                              playing
+                                  ? Icons.pause_rounded
+                                  : Icons.play_arrow_rounded,
+                            ),
+                          );
+                        },
+                      ),
+                      TextButton.icon(
+                        key: const Key('clip-range-preview-ending'),
+                        onPressed: _ready
+                            ? () => unawaited(_previewEnding())
+                            : null,
+                        icon: const Icon(Icons.last_page_rounded, size: 18),
+                        label: Text(l10n?.rangePreviewEnding ?? '预览结尾'),
+                      ),
+                      const SizedBox(width: Spacing.sm),
+                      Text(
+                        l10n?.rangePosition(_formatMs(_positionMs)) ??
+                            '当前位置 ${_formatMs(_positionMs)}',
+                        style: labelStyle,
+                      ),
+                      const SizedBox(width: Spacing.xs),
+                      Container(
+                        key: const Key('clip-range-status'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: statusColor.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(CsRadius.xs),
+                        ),
+                        child: Text(
+                          status,
+                          style: labelStyle?.copyWith(color: statusColor),
                         ),
                       ),
-                    ),
-                    Text(
-                      context.bheText('当前位置 ${_formatMs(_positionMs)}'),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: c.textSecondary,
-                        fontFeatures: const [FontFeature.tabularFigures()],
+                      const SizedBox(width: Spacing.sm),
+                      Expanded(
+                        child: Text(
+                          l10n?.rangeSummary(
+                                _formatMs(start),
+                                _formatMs(end),
+                                _formatClipDuration(end - start),
+                              ) ??
+                              '片段 ${_formatMs(start)} – ${_formatMs(end)} · '
+                                  '${_formatClipDuration(end - start)}',
+                          style: labelStyle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.end,
+                        ),
                       ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      context.bheText(
-                        '片段 ${_formatMs(start)} - ${_formatMs(end)} · '
-                        '${_formatClipDuration(end - start)}',
-                      ),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: c.textSecondary,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  ],
-                ),
-                RangeSlider(
-                  min: contextStart.toDouble(),
-                  max: contextEnd.toDouble(),
-                  divisions: ((contextEnd - contextStart) ~/ 100).clamp(
-                    10,
-                    600,
+                    ],
                   ),
-                  values: RangeValues(start.toDouble(), end.toDouble()),
-                  onChanged: _ready
-                      ? (value) {
-                          final nextStart = value.start.round();
-                          final nextEnd = value.end.round();
-                          _setRange(nextStart, nextEnd);
-                        }
-                      : null,
-                  onChangeStart: _ready ? _startRangeDrag : null,
-                  onChangeEnd: _ready ? _endRangeDrag : null,
-                ),
-                Row(
-                  children: [
-                    Text(
-                      _formatMs(contextStart),
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelSmall?.copyWith(color: c.textTertiary),
+                  const SizedBox(height: Spacing.xs),
+                  Listener(
+                    onPointerDown: (_) => _keyFocus.requestFocus(),
+                    child: ClipRangeTimeline(
+                      key: const Key('clip-range-timeline'),
+                      windowStartMs: _windowStartMs,
+                      windowEndMs: _windowEndMs,
+                      startMs: start,
+                      endMs: end,
+                      positionMs: _positionMs,
+                      eventMs: widget.eventMs,
+                      originalStartMs: widget.startMs,
+                      originalEndMs: widget.endMs,
+                      enabled: _ready,
+                      minDurationMs: _minClipMs,
+                      semanticLabel: l10n?.rangeTimelineLabel ?? '片段时间轴',
+                      onRangeChanged: _onTimelineRangeChanged,
+                      onRangeChangeEnd: _onTimelineRangeChangeEnd,
+                      onScrub: _scrubTo,
+                      onScrubEnd: _finishScrub,
+                      onExtendWindow: _extendWindow,
                     ),
-                    const Spacer(),
-                    Text(
-                      _formatMs(contextEnd),
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelSmall?.copyWith(color: c.textTertiary),
-                    ),
+                  ),
+                  Row(
+                    children: [
+                      Text(
+                        _formatMs(_windowStartMs),
+                        style: labelStyle?.copyWith(color: c.textTertiary),
+                      ),
+                      const Spacer(),
+                      if (widget.eventMs != null) ...[
+                        Icon(Icons.arrow_drop_down, size: 16, color: c.warning),
+                        Text(
+                          l10n?.rangeLegendEvent ?? '进球时刻',
+                          style: labelStyle?.copyWith(color: c.textTertiary),
+                        ),
+                        const SizedBox(width: Spacing.sm),
+                      ],
+                      if (start != widget.startMs || end != widget.endMs) ...[
+                        Text(
+                          '┄ ',
+                          style: labelStyle?.copyWith(color: c.textSecondary),
+                        ),
+                        Text(
+                          l10n?.rangeLegendOriginal ?? '原范围',
+                          style: labelStyle?.copyWith(color: c.textTertiary),
+                        ),
+                      ],
+                      const Spacer(),
+                      Text(
+                        _formatMs(_windowEndMs),
+                        style: labelStyle?.copyWith(color: c.textTertiary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: Spacing.sm),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: _RangeHandleEditor(
+                          label: context.bheText('开始'),
+                          controller: _startController,
+                          keyPrefix: 'clip-range-start',
+                          setHereLabel: l10n?.rangeSetStart ?? '设为开始（I）',
+                          enabled: _ready,
+                          onChanged: () => _startTimeEdited = true,
+                          onSubmitted: () => _submitTimeField(isStart: true),
+                          onNudge: (delta) =>
+                              _nudge(ClipRangeHandle.start, delta),
+                          onSetHere: () =>
+                              _setHandleAtPosition(ClipRangeHandle.start),
+                        ),
+                      ),
+                      const SizedBox(width: Spacing.md),
+                      Expanded(
+                        child: _RangeHandleEditor(
+                          label: context.bheText('结束'),
+                          controller: _endController,
+                          keyPrefix: 'clip-range-end',
+                          setHereLabel: l10n?.rangeSetEnd ?? '设为结束（O）',
+                          enabled: _ready,
+                          onChanged: () => _endTimeEdited = true,
+                          onSubmitted: () => _submitTimeField(isStart: false),
+                          onNudge: (delta) =>
+                              _nudge(ClipRangeHandle.end, delta),
+                          onSetHere: () =>
+                              _setHandleAtPosition(ClipRangeHandle.end),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: Spacing.xs),
+                  Wrap(
+                    spacing: Spacing.xs,
+                    runSpacing: Spacing.xs,
+                    children: [
+                      ActionChip(
+                        key: const Key('clip-range-extend-start'),
+                        avatar: const Icon(Icons.first_page_rounded, size: 16),
+                        label: Text(l10n?.rangeExtendStart ?? '开头 −2 秒'),
+                        onPressed: () => _nudge(ClipRangeHandle.start, -2000),
+                      ),
+                      ActionChip(
+                        key: const Key('clip-range-extend-end'),
+                        avatar: const Icon(Icons.last_page_rounded, size: 16),
+                        label: Text(l10n?.rangeExtendEnd ?? '结尾 +2 秒'),
+                        onPressed: () => _nudge(ClipRangeHandle.end, 2000),
+                      ),
+                      ActionChip(
+                        key: const Key('clip-range-extend-both'),
+                        avatar: const Icon(Icons.unfold_more_rounded, size: 16),
+                        label: Text(l10n?.rangeExtendBoth ?? '前后各 +2 秒'),
+                        onPressed: _extendBoth,
+                      ),
+                    ],
+                  ),
+                  if (_rangeError != null) ...[
+                    const SizedBox(height: Spacing.xs),
+                    Text(_rangeError!, style: TextStyle(color: c.error)),
                   ],
-                ),
-                const SizedBox(height: Spacing.sm),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _ClipTimeField(
-                        label: context.bheText('开始'),
-                        controller: _startController,
-                        onSubmitted: () => _submitTimeField(isStart: true),
+                  const SizedBox(height: Spacing.md),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: _restoreDefault,
+                        style: TextButton.styleFrom(
+                          foregroundColor: c.textSecondary,
+                        ),
+                        child: Text(context.bheText('恢复默认')),
                       ),
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: Spacing.sm),
-                      child: Icon(Icons.arrow_forward, size: 16),
-                    ),
-                    Expanded(
-                      child: _ClipTimeField(
-                        label: context.bheText('结束'),
-                        controller: _endController,
-                        onSubmitted: () => _submitTimeField(isStart: false),
+                      const SizedBox(width: Spacing.xs),
+                      OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: c.textPrimary,
+                          side: BorderSide(color: c.borderStrong),
+                        ),
+                        child: Text(context.bheText('取消')),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: Spacing.md),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: _restoreDefault,
-                      style: TextButton.styleFrom(
-                        foregroundColor: c.textSecondary,
+                      const SizedBox(width: Spacing.sm),
+                      FilledButton(
+                        onPressed: _applyRange,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: c.orange,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: c.surface3,
+                          disabledForegroundColor: c.textTertiary,
+                        ),
+                        child: Text(widget.confirmLabel),
                       ),
-                      child: Text(context.bheText('恢复默认')),
-                    ),
-                    const SizedBox(width: Spacing.xs),
-                    OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: c.textPrimary,
-                        side: BorderSide(color: c.borderStrong),
-                      ),
-                      child: Text(context.bheText('取消')),
-                    ),
-                    const SizedBox(width: Spacing.sm),
-                    FilledButton(
-                      onPressed: end > start
-                          ? () => Navigator.pop(context, (
-                              startMs: start,
-                              endMs: end,
-                            ))
-                          : null,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: c.orange,
-                        foregroundColor: Colors.white,
-                        disabledBackgroundColor: c.surface3,
-                        disabledForegroundColor: c.textTertiary,
-                      ),
-                      child: Text(widget.confirmLabel),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _RangeHandleEditor extends StatelessWidget {
+  const _RangeHandleEditor({
+    required this.label,
+    required this.controller,
+    required this.keyPrefix,
+    required this.setHereLabel,
+    required this.enabled,
+    required this.onChanged,
+    required this.onSubmitted,
+    required this.onNudge,
+    required this.onSetHere,
+  });
+
+  final String label;
+  final TextEditingController controller;
+  final String keyPrefix;
+  final String setHereLabel;
+  final bool enabled;
+  final VoidCallback onChanged;
+  final VoidCallback onSubmitted;
+  final ValueChanged<int> onNudge;
+  final VoidCallback onSetHere;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final compact = TextButton.styleFrom(
+      foregroundColor: c.textSecondary,
+      minimumSize: const Size(44, 36),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      visualDensity: VisualDensity.compact,
+      textStyle: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ClipTimeField(
+          label: label,
+          controller: controller,
+          onChanged: onChanged,
+          onSubmitted: onSubmitted,
+        ),
+        const SizedBox(height: Spacing.xs),
+        Row(
+          children: [
+            for (final delta in const [-1000, -500, 500, 1000])
+              TextButton(
+                key: ValueKey('$keyPrefix-nudge-$delta'),
+                style: compact,
+                onPressed: () => onNudge(delta),
+                child: Text(
+                  '${delta > 0 ? '+' : '−'}${(delta.abs() / 1000).toStringAsFixed(delta.abs() % 1000 == 0 ? 0 : 1)}s',
+                ),
+              ),
+            const SizedBox(width: Spacing.xs),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton.icon(
+                  key: ValueKey('$keyPrefix-set'),
+                  onPressed: enabled ? onSetHere : null,
+                  icon: const Icon(Icons.my_location_rounded, size: 16),
+                  label: Text(
+                    setHereLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: c.textPrimary,
+                    side: BorderSide(color: c.borderStrong),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -3530,11 +4029,13 @@ class _ClipTimeField extends StatelessWidget {
     required this.label,
     required this.controller,
     required this.onSubmitted,
+    required this.onChanged,
   });
 
   final String label;
   final TextEditingController controller;
   final VoidCallback onSubmitted;
+  final VoidCallback onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -3542,6 +4043,7 @@ class _ClipTimeField extends StatelessWidget {
     return TextField(
       controller: controller,
       onSubmitted: (_) => onSubmitted(),
+      onChanged: (_) => onChanged(),
       textInputAction: TextInputAction.done,
       keyboardType: TextInputType.number,
       style: Theme.of(context).textTheme.labelMedium?.copyWith(
@@ -3636,6 +4138,8 @@ class _CandidatePanel extends StatelessWidget {
     required this.includedCount,
     required this.totalCount,
     required this.filter,
+    required this.playerFilter,
+    required this.statusCandidates,
     required this.busy,
     required this.busyMessage,
     required this.hydrating,
@@ -3650,17 +4154,13 @@ class _CandidatePanel extends StatelessWidget {
     required this.onSetPlayer,
     required this.onCreatePlayer,
     required this.players,
-    required this.batchMode,
-    required this.selectedForBatch,
-    required this.onToggleBatch,
-    required this.onToggleBatchCandidate,
-    required this.onSetPlayerForBatch,
-    required this.onCreatePlayerForBatch,
     required this.onDeletePlayer,
     required this.onBatchRange,
     required this.onSetStatus,
     required this.onLoadCover,
     required this.onFilterChanged,
+    required this.onPlayerFilterChanged,
+    required this.onClearFilters,
     required this.onReanalyze,
     required this.onRetryHydration,
     required this.onEditRange,
@@ -3676,6 +4176,8 @@ class _CandidatePanel extends StatelessWidget {
   final int includedCount;
   final int totalCount;
   final String filter;
+  final String playerFilter;
+  final List<Map<String, dynamic>> statusCandidates;
   final bool busy;
   final String? busyMessage;
   final bool hydrating;
@@ -3690,17 +4192,13 @@ class _CandidatePanel extends StatelessWidget {
   final Future<void> Function(Map<String, dynamic>, String?) onSetPlayer;
   final Future<void> Function(Map<String, dynamic>) onCreatePlayer;
   final List<Map<String, dynamic>> players;
-  final bool batchMode;
-  final Set<String> selectedForBatch;
-  final VoidCallback onToggleBatch;
-  final ValueChanged<String> onToggleBatchCandidate;
-  final ValueChanged<String?> onSetPlayerForBatch;
-  final VoidCallback onCreatePlayerForBatch;
   final Future<void> Function(String, String) onDeletePlayer;
   final VoidCallback onBatchRange;
   final Future<void> Function(String, String) onSetStatus;
   final Future<String?> Function(String, int)? onLoadCover;
   final ValueChanged<String> onFilterChanged;
+  final ValueChanged<String> onPlayerFilterChanged;
+  final VoidCallback onClearFilters;
   final VoidCallback? onReanalyze;
   final VoidCallback? onRetryHydration;
   final VoidCallback? onEditRange;
@@ -3710,32 +4208,11 @@ class _CandidatePanel extends StatelessWidget {
   final VoidCallback onGoImport;
   final VoidCallback? onExport;
 
-  void _showBatchPlayerMenu(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => _PlayerPickerMenuContent(
-        players: players,
-        onSelected: (playerId) {
-          Navigator.of(context).pop();
-          onSetPlayerForBatch(playerId);
-        },
-        onCreate: () {
-          Navigator.of(context).pop();
-          onCreatePlayerForBatch();
-        },
-        onDelete: (playerId, playerName) async {
-          Navigator.of(context).pop();
-          await onDeletePlayer(playerId, playerName);
-        },
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
     final theme = Theme.of(context);
+    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
     return Container(
       key: const Key('candidate-panel-inset'),
       color: c.surface,
@@ -3804,42 +4281,10 @@ class _CandidatePanel extends StatelessWidget {
                 spacing: 0,
                 runSpacing: 0,
                 children: [
-                  if (batchMode && selectedForBatch.isNotEmpty) ...[
-                    Text(
-                      context.bheText('批量 ${selectedForBatch.length} 个'),
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: c.orange,
-                      ),
-                    ),
-                    IconButton(
-                    tooltip: context.bheText('设置批量球员标签'),
-                      onPressed: busy
-                          ? null
-                          : () => _showBatchPlayerMenu(context),
-                      icon: const Icon(
-                        Icons.person_add_alt_1_outlined,
-                        size: 18,
-                      ),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ],
                   IconButton(
                     tooltip: context.bheText('批量设置片段时长'),
                     onPressed: busy ? null : onBatchRange,
                     icon: const Icon(Icons.schedule_outlined, size: 18),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  IconButton(
-                    tooltip: context.bheText(
-                      batchMode ? '退出批量选择' : '批量选择候选',
-                    ),
-                    onPressed: busy ? null : onToggleBatch,
-                    icon: Icon(
-                      batchMode
-                          ? Icons.close_fullscreen
-                          : Icons.checklist_outlined,
-                      size: 18,
-                    ),
                     visualDensity: VisualDensity.compact,
                   ),
                   PopupMenuButton<String>(
@@ -3890,7 +4335,7 @@ class _CandidatePanel extends StatelessWidget {
                   ),
                   Tooltip(
                     message: context.bheText(
-                      '快捷键\nSpace  播放/暂停\nR  重播当前\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒\nC / Enter  保留\nX / Backspace  排除\nCmd/Ctrl+Z  撤销',
+                      '快捷键\nSpace  播放/暂停\nR  重播当前\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒\nC / Enter  保留\nX / Backspace  排除\n1–9  设置球员标签 · 0  清除\nCmd/Ctrl+Z  撤销',
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(8),
@@ -3922,6 +4367,27 @@ class _CandidatePanel extends StatelessWidget {
             },
           ),
           const SizedBox(height: Spacing.xs),
+          Row(
+            children: [
+              Expanded(
+                child: _PlayerTagFilterMenu(
+                  value: playerFilter,
+                  candidates: statusCandidates,
+                  players: players,
+                  onChanged: onPlayerFilterChanged,
+                ),
+              ),
+              const SizedBox(width: Spacing.sm),
+              Text(
+                l10n?.reviewFilterCount(candidates.length, totalCount) ??
+                    '显示 ${candidates.length} / $totalCount',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: c.textSecondary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Spacing.xs),
           Expanded(
             child: candidates.isEmpty
                 ? _EmptyCandidates(
@@ -3932,9 +4398,9 @@ class _CandidatePanel extends StatelessWidget {
                     analysisMode: analysisMode,
                     analysisCompleted: analysisCompleted,
                     filterEmpty: totalCount > 0,
-                    onClearFilter: filter == 'all'
+                    onClearFilter: filter == 'all' && playerFilter == 'all'
                         ? null
-                        : () => onFilterChanged('all'),
+                        : onClearFilters,
                     onReanalyze: onReanalyze,
                     onRetryHydration: onRetryHydration,
                     onGoImport: onGoImport,
@@ -3955,8 +4421,6 @@ class _CandidatePanel extends StatelessWidget {
                         candidate: candidate,
                         index: index,
                         selected: id == selectedId,
-                        batchMode: batchMode,
-                        batchSelected: selectedForBatch.contains(id),
                         excluded: _isExcluded(candidate),
                         busy: busy,
                         onTap: () => onSelect(candidate),
@@ -3970,7 +4434,6 @@ class _CandidatePanel extends StatelessWidget {
                           candidate['player_id']?.toString(),
                           _playerIndex(candidate, players),
                         ),
-                        onToggleBatch: () => onToggleBatchCandidate(id),
                         onInclude: () => unawaited(onSetStatus(id, 'included')),
                         onExclude: () => unawaited(onSetStatus(id, 'excluded')),
                         coverFuture: coverFuture,
@@ -3986,8 +4449,12 @@ class _CandidatePanel extends StatelessWidget {
               children: [
                 Expanded(
                   child: CsButton(
-                    label: Text(
-                      context.bheText('导出 $includedCount 个片段'),
+                    label: Flexible(
+                      child: Text(
+                        context.bheText('导出 $includedCount 个片段'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     icon: Icons.file_upload_outlined,
                     size: CsButtonSize.sm,
@@ -4034,6 +4501,97 @@ class _CandidatePanel extends StatelessWidget {
   }
 }
 
+class _PlayerTagFilterMenu extends StatelessWidget {
+  const _PlayerTagFilterMenu({
+    required this.value,
+    required this.candidates,
+    required this.players,
+    required this.onChanged,
+  });
+
+  final String value;
+  final List<Map<String, dynamic>> candidates;
+  final List<Map<String, dynamic>> players;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
+    final c = AppColors.of(context);
+    final labels = <String, String>{
+      'all': l10n?.reviewAllTags ?? '全部标签',
+      'tagged': l10n?.reviewTagged ?? '已标记',
+      'untagged': l10n?.reviewUntagged ?? '未标记',
+      for (final player in players)
+        'player:${player['id']}': player['name']?.toString() ?? '',
+    };
+    final counts = <String, int>{'all': candidates.length};
+    for (final candidate in candidates) {
+      final id = candidate['player_id']?.toString() ?? '';
+      final bucket = id.isEmpty ? 'untagged' : 'tagged';
+      counts.update(bucket, (count) => count + 1, ifAbsent: () => 1);
+      if (id.isNotEmpty) {
+        counts.update('player:$id', (count) => count + 1, ifAbsent: () => 1);
+      }
+    }
+    final currentLabel = labels[value] ?? labels['all']!;
+    return PopupMenuButton<String>(
+      key: const Key('review-player-filter'),
+      tooltip: l10n?.reviewFilterPlayerTags ?? '筛选球员标签',
+      initialValue: value,
+      onSelected: onChanged,
+      constraints: const BoxConstraints(maxWidth: 320),
+      itemBuilder: (context) => [
+        for (final entry in labels.entries)
+          PopupMenuItem<String>(
+            key: ValueKey('review-tag-option-${entry.key}'),
+            value: entry.key,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Tooltip(
+                    message: entry.value,
+                    child: Text(
+                      entry.value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: Spacing.md),
+                Text('${counts[entry.key] ?? 0}'),
+              ],
+            ),
+          ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: Spacing.sm,
+          vertical: 6,
+        ),
+        decoration: BoxDecoration(
+          color: c.surface2,
+          borderRadius: BorderRadius.circular(CsRadius.sm),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.person_outline, size: 16, color: c.textSecondary),
+            const SizedBox(width: Spacing.xs),
+            Expanded(
+              child: Text(
+                currentLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(Icons.expand_more, size: 15, color: c.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _EmptyCandidates extends StatelessWidget {
   const _EmptyCandidates({
     required this.analyzing,
@@ -4074,9 +4632,7 @@ class _EmptyCandidates extends StatelessWidget {
       return CsEmptyState(
         icon: Icons.sync_problem_outlined,
         title: context.bheText('项目数据加载失败'),
-        description: context.bheText(
-          '候选片段没有成功恢复，请重试加载，不需要重新分析视频。',
-        ),
+        description: context.bheText('候选片段没有成功恢复，请重试加载，不需要重新分析视频。'),
         action: CsButton(
           label: Text(context.bheText('重试加载')),
           icon: Icons.refresh,
@@ -4116,9 +4672,7 @@ class _EmptyCandidates extends StatelessWidget {
       description: hasVideo
           ? fastEmpty
                 ? context.bheText('快速模式可能漏检，建议用标准模式重新分析。')
-                : context.bheText(
-                    '重新分析直接使用当前配置；重新配置可以修改分析范围和篮筐区域。',
-                  )
+                : context.bheText('重新分析直接使用当前配置；重新配置可以修改分析范围和篮筐区域。')
           : context.bheText('先导入视频并完成配置，再开始分析。'),
       action: Wrap(
         alignment: WrapAlignment.center,
@@ -4126,16 +4680,12 @@ class _EmptyCandidates extends StatelessWidget {
         children: [
           if (hasVideo)
             CsButton(
-              label: Text(
-                context.bheText(fastEmpty ? '用标准模式重新分析' : '重新分析'),
-              ),
+              label: Text(context.bheText(fastEmpty ? '用标准模式重新分析' : '重新分析')),
               icon: Icons.replay,
               onPressed: onReanalyze,
             ),
           CsButton(
-            label: Text(
-              context.bheText(hasVideo ? '重新配置' : '去导入视频'),
-            ),
+            label: Text(context.bheText(hasVideo ? '重新配置' : '去导入视频')),
             icon: hasVideo ? Icons.tune : Icons.upload_file,
             variant: CsButtonVariant.secondary,
             onPressed: onGoImport,
@@ -4151,8 +4701,6 @@ class _CandidateRow extends StatelessWidget {
     required this.candidate,
     required this.index,
     required this.selected,
-    required this.batchMode,
-    required this.batchSelected,
     required this.excluded,
     required this.busy,
     required this.onTap,
@@ -4161,7 +4709,6 @@ class _CandidateRow extends StatelessWidget {
     required this.onDeletePlayer,
     required this.players,
     required this.playerColor,
-    required this.onToggleBatch,
     required this.onInclude,
     required this.onExclude,
     required this.coverFuture,
@@ -4171,8 +4718,6 @@ class _CandidateRow extends StatelessWidget {
   final Map<String, dynamic> candidate;
   final int index;
   final bool selected;
-  final bool batchMode;
-  final bool batchSelected;
   final bool excluded;
   final bool busy;
   final VoidCallback onTap;
@@ -4181,7 +4726,6 @@ class _CandidateRow extends StatelessWidget {
   final Future<void> Function(String, String) onDeletePlayer;
   final List<Map<String, dynamic>> players;
   final Color playerColor;
-  final VoidCallback onToggleBatch;
   final VoidCallback onInclude;
   final VoidCallback onExclude;
   final Future<String?>? coverFuture;
@@ -4193,10 +4737,9 @@ class _CandidateRow extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      label:
-          context.bheText(
-            '候选 ${index + 1}，${_formatMs(_candidateTime(candidate))}，${excluded ? '已排除' : '已保留'}',
-          ),
+      label: context.bheText(
+        '候选 ${index + 1}，${_formatMs(_candidateTime(candidate))}，${excluded ? '已排除' : '已保留'}',
+      ),
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         child: AnimatedContainer(
@@ -4219,15 +4762,6 @@ class _CandidateRow extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              if (batchMode)
-                Padding(
-                  padding: const EdgeInsets.only(right: Spacing.xs),
-                  child: Checkbox(
-                    value: batchSelected,
-                    onChanged: busy ? null : (_) => onToggleBatch(),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
               Expanded(
                 child: Material(
                   color: Colors.transparent,
@@ -4553,6 +5087,7 @@ class _PlayerPickerMenuContent extends StatelessWidget {
                 label: context.bheText('未标记'),
                 icon: Icons.person_off_outlined,
                 color: c.textTertiary,
+                shortcut: '0',
                 onTap: () => onSelected(null),
               ),
               Expanded(
@@ -4567,6 +5102,7 @@ class _PlayerPickerMenuContent extends StatelessWidget {
                           return _PlayerPickerOption(
                             label: name,
                             color: _playerColor(id, index),
+                            shortcut: index < 9 ? '${index + 1}' : null,
                             onTap: id == null ? null : () => onSelected(id),
                             trailing: onDelete == null || id == null
                                 ? null
@@ -4618,6 +5154,7 @@ class _PlayerPickerOption extends StatelessWidget {
     required this.onTap,
     this.icon,
     this.trailing,
+    this.shortcut,
   });
 
   final String label;
@@ -4625,6 +5162,7 @@ class _PlayerPickerOption extends StatelessWidget {
   final VoidCallback? onTap;
   final IconData? icon;
   final Widget? trailing;
+  final String? shortcut;
 
   @override
   Widget build(BuildContext context) {
@@ -4647,6 +5185,30 @@ class _PlayerPickerOption extends StatelessWidget {
                   style: TextStyle(color: color, fontSize: 12),
                 ),
               ),
+              if (shortcut != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 6),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: AppColors.of(context).border),
+                      borderRadius: BorderRadius.circular(CsRadius.xs),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1,
+                      ),
+                      child: Text(
+                        shortcut!,
+                        style: TextStyle(
+                          color: AppColors.of(context).textTertiary,
+                          fontSize: 10,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ?trailing,
             ],
           ),
@@ -4755,14 +5317,20 @@ bool _isExcluded(Map<String, dynamic> candidate) =>
 
 List<Map<String, dynamic>> _filterCandidates(
   List<Map<String, dynamic>> candidates,
-  String filter,
-) {
-  return switch (filter) {
-    'included' =>
-      candidates.where((candidate) => !_isExcluded(candidate)).toList(),
-    'excluded' => candidates.where(_isExcluded).toList(),
-    _ => candidates,
-  };
+  String filter, {
+  String playerFilter = 'all',
+}) {
+  return candidates.where((candidate) {
+    if (filter == 'included' && _isExcluded(candidate)) return false;
+    if (filter == 'excluded' && !_isExcluded(candidate)) return false;
+    final id = candidate['player_id']?.toString() ?? '';
+    return switch (playerFilter) {
+      'tagged' => id.isNotEmpty,
+      'untagged' => id.isEmpty,
+      'all' => true,
+      _ => playerFilter == 'player:$id',
+    };
+  }).toList();
 }
 
 String _candidateFilterLabel(String filter) =>

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:convert';
 import 'dart:async';
+import 'package:bhe_l10n/bhe_l10n.dart';
 
 import 'package:desktop/features/review/review_screen.dart';
 import 'package:desktop/features/review/media_readiness.dart';
@@ -11,6 +12,230 @@ import 'package:desktop/providers/project_state.dart';
 import 'package:desktop/theme/tokens.dart';
 
 void main() {
+  testWidgets(
+    'player tag filters compose with status without changing export scope',
+    (tester) async {
+      final notifier = _TagReviewNotifier(_tagReviewState());
+      await _pumpReview(tester, notifier.initialState, notifier: notifier);
+      await _chooseTagFilter(tester, 'player:p1');
+      expect(find.byKey(const ValueKey('player-chip-c1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('player-chip-c3')), findsOneWidget);
+      expect(find.byKey(const ValueKey('player-chip-c2')), findsNothing);
+      expect(find.text('显示 2 / 4'), findsOneWidget);
+      expect(find.text('导出 3 个片段'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('筛选候选'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('保留').last);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('player-chip-c1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('player-chip-c3')), findsNothing);
+      expect(find.text('显示 1 / 4'), findsOneWidget);
+      expect(find.text('导出 3 个片段'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('review-player-filter')));
+      await tester.pumpAndSettle();
+      for (final entry in {
+        'all': '3',
+        'tagged': '2',
+        'untagged': '1',
+        'player:p1': '1',
+        'player:p3': '0',
+      }.entries) {
+        expect(
+          find.descendant(
+            of: find.byKey(ValueKey('review-tag-option-${entry.key}')),
+            matching: find.text(entry.value),
+          ),
+          findsOneWidget,
+        );
+      }
+      await tester.tap(find.byKey(const ValueKey('review-tag-option-tagged')));
+      await tester.pumpAndSettle();
+      expect(find.text('#1 00:03'), findsOneWidget);
+      expect(find.text('#2 00:12'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(find.text('候选 00:12'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'untagged filter updates when tags change and can clear an empty result',
+    (tester) async {
+      final notifier = _TagReviewNotifier(_tagReviewState());
+      await _pumpReview(tester, notifier.initialState, notifier: notifier);
+      await _chooseTagFilter(tester, 'untagged');
+      expect(find.byKey(const ValueKey('player-chip-c2')), findsOneWidget);
+      expect(find.text('显示 1 / 4'), findsOneWidget);
+      await notifier.setCandidatePlayer('c2', 'p1');
+      await tester.pumpAndSettle();
+      expect(find.text('没有匹配的候选'), findsOneWidget);
+      expect(find.text('显示 0 / 4'), findsOneWidget);
+      await tester.tap(find.text('显示全部'));
+      await tester.pumpAndSettle();
+      expect(find.text('全部标签'), findsOneWidget);
+      expect(find.text('显示 4 / 4'), findsOneWidget);
+      expect(find.text('导出 3 个片段'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'tagging a middle untagged clip advances nearby instead of restarting review',
+    (tester) async {
+      final initial = _tagReviewState();
+      final notifier = _TagReviewNotifier(
+        initial.copyWith(
+          candidates: [
+            for (final candidate in initial.candidates)
+              if (candidate['id'] != 'c3')
+                {...candidate, 'player_id': null, 'player_name': null}
+              else
+                candidate,
+          ],
+        ),
+      );
+      await _pumpReview(tester, notifier.initialState, notifier: notifier);
+      await _chooseTagFilter(tester, 'untagged');
+      await tester.tap(find.text('#2 00:06'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('player-chip-c2')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('小夏'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('player-chip-c2')), findsNothing);
+      expect(find.text('候选 00:12'), findsOneWidget);
+      expect(find.text('显示 2 / 4'), findsOneWidget);
+    },
+  );
+
+  testWidgets('empty-result recovery clears both tag and status filters', (
+    tester,
+  ) async {
+    final notifier = _TagReviewNotifier(_tagReviewState());
+    await _pumpReview(tester, notifier.initialState, notifier: notifier);
+    await tester.tap(find.byTooltip('筛选候选'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('排除').last);
+    await tester.pumpAndSettle();
+    await _chooseTagFilter(tester, 'player:p2');
+    expect(find.text('没有匹配的候选'), findsOneWidget);
+    await tester.tap(find.text('显示全部'));
+    await tester.pumpAndSettle();
+    expect(find.text('显示 4 / 4'), findsOneWidget);
+    expect(find.text('全部标签'), findsOneWidget);
+    expect(find.text('全部'), findsOneWidget);
+  });
+
+  testWidgets('number keys tag the selected clip in player menu order', (
+    tester,
+  ) async {
+    final notifier = _TagReviewNotifier(_tagReviewState());
+    await _pumpReview(tester, notifier.initialState, notifier: notifier);
+    await _chooseTagFilter(tester, 'untagged');
+    expect(find.byKey(const ValueKey('player-chip-c2')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit9);
+    await tester.pumpAndSettle();
+    expect(notifier.lastTaggedIds, isNull);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(notifier.lastTaggedIds, isNull);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
+    await tester.pumpAndSettle();
+    expect(notifier.lastTaggedIds, ['c2']);
+    expect(
+      notifier.current.candidates.firstWhere(
+        (c) => c['id'] == 'c2',
+      )['player_id'],
+      'p2',
+    );
+    expect(find.text('没有匹配的候选'), findsOneWidget);
+
+    await tester.tap(find.text('显示全部'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('#1 00:03'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.numpad0);
+    await tester.pumpAndSettle();
+    expect(notifier.lastTaggedIds, ['c1']);
+    expect(
+      notifier.current.candidates.firstWhere(
+        (c) => c['id'] == 'c1',
+      )['player_id'],
+      isNull,
+    );
+  });
+
+  testWidgets('batch duration applies to the current filtered list', (
+    tester,
+  ) async {
+    final notifier = _TagReviewNotifier(_tagReviewState());
+    await _pumpReview(tester, notifier.initialState, notifier: notifier);
+    await _chooseTagFilter(tester, 'player:p1');
+    await tester.tap(find.byTooltip('批量设置片段时长'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('当前列表的 2 个候选'), findsOneWidget);
+    await tester.tap(find.text('应用到 2 个片段'));
+    await tester.pumpAndSettle();
+    expect(notifier.rangeIds, ['c1', 'c3']);
+  });
+
+  testWidgets(
+    'deleted tags and a different project cannot leave a stale filter',
+    (tester) async {
+      final notifier = _TagReviewNotifier(_tagReviewState());
+      await _pumpReview(tester, notifier.initialState, notifier: notifier);
+      await _chooseTagFilter(tester, 'player:p3');
+      expect(find.text('没有匹配的候选'), findsOneWidget);
+      notifier.replaceState(
+        notifier.current.copyWith(
+          players: notifier.current.players.take(2).toList(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('全部标签'), findsOneWidget);
+      expect(find.text('显示 4 / 4'), findsOneWidget);
+      await _chooseTagFilter(tester, 'player:p1');
+      await tester.tap(find.byTooltip('筛选候选'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('保留').last);
+      await tester.pumpAndSettle();
+      notifier.replaceState(_tagReviewState(projectId: 'v2'));
+      await tester.pumpAndSettle();
+      expect(find.text('全部标签'), findsOneWidget);
+      expect(find.text('全部'), findsOneWidget);
+      expect(find.text('显示 4 / 4'), findsOneWidget);
+    },
+  );
+
+  for (final size in [const Size(1000, 800), const Size(760, 900)]) {
+    testWidgets('English tag filters handle long names at $size', (
+      tester,
+    ) async {
+      final notifier = _TagReviewNotifier(
+        _tagReviewState(
+          playerName: List.filled(20, 'Long player name').join(' '),
+        ),
+      );
+      await _pumpReview(
+        tester,
+        notifier.initialState,
+        notifier: notifier,
+        size: size,
+        locale: const Locale('en'),
+      );
+      await tester.ensureVisible(find.byKey(const Key('review-player-filter')));
+      await _chooseTagFilter(tester, 'player:p1');
+      expect(find.text('Showing 2 / 4'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   for (final frame in [
     const Size(1440, 1080),
     const Size(1920, 1080),
@@ -685,10 +910,10 @@ void main() {
       ),
     );
 
-    expect(find.byTooltip('关闭标注（A）'), findsOneWidget);
+    expect(find.byTooltip('显示标注（A）'), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
     await tester.pump();
-    expect(find.byTooltip('显示标注（A）'), findsOneWidget);
+    expect(find.byTooltip('关闭标注（A）'), findsOneWidget);
   });
 
   testWidgets('shows keyboard shortcut help on the candidate panel', (
@@ -711,7 +936,7 @@ void main() {
 
     expect(
       find.byTooltip(
-        '快捷键\nSpace  播放/暂停\nR  重播当前\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒\nC / Enter  保留\nX / Backspace  排除\nCmd/Ctrl+Z  撤销',
+        '快捷键\nSpace  播放/暂停\nR  重播当前\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒\nC / Enter  保留\nX / Backspace  排除\n1–9  设置球员标签 · 0  清除\nCmd/Ctrl+Z  撤销',
       ),
       findsOneWidget,
     );
@@ -961,6 +1186,7 @@ Future<void> _pumpReview(
   ProjectState state, {
   Size size = const Size(1200, 800),
   ProjectNotifier? notifier,
+  Locale? locale,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -970,10 +1196,119 @@ Future<void> _pumpReview(
       overrides: [
         projectProvider.overrideWith(() => notifier ?? _ReviewNotifier(state)),
       ],
-      child: const MaterialApp(home: Scaffold(body: ReviewScreen())),
+      child: MaterialApp(
+        locale: locale,
+        localizationsDelegates: locale == null
+            ? null
+            : BheLocalizations.localizationsDelegates,
+        supportedLocales: BheLocalizations.supportedLocales,
+        home: const Scaffold(body: ReviewScreen()),
+      ),
     ),
   );
   await tester.pump();
+}
+
+Future<void> _chooseTagFilter(WidgetTester tester, String value) async {
+  await tester.tap(find.byKey(const Key('review-player-filter')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(ValueKey('review-tag-option-$value')));
+  await tester.pumpAndSettle();
+}
+
+ProjectState _tagReviewState({
+  String projectId = 'v1',
+  String playerName = '小夏',
+}) => ProjectState(
+  video: {'id': projectId},
+  job: const {'state': 'completed'},
+  players: [
+    {'id': 'p1', 'name': playerName},
+    {'id': 'p2', 'name': '小王'},
+    {'id': 'p3', 'name': '零片段'},
+  ],
+  candidates: [
+    {
+      'id': 'c1',
+      'event_time_ms': 3000,
+      'default_start_ms': 0,
+      'default_end_ms': 6000,
+      'player_id': 'p1',
+      'player_name': playerName,
+      'review_status': 'pending',
+    },
+    {
+      'id': 'c2',
+      'event_time_ms': 6000,
+      'default_start_ms': 3000,
+      'default_end_ms': 9000,
+      'player_id': null,
+      'review_status': 'pending',
+    },
+    {
+      'id': 'c3',
+      'event_time_ms': 9000,
+      'default_start_ms': 6000,
+      'default_end_ms': 12000,
+      'player_id': 'p1',
+      'player_name': playerName,
+      'review_status': 'excluded',
+    },
+    {
+      'id': 'c4',
+      'event_time_ms': 12000,
+      'default_start_ms': 9000,
+      'default_end_ms': 15000,
+      'player_id': 'p2',
+      'player_name': '小王',
+      'review_status': 'goal',
+    },
+  ],
+);
+
+class _TagReviewNotifier extends _ReviewNotifier {
+  _TagReviewNotifier(super.initialState);
+  List<String>? lastTaggedIds;
+  List<String>? rangeIds;
+  ProjectState get current => state;
+  void replaceState(ProjectState value) => state = value;
+
+  @override
+  Future<void> startReview(String id) async {}
+
+  @override
+  Future<String?> loadCandidatePreview(String candidateId, int timeMs) async =>
+      null;
+
+  @override
+  Future<Map<String, dynamic>?> updateClipRanges({
+    required List<String> candidateIds,
+    required int beforeMs,
+    required int afterMs,
+    bool overwriteManual = false,
+  }) async {
+    rangeIds = candidateIds;
+    return null;
+  }
+
+  @override
+  Future<void> setCandidatePlayer(String candidateId, String? playerId) async {
+    final candidateIds = [candidateId];
+    lastTaggedIds = candidateIds;
+    final playerName = state.players
+        .where((player) => player['id'] == playerId)
+        .map((player) => player['name'])
+        .firstOrNull;
+    state = state.copyWith(
+      candidates: [
+        for (final candidate in state.candidates)
+          if (candidateIds.contains(candidate['id']))
+            {...candidate, 'player_id': playerId, 'player_name': playerName}
+          else
+            candidate,
+      ],
+    );
+  }
 }
 
 class _ReviewNotifier extends ProjectNotifier {

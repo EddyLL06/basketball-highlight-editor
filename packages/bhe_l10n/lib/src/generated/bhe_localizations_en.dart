@@ -9,6 +9,15 @@ class BheLocalizationsEn extends BheLocalizations {
   BheLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get reviewInvalidClipRange =>
+      'Enter valid times within the video, with a duration of at least 1 second.';
+
+  @override
+  String reviewRangeOpenFailed(String error) {
+    return 'Could not pause the preview and open the range editor: $error';
+  }
+
+  @override
   String get appName => 'BHE';
 
   @override
@@ -222,6 +231,28 @@ class BheLocalizationsEn extends BheLocalizations {
 
   @override
   String get unassigned => 'Unassigned';
+
+  @override
+  String get reviewFilterPlayerTags => 'Filter player tags';
+
+  @override
+  String get reviewAllTags => 'All tags';
+
+  @override
+  String get reviewTagged => 'Tagged';
+
+  @override
+  String get reviewUntagged => 'Untagged';
+
+  @override
+  String reviewBatchRangeScope(int count) {
+    return 'Applies to the $count candidates in the current list (follows status and player tag filters)';
+  }
+
+  @override
+  String reviewFilterCount(int count, int total) {
+    return 'Showing $count / $total';
+  }
 
   @override
   String get currentFilter => 'Current filter';
@@ -553,4 +584,64 @@ class BheLocalizationsEn extends BheLocalizations {
 
   @override
   String get close => 'Close';
+
+  @override
+  String get rangeEditorHint =>
+      'Clip playback loops inside the range. Drag either end (hold it at the edge to keep extending), or press I / O to set the start / end at the current position. The source video is not modified.';
+
+  @override
+  String get rangeManualHint =>
+      'Positioned at the current source time. Set the start and end with I / O, then add it to candidates.';
+
+  @override
+  String get rangePlayClip => 'Play clip (Space)';
+
+  @override
+  String get rangePause => 'Pause (Space)';
+
+  @override
+  String get rangePreviewEnding => 'Preview ending';
+
+  @override
+  String get rangeStatusInside => 'In range';
+
+  @override
+  String get rangeStatusBefore => 'Before range';
+
+  @override
+  String get rangeStatusAfter => 'After range';
+
+  @override
+  String rangePosition(String time) {
+    return 'Position $time';
+  }
+
+  @override
+  String rangeSummary(String start, String end, String duration) {
+    return 'Clip $start – $end · $duration';
+  }
+
+  @override
+  String get rangeSetStart => 'Set start (I)';
+
+  @override
+  String get rangeSetEnd => 'Set end (O)';
+
+  @override
+  String get rangeExtendStart => 'Start −2s';
+
+  @override
+  String get rangeExtendEnd => 'End +2s';
+
+  @override
+  String get rangeExtendBoth => 'Both ±2s';
+
+  @override
+  String get rangeLegendEvent => 'Shot moment';
+
+  @override
+  String get rangeLegendOriginal => 'Original range';
+
+  @override
+  String get rangeTimelineLabel => 'Clip timeline';
 }

@@ -38,9 +38,21 @@ void main() {
     expect(english.text('视频解码不完整'), 'Video decoding was incomplete');
     expect(english.text('正在添加球员…'), 'Adding player…');
     expect(english.text('保留'), 'Included');
+    expect(english.reviewAllTags, 'All tags');
+    expect(english.reviewTagged, 'Tagged');
+    expect(english.reviewUntagged, 'Untagged');
+    expect(english.reviewFilterPlayerTags, 'Filter player tags');
+    expect(english.reviewBatchRangeScope(12), contains('12 candidates'));
+    expect(english.reviewFilterCount(2, 389), 'Showing 2 / 389');
+    expect(english.reviewInvalidClipRange, contains('at least 1 second'));
+    expect(english.reviewRangeOpenFailed('test'),
+        'Could not pause the preview and open the range editor: test');
     expect(english.text('排除'), 'Excluded');
     expect(english.text('正在准备输出位置…'), 'Preparing output location…');
-    expect(english.text('选择输出位置失败：test'), 'Could not choose an output location: test');
+    expect(
+      english.text('选择输出位置失败：test'),
+      'Could not choose an output location: test',
+    );
     expect(english.text('保留 380 / 389'), 'Included 380 / 389');
     expect(english.text('正在保存球员标签…'), 'Saving player tags…');
     expect(english.text('正在删除球员…'), 'Deleting player…');
@@ -66,6 +78,11 @@ void main() {
       ),
     );
     expect(chinese.text('视频解码不完整'), '视频解码不完整');
+    expect(chinese.reviewAllTags, '全部标签');
+    expect(chinese.reviewBatchRangeScope(12), contains('当前列表的 12 个候选'));
+    expect(chinese.reviewFilterCount(2, 389), '显示 2 / 389');
+    expect(chinese.reviewInvalidClipRange, contains('至少为 1 秒'));
+    expect(chinese.reviewRangeOpenFailed('test'), '无法暂停预览并打开范围编辑：test');
   });
 
   testWidgets('translates desktop export copy and dynamic summaries', (
@@ -107,7 +124,6 @@ void main() {
       startsWith('Editing the orange shot analysis region:'),
     );
     expect(english.text('新建项目'), 'New project');
-    expect(english.text('全部候选 · 12 个'), 'All candidates · 12');
     expect(
       english.text('标准分析 · 13 个候选 · 用时 10 秒'),
       'Standard analysis · 13 candidates · Elapsed 10 sec',

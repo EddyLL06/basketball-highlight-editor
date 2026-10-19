@@ -1,5 +1,8 @@
 {
   "@@locale": "en",
+  "reviewInvalidClipRange": "Enter valid times within the video, with a duration of at least 1 second.",
+  "reviewRangeOpenFailed": "Could not pause the preview and open the range editor: {error}",
+  "@reviewRangeOpenFailed": {"placeholders": {"error": {"type": "String"}}},
   "appName": "BHE",
   "navProject": "Project",
   "navImport": "Import",
@@ -68,6 +71,19 @@
   "exportScope": "Export scope",
   "allPlayers": "All players",
   "unassigned": "Unassigned",
+  "reviewFilterPlayerTags": "Filter player tags",
+  "reviewAllTags": "All tags",
+  "reviewTagged": "Tagged",
+  "reviewUntagged": "Untagged",
+  "reviewBatchRangeScope": "Applies to the {count} candidates in the current list (follows status and player tag filters)",
+  "@reviewBatchRangeScope": {"placeholders": {"count": {"type": "int"}}},
+  "reviewFilterCount": "Showing {count} / {total}",
+  "@reviewFilterCount": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "total": {"type": "int"}
+    }
+  },
   "currentFilter": "Current filter",
   "cancelExport": "Cancel export",
   "analysisStillRunning": "The video is still being analyzed. New candidates can be exported when analysis finishes.",
@@ -162,5 +178,25 @@
   "detectRegionStep": "Detection region",
   "confirm": "Confirm",
   "cancel": "Cancel",
-  "close": "Close"
+  "close": "Close",
+  "rangeEditorHint": "Clip playback loops inside the range. Drag either end (hold it at the edge to keep extending), or press I / O to set the start / end at the current position. The source video is not modified.",
+  "rangeManualHint": "Positioned at the current source time. Set the start and end with I / O, then add it to candidates.",
+  "rangePlayClip": "Play clip (Space)",
+  "rangePause": "Pause (Space)",
+  "rangePreviewEnding": "Preview ending",
+  "rangeStatusInside": "In range",
+  "rangeStatusBefore": "Before range",
+  "rangeStatusAfter": "After range",
+  "rangePosition": "Position {time}",
+  "@rangePosition": {"placeholders": {"time": {"type": "String"}}},
+  "rangeSummary": "Clip {start} – {end} · {duration}",
+  "@rangeSummary": {"placeholders": {"start": {"type": "String"}, "end": {"type": "String"}, "duration": {"type": "String"}}},
+  "rangeSetStart": "Set start (I)",
+  "rangeSetEnd": "Set end (O)",
+  "rangeExtendStart": "Start −2s",
+  "rangeExtendEnd": "End +2s",
+  "rangeExtendBoth": "Both ±2s",
+  "rangeLegendEvent": "Shot moment",
+  "rangeLegendOriginal": "Original range",
+  "rangeTimelineLabel": "Clip timeline"
 }
