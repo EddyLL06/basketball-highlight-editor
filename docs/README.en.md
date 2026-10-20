@@ -20,6 +20,7 @@ The root [`README.en.md`](../README.en.md) is the project overview and shortest 
 | Export reviewed data | [`REVIEW_DATASET_EXPORT.md`](REVIEW_DATASET_EXPORT.md) |
 | Understand Fast/Standard analysis | [`research/ANALYSIS_MODES_V1.md`](research/ANALYSIS_MODES_V1.md) |
 | Read the recorded performance sample | [`benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md`](benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md) |
+| Read the rim check accuracy sample | [`benchmarks/RIM_CHECK_BENCHMARK_20261020.md`](benchmarks/RIM_CHECK_BENCHMARK_20261020.md) |
 | Audit model, data, and dependency rights | [`MODEL_AND_DATA_LICENSES.md`](MODEL_AND_DATA_LICENSES.md) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) |
 | Review the source-publication gate | [`OPEN_SOURCE_AUDIT.md`](OPEN_SOURCE_AUDIT.md) |
 
@@ -48,6 +49,7 @@ The root [`README.en.md`](../README.en.md) is the project overview and shortest 
 - [`USER_FLOW_V1.md`](USER_FLOW_V1.md): import, analysis, review, export, and failure paths.
 - [`research/ANALYSIS_MODES_V1.md`](research/ANALYSIS_MODES_V1.md): mode rules, caching, inheritance, and quality gates.
 - [`benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md`](benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md): one cold-start timing record, not an accuracy promise.
+- [`benchmarks/RIM_CHECK_BENCHMARK_20261020.md`](benchmarks/RIM_CHECK_BENCHMARK_20261020.md): rim check accuracy on four reviewed videos (Chinese), not an accuracy promise.
 
 ## Open source and release
 
