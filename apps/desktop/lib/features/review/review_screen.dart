@@ -4886,6 +4886,10 @@ class _CandidatePanel extends StatelessWidget {
                   )
                 : ListView.separated(
                     controller: candidateScrollController,
+                    // A hovered row asks to be kept alive. When it is scrolled
+                    // away it is then never laid out, and a tooltip it just
+                    // opened breaks mouse hit testing for the whole window.
+                    addAutomaticKeepAlives: false,
                     itemCount: candidates.length,
                     separatorBuilder: (_, _) =>
                         const SizedBox(height: Spacing.xs),
