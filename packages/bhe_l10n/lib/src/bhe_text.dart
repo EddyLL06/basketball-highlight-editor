@@ -189,10 +189,14 @@ String? _translateDynamic(String source) {
     return 'Clip ${clipRange.group(1)} - ${clipRange.group(2)} · Duration ${_englishDuration(clipRange.group(3)!)}';
   }
   final candidateAria = RegExp(
-    r'^候选 (\d+)，(.+)，(已排除|已保留)$',
+    r'^候选 (\d+)，(.+)，(已排除|自动排除|已保留)$',
   ).firstMatch(source);
   if (candidateAria != null) {
-    final status = candidateAria.group(3) == '已排除' ? 'excluded' : 'included';
+    final status = switch (candidateAria.group(3)) {
+      '已排除' => 'excluded',
+      '自动排除' => 'auto-excluded',
+      _ => 'included',
+    };
     return 'Candidate ${candidateAria.group(1)}, ${candidateAria.group(2)}, $status';
   }
   final candidateAt = RegExp(r'^候选 (.+)$').firstMatch(source);
@@ -219,6 +223,7 @@ String? _translateDynamic(String source) {
       '粗扫': 'Coarse scan',
       '候选': 'Candidates',
       '精筛': 'Refinement',
+      '篮筐复核': 'Rim check',
       '封面': 'Covers',
       '落库': 'Save results',
     };
@@ -854,7 +859,21 @@ const _englishText = <String, String>{
   '精筛': 'Refinement',
   '封面': 'Covers',
   '落库': 'Save results',
-  'Engine 尚未启动': 'Engine has not started',
+  '篮筐逐帧复核': 'Frame-by-frame rim check',
+  '自动排除': 'Auto-excluded',
+  '篮筐复核': 'Rim check',
+  '按原视频逐帧放大篮筐区域，确认球从篮筐上方进入、被篮网遮挡并从网底落下。未通过的候选会自动排除，可随时改回保留。':
+      'Zooms into the rim on every source frame to confirm the ball enters from above, is hidden by the net and drops out of the bottom. Candidates that fail are auto-excluded; you can keep them again at any time.',
+  '通过：球穿过篮网落下': 'Passed: the ball dropped through the net',
+  '未通过：没有看到球穿过篮筐': 'Failed: no ball was seen crossing the rim',
+  '未通过：球不是从篮筐上方落下': 'Failed: the ball did not come down from above the rim',
+  '未通过：球偏离篮筐口': 'Failed: the ball missed the rim opening',
+  '未通过：没有看到球从网底落下': 'Failed: the ball was not seen leaving the bottom of the net',
+  '未通过：球从篮网侧面出来': 'Failed: the ball left from the side of the net',
+  '未通过：球在篮筐附近弹起': 'Failed: the ball bounced up near the rim',
+  '未通过：球从篮筐前方掠过，没有进网': 'Failed: the ball passed in front of the rim, not through the net',
+  '未复核：篮筐在画面中太小，请人工确认': 'Not checked: the rim is too small in the frame, please review manually',
+  '未复核：请人工确认': 'Not checked: please review manually',
   'Engine 返回未知错误': 'Engine returned an unknown error',
   'Engine 已关闭': 'Engine is closed',
   '视频预览加载失败：': 'Video preview failed: ',

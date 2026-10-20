@@ -3241,6 +3241,7 @@ class _CandidateInspector extends StatelessWidget {
 
     final crossingUnknown =
         isCoarse && crossingState == _CrossingDisplay.unknown;
+    final rimCheck = _rimCheckDisplay(c, evidence['rim_check']);
     final metrics = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -3322,6 +3323,45 @@ class _CandidateInspector extends StatelessWidget {
             ),
           ],
         ),
+        if (rimCheck != null) ...[
+          const SizedBox(height: 10),
+          Tooltip(
+            message: context.bheText(
+              '按原视频逐帧放大篮筐区域，确认球从篮筐上方进入、被篮网遮挡并从网底落下。未通过的候选会自动排除，可随时改回保留。',
+            ),
+            child: Row(
+              key: const Key('inspector-rim-check'),
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: rimCheck.color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  context.bheText('篮筐复核'),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: c.textTertiary,
+                  ),
+                ),
+                const SizedBox(width: Spacing.xs),
+                Expanded(
+                  child: Text(
+                    context.bheText(rimCheck.label),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: rimCheck.color,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 10),
         Tooltip(
           message: context.bheText('当前候选被纳入审核列表的主要原因。'),
@@ -5532,7 +5572,7 @@ class _CandidateRow extends StatelessWidget {
       button: true,
       selected: selected,
       label: context.bheText(
-        '候选 ${index + 1}，${_formatMs(_candidateTime(candidate))}，${excluded ? '已排除' : '已保留'}',
+        '候选 ${index + 1}，${_formatMs(_candidateTime(candidate))}，${excluded ? (_isAutoExcluded(candidate) ? '自动排除' : '已排除') : '已保留'}',
       ),
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
@@ -5649,7 +5689,11 @@ class _CandidateRow extends StatelessWidget {
                                     if (excluded) ...[
                                       const SizedBox(width: Spacing.xs),
                                       Text(
-                                        context.bheText('已排除'),
+                                        context.bheText(
+                                          _isAutoExcluded(candidate)
+                                              ? '自动排除'
+                                              : '已排除',
+                                        ),
                                         style: theme.textTheme.labelSmall
                                             ?.copyWith(color: c.error),
                                       ),
@@ -6158,6 +6202,38 @@ bool _isReviewed(Map<String, dynamic> candidate) {
   return status.isNotEmpty && status != 'pending';
 }
 
+bool _isAutoExcluded(Map<String, dynamic> candidate) =>
+    candidate['review_status']?.toString() == 'excluded' &&
+    candidate['review_reason']?.toString() == 'auto_rim_check';
+
+({String label, Color color})? _rimCheckDisplay(AppColors c, dynamic value) {
+  if (value is! Map) return null;
+  final reason = value['reason']?.toString();
+  return switch (value['status']?.toString()) {
+    'made' => (label: '通过：球穿过篮网落下', color: c.success),
+    'rejected' => (
+      label: const <String, String>{
+            'no_crossing': '未通过：没有看到球穿过篮筐',
+            'no_entry': '未通过：球不是从篮筐上方落下',
+            'off_center': '未通过：球偏离篮筐口',
+            'no_exit': '未通过：没有看到球从网底落下',
+            'exit_off_center': '未通过：球从篮网侧面出来',
+            'rebound': '未通过：球在篮筐附近弹起',
+            'not_occluded': '未通过：球从篮筐前方掠过，没有进网',
+          }[reason] ??
+          '未通过',
+      color: c.error,
+    ),
+    'skipped' => (
+      label: reason == 'small_rim'
+          ? '未复核：篮筐在画面中太小，请人工确认'
+          : '未复核：请人工确认',
+      color: c.warning,
+    ),
+    _ => null,
+  };
+}
+
 bool _isExcluded(Map<String, dynamic> candidate) =>
     candidate['selection_status']?.toString() == 'excluded' ||
     candidate['review_status']?.toString() == 'excluded';
@@ -6490,6 +6566,7 @@ String _analysisDetailLabel(
     'coarse_scan': '粗扫',
     'generate_candidates': '候选',
     'refine_candidates': '精筛',
+    'verify_rim_crossing': '篮筐复核',
     'prepare_review_previews': '封面',
     'persist_candidates': '落库',
   }.entries) {
@@ -6522,6 +6599,7 @@ String _stageLabel(String stage) =>
       'coarse_scan': '快速扫描候选',
       'generate_candidates': '生成候选',
       'refine_candidates': '精细分析候选',
+      'verify_rim_crossing': '篮筐逐帧复核',
       'persist_candidates': '整理审核片段',
       'prepare_review_previews': '准备候选封面',
     }[stage] ??

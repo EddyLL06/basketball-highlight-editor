@@ -933,6 +933,75 @@ void main() {
     expect(find.text('通过'), findsNothing);
   });
 
+  testWidgets('marks rim-check exclusions and explains the result', (
+    tester,
+  ) async {
+    await _pumpReview(
+      tester,
+      ProjectState(
+        job: const {'state': 'completed'},
+        candidates: [
+          {
+            'id': 'candidate-1',
+            'event_time_ms': 12000,
+            'default_start_ms': 6000,
+            'default_end_ms': 15000,
+            'review_status': 'excluded',
+            'selection_status': 'excluded',
+            'review_reason': 'auto_rim_check',
+            'evidence_json': jsonEncode({
+              'rim_check': {'status': 'rejected', 'reason': 'not_occluded'},
+            }),
+          },
+          {
+            'id': 'candidate-2',
+            'event_time_ms': 30000,
+            'default_start_ms': 24000,
+            'default_end_ms': 33000,
+            'review_status': 'excluded',
+            'selection_status': 'excluded',
+            'review_reason': 'rim_out',
+          },
+        ],
+      ),
+    );
+
+    expect(find.text('自动排除'), findsOneWidget);
+    expect(find.text('已排除'), findsOneWidget);
+    expect(find.byKey(const Key('inspector-rim-check')), findsOneWidget);
+    expect(find.text('未通过：球从篮筐前方掠过，没有进网'), findsOneWidget);
+  });
+
+  testWidgets('asks for manual review when the rim is too small to check', (
+    tester,
+  ) async {
+    await _pumpReview(
+      tester,
+      ProjectState(
+        job: const {'state': 'completed'},
+        candidates: [
+          {
+            'id': 'candidate-1',
+            'event_time_ms': 12000,
+            'default_start_ms': 6000,
+            'default_end_ms': 15000,
+            'evidence_json': jsonEncode({
+              'rim_check': {'status': 'skipped', 'reason': 'small_rim'},
+            }),
+          },
+        ],
+      ),
+      locale: const Locale('en'),
+    );
+
+    expect(
+      find.text(
+        'Not checked: the rim is too small in the frame, please review manually',
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('provides a toggle for video annotations', (tester) async {
     await _pumpReview(
       tester,
