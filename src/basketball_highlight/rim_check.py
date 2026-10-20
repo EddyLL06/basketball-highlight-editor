@@ -9,7 +9,9 @@ skipped. A make must:
 3. reach the net bottom close to the rim center and keep falling,
 4. not bounce back up near the rim,
 5. be hidden or blurred for at least one frame while passing the rim/net.
-   A ball that falls in front of the rim stays fully visible.
+   A ball that falls in front of the rim stays fully visible. Close, low
+   cameras with a thin net see the ball clearly through the net, so this
+   rule is dropped for a video where most central crossings stay visible.
 
 Coordinates are normalized to the rim: x = (x - center_x) / width and
 y = (y - rim_y) / width. Thresholds were measured on reviewed projects with
@@ -29,6 +31,10 @@ STRONG_BALL_CONF = 0.5
 MAX_CROSS_OFFSET = 0.45
 MAX_EXIT_OFFSET = 0.7
 MIN_HIDDEN_FRAMES = 1
+# Reviewed videos where the net hides the ball: 86% and 95% of central
+# crossings were hidden. A close camera with a thin net: 16%.
+MIN_OCCLUDED_SHARE = 0.5
+MIN_OCCLUSION_SAMPLES = 8
 
 _ZONE_X = 2.5
 _ZONE_TOP = -2.5
@@ -225,3 +231,31 @@ def assess_rim_crossing(frames, rim):
         "frames": len(frames),
         **(best or {}),
     }
+
+
+def apply_video_occlusion(results):
+    """Drop the occlusion rule for a video whose net does not hide the ball.
+
+    ``results`` are the rim checks of every candidate of one video. Central
+    crossings are those that passed every rule except possibly occlusion.
+    """
+    central = [
+        result for result in results
+        if result.get("status") in ("made", "rejected") and result.get("reason") in (None, "not_occluded")
+    ]
+    share = sum(1 for result in central if result["reason"] is None) / len(central) if central else None
+    use_rule = len(central) < MIN_OCCLUSION_SAMPLES or share >= MIN_OCCLUDED_SHARE
+    judged = []
+    for result in results:
+        if result.get("status") not in ("made", "rejected"):
+            judged.append(result)
+            continue
+        result = {
+            **result,
+            "occluded_share": round(share, 3) if share is not None else None,
+            "occlusion_rule": use_rule,
+        }
+        if not use_rule and result["reason"] == "not_occluded":
+            result.update(status="made", reason=None)
+        judged.append(result)
+    return judged

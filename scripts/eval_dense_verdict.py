@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from basketball_highlight.rim_check import assess_rim_crossing  # noqa: E402
+from basketball_highlight.rim_check import apply_video_occlusion, assess_rim_crossing  # noqa: E402
 from eval_review_labels import report  # noqa: E402
 
 RULES = {
@@ -41,6 +41,11 @@ def main():
     for case in cases:
         case["rim_check"] = assess_rim_crossing(probe_frames(case, args.source), case["rim"])
         case.pop("frames")
+    for project in {case["project"] for case in cases}:
+        group = [case for case in cases if case["project"] == project]
+        for case, check in zip(group, apply_video_occlusion([case["rim_check"] for case in group])):
+            case["rim_check"] = check
+    for case in cases:
         if args.details:
             print(f"{'GOAL' if case['goal'] else 'miss'} {case['project'][:2]} "
                   f"{case['event_ms'] / 1000:7.2f} {case['verdict'][:5]:5s} {case['rim_check']}")

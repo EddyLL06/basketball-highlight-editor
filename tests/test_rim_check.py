@@ -1,4 +1,9 @@
-from basketball_highlight.rim_check import assess_rim_crossing, tight_crop_box
+from basketball_highlight.rim_check import (
+    apply_video_occlusion,
+    assess_rim_crossing,
+    skipped_result,
+    tight_crop_box,
+)
 
 RIM = {"center_x": 500.0, "rim_y": 300.0, "width": 50.0, "height": 20.0}
 
@@ -93,3 +98,34 @@ def test_tight_crop_stays_inside_the_frame():
     x1, y1, x2, y2 = tight_crop_box(edge, 1920, 1080)
     assert (x1, y1) == (0, 0)
     assert x2 - x1 == y2 - y1 == 250
+
+
+def video(hidden_makes, visible_falls):
+    """Rim checks of one video: falls hidden by the net and fully visible ones."""
+    return (
+        [assess_rim_crossing(fall(hidden={6, 7}), RIM) for _ in range(hidden_makes)]
+        + [assess_rim_crossing(fall(), RIM) for _ in range(visible_falls)]
+    )
+
+
+def test_occlusion_is_ignored_when_the_net_rarely_hides_the_ball():
+    # Close, low camera with a thin net: clean makes stay fully visible.
+    others = [assess_rim_crossing(fall(x_start=0.9, x_end=0.6, hidden={6, 7}), RIM), skipped_result("small_rim", 20)]
+    judged = apply_video_occlusion(video(2, 8) + others)
+    assert [result["status"] for result in judged[:10]] == ["made"] * 10
+    assert judged[0]["occlusion_rule"] is False
+    assert judged[0]["occluded_share"] == 0.2
+    assert judged[10]["reason"] == "off_center"
+    assert judged[11] == skipped_result("small_rim", 20)
+
+
+def test_occlusion_still_rejects_falls_in_front_when_the_net_hides_makes():
+    judged = apply_video_occlusion(video(9, 2))
+    assert [result["reason"] for result in judged[-2:]] == ["not_occluded", "not_occluded"]
+    assert judged[0]["occlusion_rule"] is True
+
+
+def test_occlusion_rule_is_kept_when_too_few_crossings_to_judge_the_video():
+    judged = apply_video_occlusion(video(1, 6))
+    assert [result["reason"] for result in judged[1:]] == ["not_occluded"] * 6
+

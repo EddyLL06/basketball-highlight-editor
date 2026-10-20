@@ -7,6 +7,7 @@ import pytest
 
 from engine.python.basketball_engine.adapters.analysis import (
     PipelineCancelled,
+    apply_rim_checks,
     build_pipeline_commands,
     candidate_to_row,
     flatten_coarse_matches,
@@ -14,6 +15,8 @@ from engine.python.basketball_engine.adapters.analysis import (
     scale_roi_to_proxy,
     run_pipeline,
 )
+
+from .test_rim_check import RIM, fall
 
 
 def test_scale_roi_to_proxy_preserves_relative_coordinates():
@@ -313,6 +316,20 @@ def test_run_pipeline_reports_custom_stage_inside_its_progress_range(tmp_path: P
         ("verify_rim_crossing", 0.875),
         ("persist_candidates", 0.95),
     ]
+
+
+def test_rim_checks_drop_occlusion_for_a_video_where_the_net_never_hides_the_ball():
+    matches = [{"time": float(index)} for index in range(10)]
+    inputs = [{"time": float(index), "rim": RIM} for index in range(10)]
+    output = {"results": [
+        {"status": "rejected", "frames": fall(hidden={6, 7}) if index < 2 else fall()}
+        for index in range(10)
+    ]}
+    apply_rim_checks(matches, inputs, output)
+    assert {match["rim_check"]["status"] for match in matches} == {"made"}
+    assert candidate_to_row(
+        matches[5], "video-1", "roi-1", 20_000, 0.5, 0.5, "v1"
+    )["auto_review_status"] is None
 
 
 def test_run_pipeline_reuses_completed_manifest_stage(tmp_path: Path):

@@ -19,7 +19,12 @@ if _SRC_PATH.is_dir() and str(_SRC_PATH) not in sys.path:
     sys.path.insert(0, str(_SRC_PATH))
 
 from basketball_highlight.review_reason import suggest_review_reasons
-from basketball_highlight.rim_check import AUTO_REVIEW_REASON, assess_rim_crossing, skipped_result
+from basketball_highlight.rim_check import (
+    AUTO_REVIEW_REASON,
+    apply_video_occlusion,
+    assess_rim_crossing,
+    skipped_result,
+)
 from basketball_highlight.ranking import dedupe_candidates
 
 
@@ -207,17 +212,20 @@ def apply_rim_checks(
         for match in matches:
             match["rim_check"] = skipped_result("check_failed")
         return
-    for match, item, result in zip(matches, inputs, results):
+    checks = []
+    for item, result in zip(inputs, results):
         if not isinstance(result, dict):
-            match["rim_check"] = skipped_result("check_failed")
+            checks.append(skipped_result("check_failed"))
             continue
         frames = result.get("frames")
         if result.get("status") == "skipped" or not isinstance(frames, list) or item["rim"] is None:
-            match["rim_check"] = {
+            checks.append({
                 key: result.get(key) for key in ("version", "status", "reason", "rim_width_px")
-            }
+            })
             continue
-        match["rim_check"] = assess_rim_crossing(frames, item["rim"])
+        checks.append(assess_rim_crossing(frames, item["rim"]))
+    for match, check in zip(matches, apply_video_occlusion(checks)):
+        match["rim_check"] = check
 
 
 def build_rim_check_command(

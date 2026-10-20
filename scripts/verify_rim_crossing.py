@@ -20,6 +20,7 @@ from basketball_highlight.rim_check import (  # noqa: E402
     RIM_CHECK_VERSION,
     WINDOW_AFTER_S,
     WINDOW_BEFORE_S,
+    apply_video_occlusion,
     assess_rim_crossing,
     skipped_result,
     tight_crop_box,
@@ -165,6 +166,7 @@ def main(args):
             **assess_rim_crossing(job["frames"], job["rim"]),
             "frames": job["frames"],
         }
+    results = apply_video_occlusion(results)
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
