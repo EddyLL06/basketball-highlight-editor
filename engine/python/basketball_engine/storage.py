@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable
 from uuid import uuid4
 
+# Same value as basketball_highlight.rim_check.AUTO_REVIEW_REASON.
+AUTO_REVIEW_REASON = "auto_rim_check"
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
@@ -714,6 +717,15 @@ class ProjectStore:
                     ),
                 )
                 review = matches.get(row["id"])
+                status = review["status"] if review else "pending"
+                reason = review["reason"] if review else None
+                # 自动复核只决定"没人审过"的候选:新候选,或上次也是自动
+                # 排除且用户没改过的候选。人工审核结果一律保留。
+                if review is None or (
+                    review["status"] == "excluded" and review["reason"] == AUTO_REVIEW_REASON
+                ):
+                    status = row.get("auto_review_status") or "pending"
+                    reason = row.get("auto_review_reason") if row.get("auto_review_status") else None
                 connection.execute(
                     """
                     INSERT INTO candidate_reviews (
@@ -724,8 +736,8 @@ class ProjectStore:
                     (
                         row["id"],
                         review["player_id"] if review else None,
-                        review["status"] if review else "pending",
-                        review["reason"] if review else None,
+                        status,
+                        reason,
                         review["note"] if review else None,
                         None,
                         None,
@@ -889,6 +901,7 @@ class ProjectStore:
             "uncertain",
             "made",
             "other",
+            AUTO_REVIEW_REASON,
         }:
             raise ValueError("INVALID_REVIEW_REASON")
         timestamp = now_iso()

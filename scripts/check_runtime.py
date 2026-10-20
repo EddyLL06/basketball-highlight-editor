@@ -17,6 +17,7 @@ REQUIRED_SCRIPTS = (
     "generate_candidates.py",
     "refine_dynamic_candidates.py",
     "refine_candidates.py",
+    "verify_rim_crossing.py",
 )
 REQUIRED_IMPORTS = ("cv2", "numpy", "ultralytics", "torch")
 

@@ -137,6 +137,7 @@ validate_input
 → coarse_scan
 → generate_candidates
 → refine_candidates（标准模式）
+→ verify_rim_crossing（标准模式，篮筐逐帧复核）
 → persist_candidates
 → prepare_review_previews
 → completed
@@ -149,6 +150,7 @@ validate_input
 PYTHONPATH=src:scripts .venv/bin/python scripts/scan_video.py --help
 .venv/bin/python scripts/generate_candidates.py --help
 .venv/bin/python scripts/refine_dynamic_candidates.py --help
+.venv/bin/python scripts/verify_rim_crossing.py --help
 ```
 
 这些脚本的 `--help` 不会验证真实视频、模型和 ROI；调试输出写到临时目录，不要写入仓库或提交到 Git。

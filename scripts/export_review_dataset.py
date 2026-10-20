@@ -27,6 +27,8 @@ EXPORT_FIELDS = (
     "evidence_parse_error",
 )
 REVIEWED_STATUSES = ("goal", "excluded", "deferred", "second_review")
+# The engine's own rim-check exclusion is not a human label.
+AUTO_REVIEW_REASON = "auto_rim_check"
 
 
 @dataclass(frozen=True)
@@ -57,8 +59,10 @@ def _parse_evidence(raw: str) -> tuple[Any, str | None]:
 
 def _load_rows(project_root: str | Path, include_pending: bool) -> list[dict[str, Any]]:
     database = _database_path(project_root)
-    status_filter = "" if include_pending else "WHERE COALESCE(r.status, 'pending') IN (?, ?, ?, ?)"
-    params: tuple[str, ...] = () if include_pending else REVIEWED_STATUSES
+    status_filter = "" if include_pending else (
+        "WHERE COALESCE(r.status, 'pending') IN (?, ?, ?, ?) AND COALESCE(r.reason, '') != ?"
+    )
+    params: tuple[str, ...] = () if include_pending else (*REVIEWED_STATUSES, AUTO_REVIEW_REASON)
     query = f"""
         SELECT
             c.id AS candidate_id,

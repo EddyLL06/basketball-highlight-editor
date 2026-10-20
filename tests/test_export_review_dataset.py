@@ -93,6 +93,29 @@ def test_include_pending_and_csv_use_same_fields(tmp_path: Path):
     assert list(csv_rows[0]) == list(export_review_dataset.EXPORT_FIELDS)
 
 
+def test_automatic_rim_check_exclusions_are_not_exported_as_labels(tmp_path: Path):
+    project_root = tmp_path / "project"
+    create_database(project_root)
+    connection = sqlite3.connect(project_root / "project.db")
+    connection.executescript(
+        """
+        INSERT INTO candidates VALUES
+            ('auto-1', 'video-1', 4000, 3500, 4500, 'detector-v2', 0.5, 'review', '{}');
+        INSERT INTO candidate_reviews VALUES ('auto-1', 'excluded', 'auto_rim_check', NULL, NULL);
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    labeled = export_review_dataset.export_dataset(project_root, timestamp="20260807T000003Z")
+    everything = export_review_dataset.export_dataset(
+        project_root, include_pending=True, timestamp="20260807T000004Z",
+    )
+
+    assert "auto-1" not in [row["candidate_id"] for row in labeled.rows]
+    assert everything.rows[-1]["review_reason"] == "auto_rim_check"
+
+
 def test_bad_json_is_retained_as_string_with_parse_error(tmp_path: Path):
     project_root = tmp_path / "project"
     create_database(project_root)

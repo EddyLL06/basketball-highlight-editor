@@ -19,9 +19,11 @@ def load_projects(roots):
             "select x1, y1, x2, y2, calibration_json from rois where is_active=1"
         ).fetchone()
         calibration = json.loads(roi["calibration_json"] or "{}") if roi else {}
+        # Automatic exclusions are the engine's own decision, not a label.
         rows = con.execute(
             "select c.id, c.event_time_ms, c.evidence_json, coalesce(r.status, 'pending') status "
             "from candidates c left join candidate_reviews r on r.candidate_id = c.id "
+            "where coalesce(r.reason, '') != 'auto_rim_check' "
             "order by c.event_time_ms"
         ).fetchall()
         for row in rows:

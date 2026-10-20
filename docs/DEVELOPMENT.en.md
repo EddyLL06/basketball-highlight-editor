@@ -137,6 +137,7 @@ validate_input
 → coarse_scan
 → generate_candidates
 → refine_candidates (Standard mode)
+→ verify_rim_crossing (Standard mode, frame-by-frame rim check)
 → persist_candidates
 → prepare_review_previews
 → completed
@@ -149,6 +150,7 @@ Script help:
 PYTHONPATH=src:scripts .venv/bin/python scripts/scan_video.py --help
 .venv/bin/python scripts/generate_candidates.py --help
 .venv/bin/python scripts/refine_dynamic_candidates.py --help
+.venv/bin/python scripts/verify_rim_crossing.py --help
 ```
 
 `--help` does not validate a real video, model, or ROI. Write debug output to a temporary directory, not the repository.

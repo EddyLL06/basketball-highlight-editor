@@ -2423,3 +2423,156 @@ def test_coarse_overlay_rejects_incomplete_crossing_points():
     )
 
     assert overlay is None
+
+
+def _standard_rim_check_fakes(captured, rim_calls):
+    from .test_rim_check import RIM, fall
+
+    def fake_build(**kwargs):
+        captured.update(kwargs)
+        return [["fake", "proxy"], ["fake", "scan"], ["fake", "candidates"], ["fake", "refine"]]
+
+    def fake_run(commands, refined_output, *_args, **kwargs):
+        if kwargs.get("stage_names") == ("verify_rim_crossing",):
+            rim_calls.append(commands[0])
+            command = commands[0]
+            inputs = json.loads(
+                Path(command[command.index("--candidates") + 1]).read_text(encoding="utf-8")
+            )["candidates"]
+            # 5s: falls in front of the rim (always visible); 10s: hidden by the net.
+            frames = {5.0: fall(), 10.0: fall(hidden={6, 7})}
+            output = {"results": [
+                {"status": "made", "frames": frames[item["time"]]} for item in inputs
+            ]}
+            Path(refined_output).write_text(json.dumps(output), encoding="utf-8")
+            return {"refined": output, "logs": ["rim check"], "stage_timings_ms": {}}
+        assert kwargs["stage_ranges"][-1] == (0.40, 0.80)
+        Path(captured["coarse_detections"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(captured["coarse_detections"]).write_text(
+            json.dumps({"records": [{"detections": [{"name": "ball"}]}]}),
+            encoding="utf-8",
+        )
+        Path(captured["coarse_candidates"]).write_text(json.dumps({"candidates": []}), encoding="utf-8")
+        refined = {"results": [{"refined": [
+            {"time": time_s, "score": 0.8, "verdict": "ambiguous", "overlay": {"rim": RIM}}
+            for time_s in (5.0, 10.0)
+        ]}]}
+        Path(refined_output).write_text(json.dumps(refined), encoding="utf-8")
+        return {"refined": refined, "logs": [], "cache_hits": 0, "stage_timings_ms": {}}
+
+    return fake_build, fake_run
+
+
+def _run_standard_analysis(service, store, video, model):
+    payload = {
+        "project_root": str(store.root),
+        "video_id": video["id"],
+        "model_path": str(model),
+        "mode": "standard",
+    }
+    job = service._create_analysis_job(payload)["job"]
+    service._run_analysis(payload, job["id"])
+    finished = store.get_job(job["id"])
+    assert finished["state"] == "completed", finished["error_message"]
+    return (
+        json.loads(finished["checkpoint_json"]),
+        {candidate["event_time_ms"]: candidate for candidate in store.list_candidates(video["id"])},
+    )
+
+
+def test_standard_analysis_auto_excludes_candidates_that_fail_the_rim_check(
+    tmp_path: Path,
+    monkeypatch,
+):
+    service, store, video, model = _analysis_fixture(tmp_path)
+    captured, rim_calls = {}, []
+    fake_build, fake_run = _standard_rim_check_fakes(captured, rim_calls)
+    monkeypatch.setattr("engine.python.basketball_engine.service.build_pipeline_commands", fake_build)
+    monkeypatch.setattr("engine.python.basketball_engine.service.run_pipeline", fake_run)
+    monkeypatch.setattr(service, "_prepare_candidate_previews", lambda **_: {"generated": 0})
+
+    checkpoint, candidates = _run_standard_analysis(service, store, video, model)
+
+    front_pass, make = candidates[5_000], candidates[10_000]
+    assert front_pass["review_status"] == "excluded"
+    assert front_pass["review_reason"] == "auto_rim_check"
+    assert json.loads(front_pass["evidence_json"])["rim_check"]["reason"] == "not_occluded"
+    assert make["review_status"] == "pending"
+    assert json.loads(make["evidence_json"])["rim_check"]["status"] == "made"
+    assert "verify_rim_crossing" in checkpoint["stage_timings_ms"]
+    assert len(rim_calls) == 1
+
+
+def test_reanalysis_reuses_rim_check_and_keeps_human_reviews(tmp_path: Path, monkeypatch):
+    service, store, video, model = _analysis_fixture(tmp_path)
+    captured, rim_calls = {}, []
+    fake_build, fake_run = _standard_rim_check_fakes(captured, rim_calls)
+    monkeypatch.setattr("engine.python.basketball_engine.service.build_pipeline_commands", fake_build)
+    monkeypatch.setattr("engine.python.basketball_engine.service.run_pipeline", fake_run)
+    monkeypatch.setattr(service, "_prepare_candidate_previews", lambda **_: {"generated": 0})
+    _, candidates = _run_standard_analysis(service, store, video, model)
+    # The user restores the auto-excluded clip and rejects the other one.
+    store.review_candidate(candidates[5_000]["id"], "goal")
+    store.review_candidate(candidates[10_000]["id"], "excluded", reason="rim_out")
+
+    checkpoint, candidates = _run_standard_analysis(service, store, video, model)
+
+    assert len(rim_calls) == 1
+    assert candidates[5_000]["review_status"] == "goal"
+    assert candidates[5_000]["review_reason"] is None
+    assert candidates[10_000]["review_status"] == "excluded"
+    assert candidates[10_000]["review_reason"] == "rim_out"
+
+
+def test_failed_rim_check_keeps_candidates_for_manual_review(tmp_path: Path, monkeypatch):
+    service, store, video, model = _analysis_fixture(tmp_path)
+    captured, rim_calls = {}, []
+    fake_build, fake_run = _standard_rim_check_fakes(captured, rim_calls)
+
+    def failing_run(commands, refined_output, *args, **kwargs):
+        if kwargs.get("stage_names") == ("verify_rim_crossing",):
+            raise RuntimeError("verify_rim_crossing.py 执行失败")
+        return fake_run(commands, refined_output, *args, **kwargs)
+
+    monkeypatch.setattr("engine.python.basketball_engine.service.build_pipeline_commands", fake_build)
+    monkeypatch.setattr("engine.python.basketball_engine.service.run_pipeline", failing_run)
+    monkeypatch.setattr(service, "_prepare_candidate_previews", lambda **_: {"generated": 0})
+
+    checkpoint, candidates = _run_standard_analysis(service, store, video, model)
+
+    assert {candidate["review_status"] for candidate in candidates.values()} == {"pending"}
+    assert json.loads(candidates[5_000]["evidence_json"])["rim_check"]["reason"] == "check_failed"
+    assert any("verify_rim_crossing" in line for line in checkpoint["logs"])
+
+
+def test_replace_candidates_refreshes_untouched_auto_exclusions(tmp_path: Path):
+    store = ProjectStore(tmp_path / "project")
+    store.initialize()
+    store.create_project("project-1", "自动复核")
+    video = store.link_video({
+        "id": "video-1",
+        "source_path": str(tmp_path / "source.mp4"),
+        "source_size_bytes": 1,
+        "source_mtime_ns": 1,
+        "duration_ms": 20_000,
+        "width": 1280,
+        "height": 720,
+    })
+    row = {
+        "id": "auto-candidate", "video_id": video["id"], "roi_id": None,
+        "event_time_ms": 5_000, "default_start_ms": 0, "default_end_ms": 8_000,
+        "review_start_ms": 0, "review_end_ms": 8_000, "detector_version": "test",
+        "evidence_json": "{}",
+        "auto_review_status": "excluded", "auto_review_reason": "auto_rim_check",
+    }
+    store.replace_candidates(video["id"], [row])
+    assert store.list_candidates(video["id"])[0]["review_status"] == "excluded"
+    # Editing the note keeps the automatic reason valid.
+    store.review_candidate(row["id"], "excluded", note="看过", reason="auto_rim_check")
+
+    store.replace_candidates(video["id"], [{**row, "auto_review_status": None, "auto_review_reason": None}])
+
+    candidate = store.list_candidates(video["id"])[0]
+    assert candidate["review_status"] == "pending"
+    assert candidate["review_reason"] is None
+    assert candidate["note"] == "看过"

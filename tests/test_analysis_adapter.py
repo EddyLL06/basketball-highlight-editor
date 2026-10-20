@@ -293,6 +293,28 @@ def test_run_pipeline_streams_child_output_to_progress_callback(tmp_path: Path):
     assert ("prepare_proxy", 0.245) in progress
 
 
+def test_run_pipeline_reports_custom_stage_inside_its_progress_range(tmp_path: Path):
+    output = tmp_path / "rim_check.json"
+    script = (
+        "import json; "
+        "print('progress=0.5', flush=True); "
+        "open(%r, 'w', encoding='utf-8').write(json.dumps({'results': []}))"
+    ) % str(output)
+    progress = []
+    run_pipeline(
+        [[sys.executable, "-c", script]],
+        output,
+        stage_callback=lambda stage, value: progress.append((stage, round(value, 4))),
+        stage_names=("verify_rim_crossing",),
+        stage_ranges=((0.80, 0.95),),
+    )
+    assert progress == [
+        ("verify_rim_crossing", 0.8),
+        ("verify_rim_crossing", 0.875),
+        ("persist_candidates", 0.95),
+    ]
+
+
 def test_run_pipeline_reuses_completed_manifest_stage(tmp_path: Path):
     refined = tmp_path / "refined.json"
     proxy = tmp_path / "proxy.mp4"

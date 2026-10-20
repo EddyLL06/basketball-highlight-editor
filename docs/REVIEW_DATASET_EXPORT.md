@@ -4,7 +4,7 @@
 
 ## 使用
 
-默认只导出 `goal`、`excluded`、`deferred`、`second_review`：
+默认只导出 `goal`、`excluded`、`deferred`、`second_review`。引擎篮筐复核自动排除的候选（`review_reason = auto_rim_check`）不是人工标注，默认不导出；加 `--include-pending` 时会带上，可按该原因区分：
 
 ```bash
 python scripts/export_review_dataset.py /path/to/project

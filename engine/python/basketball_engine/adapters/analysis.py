@@ -8,7 +8,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Sequence
 from uuid import uuid5, NAMESPACE_URL
 
 # The desktop runtime puts the engine and the shared analysis package in
@@ -19,6 +19,7 @@ if _SRC_PATH.is_dir() and str(_SRC_PATH) not in sys.path:
     sys.path.insert(0, str(_SRC_PATH))
 
 from basketball_highlight.review_reason import suggest_review_reasons
+from basketball_highlight.rim_check import AUTO_REVIEW_REASON, assess_rim_crossing, skipped_result
 from basketball_highlight.ranking import dedupe_candidates
 
 
@@ -153,7 +154,11 @@ def candidate_to_row(
     if analysis_source:
         evidence["analysis_source"] = analysis_source
     evidence["review_reason_suggestion"] = suggest_review_reasons(match)
+    rim_check = match.get("rim_check") if isinstance(match.get("rim_check"), dict) else {}
+    rejected = rim_check.get("status") == "rejected"
     return {
+        "auto_review_status": "excluded" if rejected else None,
+        "auto_review_reason": AUTO_REVIEW_REASON if rejected else None,
         "id": f"candidate_{uuid5(NAMESPACE_URL, f'{video_id}:{roi_id}:{detector_version}:{event_time_ms}').hex}",
         "video_id": video_id,
         "roi_id": roi_id,
@@ -170,6 +175,65 @@ def candidate_to_row(
         "created_at": timestamp,
         "updated_at": timestamp,
     }
+
+
+def rim_check_inputs(matches: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    """Time and source-coordinate rim for every final candidate."""
+    inputs = []
+    for match in matches:
+        overlay = match.get("overlay") if isinstance(match.get("overlay"), dict) else {}
+        rim = overlay.get("rim") if isinstance(overlay.get("rim"), dict) else None
+        if rim is not None:
+            try:
+                rim = {key: float(rim[key]) for key in ("center_x", "rim_y", "width", "height")}
+            except (KeyError, TypeError, ValueError):
+                rim = None
+        inputs.append({"time": round(float(match["time"]), 4), "rim": rim})
+    return inputs
+
+
+def apply_rim_checks(
+    matches: list[Dict[str, Any]],
+    inputs: list[Dict[str, Any]],
+    output: Dict[str, Any] | None,
+) -> None:
+    """Judge every candidate from the per-frame detections of the rim check.
+
+    The verdict is recomputed here instead of trusting the script's own
+    result, so threshold changes apply to cached detections.
+    """
+    results = output.get("results") if isinstance(output, dict) else None
+    if not isinstance(results, list) or len(results) != len(matches):
+        for match in matches:
+            match["rim_check"] = skipped_result("check_failed")
+        return
+    for match, item, result in zip(matches, inputs, results):
+        if not isinstance(result, dict):
+            match["rim_check"] = skipped_result("check_failed")
+            continue
+        frames = result.get("frames")
+        if result.get("status") == "skipped" or not isinstance(frames, list) or item["rim"] is None:
+            match["rim_check"] = {
+                key: result.get(key) for key in ("version", "status", "reason", "rim_width_px")
+            }
+            continue
+        match["rim_check"] = assess_rim_crossing(frames, item["rim"])
+
+
+def build_rim_check_command(
+    repo_root: Path,
+    source_video: Path,
+    model_path: Path,
+    candidates_path: Path,
+    output_path: Path,
+    batch: int = 16,
+) -> list[str]:
+    return [
+        sys.executable, _script(repo_root, "verify_rim_crossing.py"),
+        "--video", str(source_video), "--model", str(model_path),
+        "--candidates", str(candidates_path), "--output", str(output_path),
+        "--batch", str(batch),
+    ]
 
 
 def _script(repo_root: Path, name: str) -> str:
@@ -259,9 +323,17 @@ def run_pipeline(
     manifest_path: Path | None = None,
     stage_outputs: Iterable[Path | None] | None = None,
     manifest_version: str | int = 1,
+    stage_names: Sequence[str] | None = None,
+    stage_ranges: Sequence[tuple[float, float]] | None = None,
 ) -> Dict[str, Any]:
-    stages = ("prepare_proxy", "coarse_scan", "generate_candidates", "refine_candidates")
-    if len(commands) == 4:
+    stages = tuple(stage_names or (
+        "prepare_proxy", "coarse_scan", "generate_candidates", "refine_candidates",
+    ))
+    if stage_ranges is not None:
+        if len(stage_ranges) != len(commands):
+            raise ValueError("PIPELINE_STAGE_RANGES_INVALID")
+        stage_ranges = tuple(stage_ranges)
+    elif len(commands) == 4:
         stage_ranges = (
             (0.01, 0.14),
             (0.14, 0.44),
@@ -463,7 +535,7 @@ def run_pipeline(
     if cancel_check and cancel_check():
         raise PipelineCancelled("JOB_CANCELLED")
     if stage_callback:
-        stage_callback("persist_candidates", 0.95)
+        stage_callback("persist_candidates", stage_ranges[-1][1] if stage_ranges else 0.95)
     return {
         "refined": json.loads(refined_output.read_text(encoding="utf-8")),
         "logs": logs,

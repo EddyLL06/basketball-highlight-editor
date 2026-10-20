@@ -17,11 +17,14 @@ from typing import Any, Dict
 
 from . import __version__
 from .adapters.analysis import (
+    apply_rim_checks,
     build_pipeline_commands,
+    build_rim_check_command,
     candidate_to_row,
     flatten_coarse_matches,
     flatten_refined_matches,
     PipelineCancelled,
+    rim_check_inputs,
     run_pipeline,
     scale_roi_to_proxy,
     terminate_process,
@@ -30,6 +33,7 @@ from .adapters.export import export_goal_clips
 from .protocol import ProtocolError
 from .storage import ProjectStore, new_id
 from .media_tools import resolve_media_tool
+from basketball_highlight.rim_check import RIM_CHECK_VERSION
 from basketball_highlight.tracking import link_ball_detections
 
 
@@ -1417,6 +1421,12 @@ class EngineService:
                     else [proxy_video, coarse_detections, coarse_candidates, refined_output]
                 ),
                 manifest_version=ANALYSIS_ALGORITHM_VERSION,
+                # 标准分析之后还有篮筐逐帧复核(0.80-0.95)。
+                stage_ranges=(
+                    ((0.01, 0.12), (0.12, 0.38), (0.38, 0.40), (0.40, 0.80))
+                    if mode == "standard"
+                    else None
+                ),
             )
             if cancel_event and cancel_event.is_set():
                 raise PipelineCancelled("JOB_CANCELLED")
@@ -1504,6 +1514,17 @@ class EngineService:
                         extra["overlay"] = overlay
                     matches.append(extra)
                 matches.sort(key=lambda match: float(match["time"]))
+                self._verify_rim_crossings(
+                    repo_root=repo_root,
+                    source_video=source_video,
+                    model_path=model_path,
+                    run_root=run_root,
+                    matches=matches,
+                    on_stage=on_stage,
+                    cancel_event=cancel_event,
+                    job_id=job_id,
+                    pipeline=pipeline,
+                )
             detection_counts = self._detection_counts(coarse_detections)
             rows = [
                 candidate_to_row(
@@ -1602,6 +1623,72 @@ class EngineService:
                 self._job_threads.pop(job_id, None)
                 self._job_cancel_events.pop(job_id, None)
                 self._job_processes.pop(job_id, None)
+
+    def _verify_rim_crossings(
+        self,
+        *,
+        repo_root: Path,
+        source_video: Path,
+        model_path: Path,
+        run_root: Path,
+        matches: list[Dict[str, Any]],
+        on_stage,
+        cancel_event: threading.Event | None,
+        job_id: str,
+        pipeline: Dict[str, Any],
+    ) -> None:
+        """Re-check every final candidate frame by frame around the rim.
+
+        The per-frame detections are cached by candidate time and rim, so a
+        re-analysis only re-runs the detector when the candidates change.
+        """
+        if not matches:
+            return
+        started = time.perf_counter()
+        inputs = rim_check_inputs(matches)
+        key = hashlib.sha256(
+            json.dumps(
+                {"version": RIM_CHECK_VERSION, "candidates": inputs},
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()[:16]
+        input_path = run_root / f"rim_check_{key}.input.json"
+        output_path = run_root / f"rim_check_{key}.json"
+        try:
+            output = json.loads(output_path.read_text(encoding="utf-8"))
+            pipeline["cache_hits"] = pipeline.get("cache_hits", 0) + 1
+        except (OSError, ValueError):
+            output = None
+        if output is None:
+            run_root.mkdir(parents=True, exist_ok=True)
+            input_path.write_text(
+                json.dumps({"candidates": inputs}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            try:
+                checked = run_pipeline(
+                    [build_rim_check_command(
+                        repo_root, source_video, model_path, input_path, output_path,
+                    )],
+                    output_path,
+                    on_stage,
+                    cancel_check=cancel_event.is_set if cancel_event else None,
+                    process_callback=lambda process: self._set_job_process(job_id, process),
+                    stage_names=("verify_rim_crossing",),
+                    stage_ranges=((0.80, 0.95),),
+                )
+                output = checked["refined"]
+                pipeline["logs"].extend(checked["logs"])
+            except PipelineCancelled:
+                raise
+            except Exception as exc:
+                # 复核失败不能丢掉整次分析:候选保持人工审核。
+                pipeline["logs"].append(f"verify_rim_crossing: {exc}")
+                output = None
+        apply_rim_checks(matches, inputs, output)
+        pipeline.setdefault("stage_timings_ms", {})["verify_rim_crossing"] = round(
+            (time.perf_counter() - started) * 1000
+        )
 
     def _set_job_process(self, job_id: str, process: subprocess.Popen | None) -> None:
         with self._job_lock:
