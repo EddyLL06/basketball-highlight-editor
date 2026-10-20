@@ -6224,6 +6224,7 @@ bool _isAutoExcluded(Map<String, dynamic> candidate) =>
             'exit_off_center': '未通过：球从篮网侧面出来',
             'rebound': '未通过：球在篮筐附近弹起',
             'not_occluded': '未通过：球从篮筐前方掠过，没有进网',
+            'net_still': '未通过：球落下时篮网没有动',
           }[reason] ??
           '未通过',
       color: c.error,

@@ -16,7 +16,7 @@ from engine.python.basketball_engine.adapters.analysis import (
     run_pipeline,
 )
 
-from .test_rim_check import RIM, fall
+from .test_rim_check import RIM, fall, net
 
 
 def test_scale_roi_to_proxy_preserves_relative_coordinates():
@@ -330,6 +330,25 @@ def test_rim_checks_drop_occlusion_for_a_video_where_the_net_never_hides_the_bal
     assert candidate_to_row(
         matches[5], "video-1", "roi-1", 20_000, 0.5, 0.5, "v1"
     )["auto_review_status"] is None
+
+
+def test_rim_checks_reject_a_still_net_for_a_video_where_the_net_never_hides_the_ball():
+    matches = [{"time": float(index)} for index in range(10)]
+    inputs = [{"time": float(index), "rim": RIM} for index in range(10)]
+    output = {"results": [
+        {
+            "status": "rejected",
+            "frames": [[] for _ in range(30)] + (fall(hidden={6, 7}) if index < 2 else fall()),
+            "net_motion_series": net(1.0 if index == 5 else 9.0),
+        }
+        for index in range(10)
+    ]}
+    apply_rim_checks(matches, inputs, output)
+    assert [match["rim_check"]["reason"] for match in matches].count("net_still") == 1
+    assert matches[5]["rim_check"]["reason"] == "net_still"
+    assert candidate_to_row(
+        matches[5], "video-1", "roi-1", 20_000, 0.5, 0.5, "v1"
+    )["auto_review_status"] == "excluded"
 
 
 def test_run_pipeline_reuses_completed_manifest_stage(tmp_path: Path):

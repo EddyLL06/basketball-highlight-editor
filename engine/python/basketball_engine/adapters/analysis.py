@@ -223,7 +223,7 @@ def apply_rim_checks(
                 key: result.get(key) for key in ("version", "status", "reason", "rim_width_px")
             })
             continue
-        checks.append(assess_rim_crossing(frames, item["rim"]))
+        checks.append(assess_rim_crossing(frames, item["rim"], result.get("net_motion_series")))
     for match, check in zip(matches, apply_video_occlusion(checks)):
         match["rim_check"] = check
 

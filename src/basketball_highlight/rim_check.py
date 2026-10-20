@@ -12,13 +12,15 @@ skipped. A make must:
    A ball that falls in front of the rim stays fully visible. Close, low
    cameras with a thin net see the ball clearly through the net, so this
    rule is dropped for a video where most central crossings stay visible.
+   Such a video instead needs the net to move after the crossing.
 
 Coordinates are normalized to the rim: x = (x - center_x) / width and
 y = (y - rim_y) / width. Thresholds were measured on reviewed projects with
 rims of 47-62 px; smaller rims are skipped and left for manual review.
 """
+from statistics import median
 
-RIM_CHECK_VERSION = "rim-dense-v1"
+RIM_CHECK_VERSION = "rim-dense-v2"
 AUTO_REVIEW_REASON = "auto_rim_check"
 MIN_RIM_WIDTH_PX = 30.0
 CROP_RIM_WIDTHS = 5.0
@@ -35,6 +37,9 @@ MIN_HIDDEN_FRAMES = 1
 # crossings were hidden. A close camera with a thin net: 16%.
 MIN_OCCLUDED_SHARE = 0.5
 MIN_OCCLUSION_SAMPLES = 8
+# Close, low camera with a thin net (one video): makes scored 2.6 and up,
+# falls in front of the rim 2.2 and below.
+MIN_NET_MOTION = 2.4
 
 _ZONE_X = 2.5
 _ZONE_TOP = -2.5
@@ -168,6 +173,7 @@ def _track_crossings(track, tracks):
             "rebound": rebound,
             "hidden_frames": hidden,
             "track_points": k + 1 + len(after),
+            "cross_frame": below["i"],
         }
 
 
@@ -207,11 +213,25 @@ def skipped_result(reason, rim_width=None):
     }
 
 
-def assess_rim_crossing(frames, rim):
+def net_motion_score(series, cross_frame):
+    """Net motion right after the crossing minus the motion before it.
+
+    ``series[k]`` is the change of the net from frame k-1 to frame k. The top
+    five changes after the crossing count, so a short push is enough.
+    """
+    before = [value for value in series[max(1, cross_frame - 24):cross_frame - 5] if value is not None]
+    after = sorted(value for value in series[cross_frame + 1:cross_frame + 21] if value is not None)
+    if not before or not after:
+        return None
+    return round(sum(after[-5:]) / len(after[-5:]) - median(before), 3)
+
+
+def assess_rim_crossing(frames, rim, net_motion_series=None):
     """Judge one candidate from per-frame detections in source coordinates.
 
     ``frames`` is the ordered list of consecutive source frames; each item is
     a list of detections ``{"name", "confidence", "xyxy"}``.
+    ``net_motion_series`` comes from ``net_motion.net_motion_series``.
     """
     rim_width = float(rim["width"])
     if rim_width < MIN_RIM_WIDTH_PX:
@@ -230,6 +250,8 @@ def assess_rim_crossing(frames, rim):
         "rim_width_px": round(rim_width, 2),
         "frames": len(frames),
         **(best or {}),
+        "net_motion": net_motion_score(net_motion_series, best["cross_frame"])
+        if best and net_motion_series else None,
     }
 
 
@@ -238,6 +260,7 @@ def apply_video_occlusion(results):
 
     ``results`` are the rim checks of every candidate of one video. Central
     crossings are those that passed every rule except possibly occlusion.
+    Without the occlusion rule a central crossing must move the net instead.
     """
     central = [
         result for result in results
@@ -255,7 +278,8 @@ def apply_video_occlusion(results):
             "occluded_share": round(share, 3) if share is not None else None,
             "occlusion_rule": use_rule,
         }
-        if not use_rule and result["reason"] == "not_occluded":
-            result.update(status="made", reason=None)
+        if not use_rule and result["reason"] in (None, "not_occluded"):
+            still = result.get("net_motion") is not None and result["net_motion"] < MIN_NET_MOTION
+            result.update(status="rejected" if still else "made", reason="net_still" if still else None)
         judged.append(result)
     return judged

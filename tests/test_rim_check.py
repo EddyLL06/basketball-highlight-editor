@@ -1,6 +1,7 @@
 from basketball_highlight.rim_check import (
     apply_video_occlusion,
     assess_rim_crossing,
+    net_motion_score,
     skipped_result,
     tight_crop_box,
 )
@@ -129,3 +130,39 @@ def test_occlusion_rule_is_kept_when_too_few_crossings_to_judge_the_video():
     judged = apply_video_occlusion(video(1, 6))
     assert [result["reason"] for result in judged[1:]] == ["not_occluded"] * 6
 
+
+def net(push):
+    """Net motion series: 1.0 until frame 36, then ``push``."""
+    return [None] + [1.0] * 36 + [push] * 30
+
+
+def late_fall(push, hidden=()):
+    """A fall that crosses the rim at frame 36 (38 when hidden), with net motion."""
+    return assess_rim_crossing([[] for _ in range(30)] + fall(hidden=hidden), RIM, net(push))
+
+
+def test_net_motion_is_the_push_after_the_crossing_over_the_quiet_before():
+    assert late_fall(9.0)["cross_frame"] == 36
+    assert late_fall(9.0)["net_motion"] == 8.0
+    assert late_fall(9.0, hidden={6, 7})["net_motion"] == 8.0
+    # Too few frames before the crossing to know how still the net was.
+    assert net_motion_score(net(9.0), 5) is None
+    assert assess_rim_crossing(fall(), RIM)["net_motion"] is None
+
+
+def test_a_still_net_rejects_the_crossing_when_the_net_does_not_hide_the_ball():
+    makes = [late_fall(9.0, hidden={6, 7}), late_fall(9.0)] + [late_fall(9.0) for _ in range(6)]
+    in_front = [late_fall(1.5), late_fall(1.0, hidden={6, 7})]
+    judged = apply_video_occlusion(makes + in_front)
+    assert judged[0]["occlusion_rule"] is False
+    assert [result["status"] for result in judged[:8]] == ["made"] * 8
+    assert [result["reason"] for result in judged[8:]] == ["net_still", "net_still"]
+
+
+def test_net_motion_is_ignored_while_the_occlusion_rule_applies():
+    judged = apply_video_occlusion(
+        [late_fall(9.0, hidden={6, 7}) for _ in range(8)] + [late_fall(1.0, hidden={6, 7}), late_fall(9.0)]
+    )
+    assert judged[0]["occlusion_rule"] is True
+    assert judged[8]["status"] == "made"
+    assert judged[9]["reason"] == "not_occluded"

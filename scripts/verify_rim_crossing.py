@@ -15,6 +15,7 @@ import cv2
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from basketball_highlight.net_motion import motion_box, net_motion_series, prepare  # noqa: E402
 from basketball_highlight.rim_check import (  # noqa: E402
     MIN_RIM_WIDTH_PX,
     RIM_CHECK_VERSION,
@@ -80,7 +81,9 @@ def build_jobs(candidates, fps, total_frames, frame_width, frame_height):
             "first": first,
             "last": last,
             "box": tight_crop_box(rim, frame_width, frame_height),
+            "motion_box": motion_box(rim, frame_width, frame_height),
             "frames": [[] for _ in range(last - first + 1)],
+            "grays": [],
         })
     return jobs, results
 
@@ -154,17 +157,24 @@ def main(args):
                 if job["first"] <= frame_index <= job["last"]:
                     x1, y1, x2, y2 = job["box"]
                     pending.append((frame[y1:y2, x1:x2], job, frame_index - job["first"]))
+                    x1, y1, x2, y2 = job["motion_box"]
+                    job["grays"].append(prepare(frame[y1:y2, x1:x2]))
             if len(pending) >= args.batch:
                 run_batch(model, pending, device, args.conf, args.batch)
         if pending:
             run_batch(model, pending, device, args.conf, args.batch)
+        for job in group["jobs"]:
+            job["net_motion_series"] = net_motion_series(
+                job.pop("grays"), job["frames"], job["rim"], job["motion_box"][:2],
+            )
         print(f"progress={group_number / len(groups):.4f}", flush=True)
     cap.release()
     for job in jobs:
         # Keep the raw detections so the engine can re-judge cached runs.
         results[job["index"]] = {
-            **assess_rim_crossing(job["frames"], job["rim"]),
+            **assess_rim_crossing(job["frames"], job["rim"], job["net_motion_series"]),
             "frames": job["frames"],
+            "net_motion_series": job["net_motion_series"],
         }
     results = apply_video_occlusion(results)
 
