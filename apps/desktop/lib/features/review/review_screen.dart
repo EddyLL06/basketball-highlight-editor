@@ -4242,7 +4242,9 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
                                 cursor: SystemMouseCursors.click,
                                 child: Video(
                                   controller: controller,
-                                  fit: BoxFit.contain,
+                                  // 框已是视频比例。Windows 软件渲染的纹理比例
+                                  // 可能不对、里面带黑边,cover 正好把黑边裁掉。
+                                  fit: BoxFit.cover,
                                   controls: NoVideoControls,
                                 ),
                               ),

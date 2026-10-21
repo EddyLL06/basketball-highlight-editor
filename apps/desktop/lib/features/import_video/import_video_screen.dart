@@ -2885,7 +2885,9 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
                           child: IgnorePointer(
                             child: Video(
                               controller: controller,
-                              fit: BoxFit.contain,
+                              // 框已是视频比例。Windows 软件渲染的纹理比例可能
+                              // 不对、里面带黑边,cover 正好把黑边裁掉。
+                              fit: BoxFit.cover,
                               controls: NoVideoControls,
                             ),
                           ),
@@ -3700,6 +3702,10 @@ class _RoiCanvasState extends State<_RoiCanvas> {
                                 Positioned.fill(
                                   child: Video(
                                     controller: widget.videoController!,
+                                    // 框已是视频比例。Windows 软件渲染的纹理比例
+                                    // 可能不对、里面带黑边,cover 正好把黑边裁掉,
+                                    // 画面才和检测框对齐。
+                                    fit: BoxFit.cover,
                                     controls: NoVideoControls,
                                   ),
                                 )
