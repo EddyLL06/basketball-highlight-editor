@@ -42,6 +42,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   final Set<String> _reviewStartedCandidateIds = <String>{};
   String _candidateFilter = 'all';
   String _playerFilter = 'all';
+  String _rimFilter = 'all';
   final _VideoPaneController _videoController = _VideoPaneController();
   int _videoSourceSwitchToken = 0;
   final FocusNode _shortcutFocusNode = FocusNode(
@@ -133,6 +134,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       _orderedCandidates(ref.read(projectProvider).candidates),
       _candidateFilter,
       playerFilter: _playerFilter,
+      rimFilter: _rimFilter,
     );
     await notifier.setCandidatePlayer(candidate['id'].toString(), playerId);
     _keepSelectionVisibleAfterEdit(candidate['id'].toString(), before);
@@ -160,6 +162,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       _orderedCandidates(ref.read(projectProvider).candidates),
       _candidateFilter,
       playerFilter: _playerFilter,
+      rimFilter: _rimFilter,
     );
     await notifier.createPlayer(
       name,
@@ -168,14 +171,16 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     _keepSelectionVisibleAfterEdit(candidate['id'].toString(), before);
   }
 
-  void _changeFilters({String? status, String? player}) {
+  void _changeFilters({String? status, String? player, String? rim}) {
     setState(() {
       _candidateFilter = status ?? _candidateFilter;
       _playerFilter = player ?? _playerFilter;
+      _rimFilter = rim ?? _rimFilter;
       final candidates = _filterCandidates(
         _orderedCandidates(ref.read(projectProvider).candidates),
         _candidateFilter,
         playerFilter: _playerFilter,
+        rimFilter: _rimFilter,
       );
       _selectedCandidateId = _selectedCandidate(candidates)?['id']?.toString();
     });
@@ -567,6 +572,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       _orderedCandidates(ref.read(projectProvider).candidates),
       _candidateFilter,
       playerFilter: _playerFilter,
+      rimFilter: _rimFilter,
     );
     final future = ref
         .read(projectProvider.notifier)
@@ -587,6 +593,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       _orderedCandidates(ref.read(projectProvider).candidates),
       _candidateFilter,
       playerFilter: _playerFilter,
+      rimFilter: _rimFilter,
     );
     if (mounted &&
         _selectedCandidateId == id &&
@@ -661,6 +668,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       statusCandidates,
       'all',
       playerFilter: _playerFilter,
+      rimFilter: _rimFilter,
     );
     final selected = _selectedCandidate(candidates);
     final selectedId = selected?['id']?.toString();
@@ -823,6 +831,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     totalCount: allCandidates.length,
                     filter: _candidateFilter,
                     playerFilter: _playerFilter,
+                    rimFilter: _rimFilter,
                     statusCandidates: statusCandidates,
                     busy: reviewLocked,
                     busyMessage: state.busyMessage,
@@ -852,8 +861,12 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     onFilterChanged: (value) => _changeFilters(status: value),
                     onPlayerFilterChanged: (value) =>
                         _changeFilters(player: value),
-                    onClearFilters: () =>
-                        _changeFilters(status: 'all', player: 'all'),
+                    onRimFilterChanged: (value) => _changeFilters(rim: value),
+                    onClearFilters: () => _changeFilters(
+                      status: 'all',
+                      player: 'all',
+                      rim: 'all',
+                    ),
                     onReanalyze: !analyzing && !state.busy && !state.hydrating
                         ? reanalyze
                         : null,
@@ -967,6 +980,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       _orderedCandidates(state.candidates),
       _candidateFilter,
       playerFilter: _playerFilter,
+      rimFilter: _rimFilter,
     );
     final index = candidates.indexWhere(
       (candidate) => candidate['id']?.toString() == id,
@@ -1006,6 +1020,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     _selectedCandidateId = null;
     _candidateFilter = 'all';
     _playerFilter = 'all';
+    _rimFilter = 'all';
     _showOriginalVideo = false;
     _videoSourceSwitchToken++;
   }
@@ -4616,6 +4631,7 @@ class _CandidatePanel extends StatelessWidget {
     required this.totalCount,
     required this.filter,
     required this.playerFilter,
+    required this.rimFilter,
     required this.statusCandidates,
     required this.busy,
     required this.busyMessage,
@@ -4637,6 +4653,7 @@ class _CandidatePanel extends StatelessWidget {
     required this.onLoadCover,
     required this.onFilterChanged,
     required this.onPlayerFilterChanged,
+    required this.onRimFilterChanged,
     required this.onClearFilters,
     required this.onReanalyze,
     required this.onRetryHydration,
@@ -4655,6 +4672,7 @@ class _CandidatePanel extends StatelessWidget {
   final int totalCount;
   final String filter;
   final String playerFilter;
+  final String rimFilter;
   final List<Map<String, dynamic>> statusCandidates;
   final bool busy;
   final String? busyMessage;
@@ -4676,6 +4694,7 @@ class _CandidatePanel extends StatelessWidget {
   final Future<String?> Function(String, int)? onLoadCover;
   final ValueChanged<String> onFilterChanged;
   final ValueChanged<String> onPlayerFilterChanged;
+  final ValueChanged<String> onRimFilterChanged;
   final VoidCallback onClearFilters;
   final VoidCallback? onReanalyze;
   final VoidCallback? onRetryHydration;
@@ -4826,7 +4845,17 @@ class _CandidatePanel extends StatelessWidget {
             players: players,
             onChanged: onPlayerFilterChanged,
           ),
-          if (filter != 'all' || playerFilter != 'all') ...[
+          if (statusCandidates.any((c) => _rimCheckStatus(c) != null)) ...[
+            const SizedBox(height: Spacing.sm),
+            _RimCheckChips(
+              value: rimFilter,
+              candidates: statusCandidates,
+              onChanged: onRimFilterChanged,
+            ),
+          ],
+          if (filter != 'all' ||
+              playerFilter != 'all' ||
+              rimFilter != 'all') ...[
             const SizedBox(height: Spacing.sm),
             Container(
               key: const Key('review-filter-banner'),
@@ -4878,7 +4907,10 @@ class _CandidatePanel extends StatelessWidget {
                     analysisMode: analysisMode,
                     analysisCompleted: analysisCompleted,
                     filterEmpty: totalCount > 0,
-                    onClearFilter: filter == 'all' && playerFilter == 'all'
+                    onClearFilter:
+                        filter == 'all' &&
+                            playerFilter == 'all' &&
+                            rimFilter == 'all'
                         ? null
                         : onClearFilters,
                     onReanalyze: onReanalyze,
@@ -5118,6 +5150,121 @@ class _RowContextAnchorState extends State<_RowContextAnchor> {
 
   @override
   Widget build(BuildContext context) => widget.child;
+}
+
+class _RimCheckChips extends StatelessWidget {
+  const _RimCheckChips({
+    required this.value,
+    required this.candidates,
+    required this.onChanged,
+  });
+
+  final String value;
+  final List<Map<String, dynamic>> candidates;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final counts = <String, int>{'all': candidates.length};
+    for (final candidate in candidates) {
+      final status = _rimCheckStatus(candidate);
+      if (status != null) {
+        counts.update(status, (count) => count + 1, ifAbsent: () => 1);
+      }
+    }
+    final options = <(String, String, Color?)>[
+      ('all', '全部', null),
+      ('made', '通过', c.success),
+      ('unsure', '未确认', c.warning),
+      if ((counts['rejected'] ?? 0) > 0) ('rejected', '未通过', c.error),
+    ];
+    return Semantics(
+      container: true,
+      label: context.bheText('按篮筐复核结果筛选'),
+      child: SizedBox(
+        key: const Key('review-rim-filter'),
+        height: 30,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              Text(
+                context.bheText('篮筐复核'),
+                style: TextStyle(color: c.textTertiary, fontSize: 12),
+              ),
+              for (final (key, label, color) in options) ...[
+                const SizedBox(width: 6),
+                Semantics(
+                  button: true,
+                  selected: value == key,
+                  child: Material(
+                    key: ValueKey('review-rim-option-$key'),
+                    color: value == key ? c.surface3 : Colors.transparent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(CsRadius.full),
+                      side: BorderSide(
+                        color: value == key ? c.borderStrong : c.border,
+                      ),
+                    ),
+                    child: InkWell(
+                      onTap: () => onChanged(key),
+                      customBorder: const StadiumBorder(),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (color != null) ...[
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                            ],
+                            Text(
+                              context.bheText(label),
+                              style: TextStyle(
+                                color: value == key
+                                    ? c.textPrimary
+                                    : c.textSecondary,
+                                fontSize: 12,
+                                fontWeight: value == key
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '${counts[key] ?? 0}',
+                              style: TextStyle(
+                                color: c.textTertiary,
+                                fontSize: 11,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _PlayerTagChips extends StatelessWidget {
@@ -5703,6 +5850,26 @@ class _CandidateRow extends StatelessWidget {
                                             ?.copyWith(color: c.error),
                                       ),
                                     ],
+                                    if (!excluded &&
+                                        _rimCheckStatus(candidate) ==
+                                            'made') ...[
+                                      const SizedBox(width: Spacing.xs),
+                                      Text(
+                                        context.bheText('通过'),
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(color: c.success),
+                                      ),
+                                    ],
+                                    if (!excluded &&
+                                        _rimCheckStatus(candidate) ==
+                                            'unsure') ...[
+                                      const SizedBox(width: Spacing.xs),
+                                      Text(
+                                        context.bheText('未确认'),
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(color: c.warning),
+                                      ),
+                                    ],
                                   ],
                                 ),
                                 const SizedBox(height: 6),
@@ -6211,6 +6378,11 @@ bool _isAutoExcluded(Map<String, dynamic> candidate) =>
     candidate['review_status']?.toString() == 'excluded' &&
     candidate['review_reason']?.toString() == 'auto_rim_check';
 
+String? _rimCheckStatus(Map<String, dynamic> candidate) {
+  final check = _candidateEvidence(candidate)['rim_check'];
+  return check is Map ? check['status']?.toString() : null;
+}
+
 ({String label, Color color})? _rimCheckDisplay(AppColors c, dynamic value) {
   if (value is! Map) return null;
   final reason = value['reason']?.toString();
@@ -6259,10 +6431,14 @@ List<Map<String, dynamic>> _filterCandidates(
   List<Map<String, dynamic>> candidates,
   String filter, {
   String playerFilter = 'all',
+  String rimFilter = 'all',
 }) {
   return candidates.where((candidate) {
     if (filter == 'included' && _isExcluded(candidate)) return false;
     if (filter == 'excluded' && !_isExcluded(candidate)) return false;
+    if (rimFilter != 'all' && _rimCheckStatus(candidate) != rimFilter) {
+      return false;
+    }
     final id = candidate['player_id']?.toString() ?? '';
     return switch (playerFilter) {
       'tagged' => id.isNotEmpty,

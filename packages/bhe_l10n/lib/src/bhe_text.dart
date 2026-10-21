@@ -862,6 +862,8 @@ const _englishText = <String, String>{
   '篮筐逐帧复核': 'Frame-by-frame rim check',
   '自动排除': 'Auto-excluded',
   '篮筐复核': 'Rim check',
+  '未确认': 'Unsure',
+  '按篮筐复核结果筛选': 'Filter by rim check',
   '按原视频逐帧放大篮筐区域，确认球从篮筐上方进入、被篮网遮挡并从网底落下。只有看清球没进的候选会自动排除；没看清的保留并标为未确认，都可以随时修改。':
       'Zooms into the rim on every source frame to confirm the ball enters from above, is hidden by the net and drops out of the bottom. Only candidates clearly seen missing are auto-excluded; unclear ones stay and are marked unsure. You can change any of them.',
   '通过：球穿过篮网落下': 'Passed: the ball dropped through the net',

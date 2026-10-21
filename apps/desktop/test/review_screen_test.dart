@@ -1027,6 +1027,40 @@ void main() {
     expect(find.text('未确认：没看清球是否从网底落下，请人工确认'), findsOneWidget);
   });
 
+  testWidgets('filters the queue by rim check result', (tester) async {
+    Map<String, dynamic> candidate(String id, int ms, String status) => {
+      'id': id,
+      'event_time_ms': ms,
+      'default_start_ms': ms - 4000,
+      'default_end_ms': ms + 1000,
+      'evidence_json': jsonEncode({
+        'rim_check': {'status': status, 'reason': 'no_exit'},
+      }),
+    };
+    await _pumpReview(
+      tester,
+      ProjectState(
+        job: const {'state': 'completed'},
+        candidates: [
+          candidate('made-1', 12000, 'made'),
+          candidate('unsure-1', 30000, 'unsure'),
+          candidate('unsure-2', 50000, 'unsure'),
+        ],
+      ),
+    );
+
+    expect(find.byKey(const ValueKey('candidate-row-made-1')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('review-rim-option-unsure')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('candidate-row-made-1')), findsNothing);
+    expect(find.byKey(const ValueKey('candidate-row-unsure-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('candidate-row-unsure-2')), findsOneWidget);
+
+    await tester.tap(find.text('清除筛选'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('candidate-row-made-1')), findsOneWidget);
+  });
+
   testWidgets('provides a toggle for video annotations', (tester) async {
     await _pumpReview(
       tester,
