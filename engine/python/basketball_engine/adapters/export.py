@@ -11,8 +11,19 @@ from .analysis import PipelineCancelled, terminate_process
 from ..media_tools import resolve_media_tool
 
 
-def preferred_video_codec() -> str:
-    return "h264_videotoolbox" if platform.system() == "Darwin" else "libx264"
+# NVIDIA, Intel, AMD, then the Windows Media Foundation encoder, which works
+# on any GPU and falls back to Microsoft's software encoder.
+WINDOWS_HARDWARE_CODECS = ("h264_nvenc", "h264_qsv", "h264_amf", "h264_mf")
+
+
+def video_codecs() -> list[str]:
+    hardware = {
+        "Darwin": ("h264_videotoolbox",),
+        "Windows": WINDOWS_HARDWARE_CODECS,
+    }.get(platform.system(), ())
+    # The bundled Windows LGPL FFmpeg has no libx264. Keep H.264 when
+    # available, then use high-quality MPEG-4 rather than failing the export.
+    return list(dict.fromkeys((*hardware, "libx264", "libopenh264", "mpeg4")))
 
 
 def video_codec_options(codec: str) -> list[str]:
@@ -23,17 +34,17 @@ def video_codec_options(codec: str) -> list[str]:
         options += ["-b:v", "8M"]
     elif codec == "mpeg4":
         options += ["-q:v", "2"]
+    elif codec in WINDOWS_HARDWARE_CODECS:
+        options += ["-b:v", "16M", "-maxrate", "24M", "-bufsize", "32M"]
     return options
 
 
-def run_encoded_ffmpeg(command_builder, output_path: Path, **kwargs) -> None:
-    # The bundled Windows LGPL FFmpeg has no libx264. Keep H.264 when
-    # available, then use high-quality MPEG-4 rather than failing the export.
-    codecs = list(dict.fromkeys((preferred_video_codec(), "libx264", "libopenh264", "mpeg4")))
+def run_encoded_ffmpeg(command_builder, output_path: Path, codecs: list[str], **kwargs) -> str:
+    """Encode with the first codec that works and return it."""
     for index, codec in enumerate(codecs):
         try:
             run_atomic_ffmpeg(command_builder(codec), output_path, **kwargs)
-            return
+            return codec
         except subprocess.CalledProcessError:
             if index == len(codecs) - 1:
                 raise
@@ -65,7 +76,7 @@ def build_clip_command(
     if start_ms < 0 or end_ms <= start_ms:
         raise ValueError("INVALID_CLIP_RANGE")
     duration = (end_ms - start_ms) / 1000
-    codec = video_codec or preferred_video_codec()
+    codec = video_codec or video_codecs()[0]
     codec_options = video_codec_options(codec)
     command = [
         resolve_media_tool("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
@@ -157,12 +168,13 @@ def export_goal_clips(
     output_dir.mkdir(parents=True, exist_ok=True)
     files: list[Path] = []
     created_files: list[Path] = []
+    codecs = video_codecs()
     try:
         for index, candidate in enumerate(candidates, 1):
             path = available_output_path(
                 output_dir / f"goal_{index:03d}_{candidate['event_time_ms'] / 1000:.2f}s.mp4"
             )
-            run_encoded_ffmpeg(
+            codec = run_encoded_ffmpeg(
                 lambda codec: build_clip_command(
                     source_video,
                     int(candidate["review_start_ms"]),
@@ -171,9 +183,13 @@ def export_goal_clips(
                     codec,
                 ),
                 path,
+                codecs,
                 cancel_check=cancel_check,
                 process_callback=process_callback,
             )
+            # Later clips start with the encoder that worked, so they skip the
+            # failed hardware attempts and share one codec for the merge copy.
+            codecs = [codec, *(other for other in codecs if other != codec)]
             created_files.append(path)
             files.append(path)
             if progress_callback:
@@ -212,6 +228,7 @@ def export_goal_clips(
                         str(merged_path),
                     ],
                     merged_path,
+                    codecs,
                     cancel_check=cancel_check,
                     process_callback=process_callback,
                 )

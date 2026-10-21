@@ -21,7 +21,7 @@ def test_clip_command_rejects_invalid_range():
 
 @pytest.mark.parametrize("mode", ["separate", "merge"])
 def test_export_without_h264_encoders_falls_back_for_clips_and_merge(tmp_path, monkeypatch, mode):
-    monkeypatch.setattr(export, "preferred_video_codec", lambda: "libx264")
+    monkeypatch.setattr(export.platform, "system", lambda: "Linux")
     attempts = []
 
     def fake_ffmpeg(command, output_path, **kwargs):
@@ -43,9 +43,52 @@ def test_export_without_h264_encoders_falls_back_for_clips_and_merge(tmp_path, m
     )
     expected = ["libx264", "libopenh264", "mpeg4"]
     if mode == "merge":
-        expected += ["copy", "libx264", "libopenh264", "mpeg4"]
+        expected += ["copy", "mpeg4"]
     assert attempts == expected
     assert all(Path(path).is_file() for path in result["files"])
+
+
+def test_codec_order_per_platform(monkeypatch):
+    software = ["libx264", "libopenh264", "mpeg4"]
+    monkeypatch.setattr(export.platform, "system", lambda: "Darwin")
+    assert export.video_codecs() == ["h264_videotoolbox", *software]
+    monkeypatch.setattr(export.platform, "system", lambda: "Windows")
+    assert export.video_codecs() == ["h264_nvenc", "h264_qsv", "h264_amf", "h264_mf", *software]
+
+
+def test_hardware_encoders_get_a_bitrate():
+    options = export.video_codec_options("h264_nvenc")
+    assert options[options.index("-b:v") + 1] == "16M"
+
+
+@pytest.mark.parametrize("mode", ["separate", "merge"])
+def test_windows_tries_gpu_encoders_and_keeps_the_one_that_works(tmp_path, monkeypatch, mode):
+    monkeypatch.setattr(export.platform, "system", lambda: "Windows")
+    attempts = []
+
+    def fake_ffmpeg(command, output_path, **kwargs):
+        if "-c:v" not in command:
+            attempts.append("copy")
+            raise subprocess.CalledProcessError(1, command)
+        codec = command[command.index("-c:v") + 1]
+        attempts.append(codec)
+        if codec in {"h264_nvenc", "h264_qsv"}:
+            raise subprocess.CalledProcessError(1, command)
+        output_path.write_bytes(b"video")
+
+    monkeypatch.setattr(export, "run_atomic_ffmpeg", fake_ffmpeg)
+    export.export_goal_clips(
+        tmp_path / "source.mp4",
+        [
+            {"event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000},
+            {"event_time_ms": 2500, "review_start_ms": 2000, "review_end_ms": 3000},
+        ],
+        tmp_path / "export", mode,
+    )
+    expected = ["h264_nvenc", "h264_qsv", "h264_amf", "h264_amf"]
+    if mode == "merge":
+        expected += ["copy", "h264_amf"]
+    assert attempts == expected
 
 
 def test_export_does_not_retry_cancelled_encoding(tmp_path, monkeypatch):
@@ -66,7 +109,7 @@ def test_export_does_not_retry_cancelled_encoding(tmp_path, monkeypatch):
 
 
 def test_export_surfaces_error_when_all_encoders_fail(tmp_path, monkeypatch):
-    monkeypatch.setattr(export, "preferred_video_codec", lambda: "libx264")
+    monkeypatch.setattr(export.platform, "system", lambda: "Linux")
     attempts = []
 
     def fail(command, output_path, **kwargs):
