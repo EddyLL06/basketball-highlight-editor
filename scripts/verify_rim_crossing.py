@@ -40,6 +40,10 @@ def parse_args():
     return parser.parse_args()
 
 
+# CPU 上一次推理 16 张比 4-12 张慢约 5 倍(M1 Pro 实测);GPU 上 16 张最快。
+CPU_BATCH = 8
+
+
 def select_device(requested):
     if requested != "auto":
         return requested
@@ -146,6 +150,7 @@ def main(args):
 
         device = select_device(args.device)
         model = YOLO(str(args.model))
+    batch = min(args.batch, CPU_BATCH) if device == "cpu" else args.batch
     pending = []
     for group_number, group in enumerate(groups, 1):
         cap.set(cv2.CAP_PROP_POS_FRAMES, group["first"])
@@ -159,10 +164,10 @@ def main(args):
                     pending.append((frame[y1:y2, x1:x2], job, frame_index - job["first"]))
                     x1, y1, x2, y2 = job["motion_box"]
                     job["grays"].append(prepare(frame[y1:y2, x1:x2]))
-            if len(pending) >= args.batch:
-                run_batch(model, pending, device, args.conf, args.batch)
+            if len(pending) >= batch:
+                run_batch(model, pending, device, args.conf, batch)
         if pending:
-            run_batch(model, pending, device, args.conf, args.batch)
+            run_batch(model, pending, device, args.conf, batch)
         for job in group["jobs"]:
             job["net_motion_series"] = net_motion_series(
                 job.pop("grays"), job["frames"], job["rim"], job["motion_box"][:2],
