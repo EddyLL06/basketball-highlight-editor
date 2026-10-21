@@ -4482,7 +4482,7 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
                       FilledButton(
                         onPressed: _applyRange,
                         style: FilledButton.styleFrom(
-                          backgroundColor: c.orange,
+                          backgroundColor: c.orangeFill,
                           foregroundColor: c.onOrange,
                           disabledBackgroundColor: c.surface3,
                           disabledForegroundColor: c.textTertiary,

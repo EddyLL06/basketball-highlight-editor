@@ -1009,7 +1009,7 @@ class _ImportStepper extends StatelessWidget {
                                 color: done
                                     ? c.goal.withValues(alpha: 0.16)
                                     : active
-                                    ? c.orange
+                                    ? c.orangeFill
                                     : Colors.transparent,
                                 border: done || active
                                     ? null

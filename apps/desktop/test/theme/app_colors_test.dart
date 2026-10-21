@@ -18,6 +18,9 @@ void main() {
   test('light orange darkened for contrast', () {
     expect(lightAppColors.orange, const Color(0xFFB93E0E));
   });
+  test('buttons use the same bright orange in both themes', () {
+    expect(lightAppColors.orangeFill, darkAppColors.orangeFill);
+  });
   for (final (name, colors) in [('dark', darkAppColors), ('light', lightAppColors)]) {
     test('$name text tokens stay readable on surfaces', () {
       double contrast(Color a, Color b) {
@@ -45,7 +48,7 @@ void main() {
           );
         }
       }
-      expect(contrast(colors.onOrange, colors.orange), greaterThanOrEqualTo(4.5));
+      expect(contrast(colors.onOrange, colors.orangeFill), greaterThanOrEqualTo(4.5));
     });
   }
   testWidgets('of(context) returns theme extension', (tester) async {

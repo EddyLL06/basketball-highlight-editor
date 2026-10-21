@@ -63,8 +63,8 @@ ThemeData appTheme(Brightness brightness) {
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: colors.orange,
-        foregroundColor: Colors.white,
+        backgroundColor: colors.orangeFill,
+        foregroundColor: colors.onOrange,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(CsRadius.sm),

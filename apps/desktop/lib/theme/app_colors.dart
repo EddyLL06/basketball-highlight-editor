@@ -14,6 +14,7 @@ const darkAppColors = AppColors(
   borderStrong: Color(0xFF31343F),
   amber: Color(0xFFF0B35A),
   orange: Color(0xFFFF6B2C),
+  orangeFill: Color(0xFFFF6B2C),
   onOrange: Color(0xFF1A0E06),
   data: Color(0xFF6AA8FF),
   goal: Color(0xFF3FB950),
@@ -44,7 +45,8 @@ const lightAppColors = AppColors(
   borderStrong: Color(0xFFCBD0D8),
   amber: Color(0xFFA86418),
   orange: Color(0xFFB93E0E),
-  onOrange: Color(0xFFFFFFFF),
+  orangeFill: Color(0xFFFF6B2C),
+  onOrange: Color(0xFF1A0E06),
   data: Color(0xFF1D4ED8),
   goal: Color(0xFF166534),
   pending: Color(0xFF9A5B06),
@@ -67,7 +69,7 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color background, surface, surface2, surface3;
   final Color textPrimary, textSecondary, textTertiary;
   final Color border, borderStrong;
-  final Color amber, orange, onOrange, data;
+  final Color amber, orange, orangeFill, onOrange, data;
   final Color goal, pending, excluded;
   final Color success, error, warning;
 
@@ -86,6 +88,7 @@ class AppColors extends ThemeExtension<AppColors> {
     required this.borderStrong,
     required this.amber,
     required this.orange,
+    required this.orangeFill,
     required this.onOrange,
     required this.data,
     required this.goal,
@@ -115,6 +118,7 @@ class AppColors extends ThemeExtension<AppColors> {
     Color? borderStrong,
     Color? amber,
     Color? orange,
+    Color? orangeFill,
     Color? onOrange,
     Color? data,
     Color? goal,
@@ -136,6 +140,7 @@ class AppColors extends ThemeExtension<AppColors> {
     borderStrong: borderStrong ?? this.borderStrong,
     amber: amber ?? this.amber,
     orange: orange ?? this.orange,
+    orangeFill: orangeFill ?? this.orangeFill,
     onOrange: onOrange ?? this.onOrange,
     data: data ?? this.data,
     goal: goal ?? this.goal,
@@ -162,6 +167,7 @@ class AppColors extends ThemeExtension<AppColors> {
       borderStrong: Color.lerp(borderStrong, other.borderStrong, t)!,
       amber: Color.lerp(amber, other.amber, t)!,
       orange: Color.lerp(orange, other.orange, t)!,
+      orangeFill: Color.lerp(orangeFill, other.orangeFill, t)!,
       onOrange: Color.lerp(onOrange, other.onOrange, t)!,
       data: Color.lerp(data, other.data, t)!,
       goal: Color.lerp(goal, other.goal, t)!,

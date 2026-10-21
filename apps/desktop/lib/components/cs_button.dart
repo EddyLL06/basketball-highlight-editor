@@ -89,7 +89,7 @@ class CsButton extends StatelessWidget {
     CsButtonVariant.ghost => c.textSecondary,
   };
   Color _background(AppColors c) => switch (variant) {
-    CsButtonVariant.primary => c.orange,
+    CsButtonVariant.primary => c.orangeFill,
     CsButtonVariant.danger => c.error,
     CsButtonVariant.secondary => Colors.transparent,
     CsButtonVariant.ghost => Colors.transparent,
