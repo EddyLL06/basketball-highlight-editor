@@ -17,9 +17,10 @@ skipped. A make must:
 A candidate is excluded only on what the detector saw: a ball crossing
 outside the rim, leaving the side of the net, bouncing up, staying in front
 of a net that hides makes, or a net that did not move. A small or blurred
-ball drops out near the rim, so "the ball was not seen" excludes a candidate
-only when the refine stage did not see a crossing either. Other failed
-checks are "unsure" and stay for review.
+ball drops out near the rim, and players or an orange jersey can block or
+imitate it, so "the ball was not seen" excludes a candidate only when the
+refine stage did not see a crossing either and no ball fell toward the rim.
+Other failed checks are "unsure" and stay for review.
 
 Coordinates are normalized to the rim: x = (x - center_x) / width and
 y = (y - rim_y) / width. Rims smaller than 30 px are skipped and left for
@@ -52,8 +53,11 @@ STRONG_OCCLUDED_SHARE = 0.8
 # and the net (makes scored 2.6 and up on a close camera, -0.7 to 4 on a far
 # one), so only a net that moved less than before proves a miss.
 MIN_NET_MOTION = 0.0
-# A shorter off-center track may not be the shot ball.
+# An off-center track must be a falling ball: misses spanned 1.06 rim widths
+# and more, a jersey next to the rim 0.45. A shorter track may not be the
+# shot ball either.
 MIN_OFF_CENTER_TRACK_POINTS = 10
+MIN_OFF_CENTER_TRACK_SPAN = 1.0
 UNSEEN_REASONS = ("no_crossing", "no_entry", "no_exit")
 
 _ZONE_X = 2.5
@@ -175,7 +179,8 @@ def _track_crossings(track, tracks):
             (point["i"] for point in after if point["y"] >= 0.6),
             default=below["i"],
         )
-        seen = {point["i"]: point["conf"] for point in track[:k + 1] + after}
+        path = track[:k + 1] + after
+        seen = {point["i"]: point["conf"] for point in path}
         hidden = sum(
             1 for index in range(last_above + 1, first_below)
             if seen.get(index, 0.0) < STRONG_BALL_CONF
@@ -188,8 +193,18 @@ def _track_crossings(track, tracks):
             "rebound": rebound,
             "hidden_frames": hidden,
             "track_points": k + 1 + len(after),
+            "track_span": round(max(point["y"] for point in path) - min(point["y"] for point in path), 3),
             "cross_frame": below["i"],
         }
+
+
+def _ball_approached(tracks):
+    """Whether a ball fell toward the rim from above, close to its center."""
+    for track in tracks:
+        above = [point for point in track if abs(point["x"]) <= 1.5 and -2.5 <= point["y"] <= -0.1]
+        if len(above) >= 3 and above[-1]["y"] - above[0]["y"] >= 0.3:
+            return True
+    return False
 
 
 def rejection_reason(crossing):
@@ -264,6 +279,7 @@ def assess_rim_crossing(frames, rim, net_motion_series=None):
         "reason": reason,
         "rim_width_px": round(rim_width, 2),
         "frames": len(frames),
+        "ball_approached": _ball_approached(tracks),
         **(best or {}),
         "net_motion": net_motion_score(net_motion_series, best["cross_frame"])
         if best and net_motion_series else None,
@@ -279,9 +295,12 @@ def keep_unless_seen(result, refined):
         return result
     reason = result.get("reason")
     if reason in UNSEEN_REASONS:
-        proven = not refined
+        proven = not refined and not result.get("ball_approached")
     elif reason == "off_center":
-        proven = result.get("track_points", 0) >= MIN_OFF_CENTER_TRACK_POINTS
+        proven = (
+            result.get("track_points", 0) >= MIN_OFF_CENTER_TRACK_POINTS
+            and result.get("track_span", 0.0) >= MIN_OFF_CENTER_TRACK_SPAN
+        )
     elif reason == "not_occluded":
         proven = (result.get("occluded_share") or 0.0) >= STRONG_OCCLUDED_SHARE
     else:

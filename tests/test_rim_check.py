@@ -190,11 +190,28 @@ def test_an_unseen_ball_excludes_only_when_refine_did_not_see_a_crossing_either(
     for reason in ("no_crossing", "no_entry", "no_exit"):
         assert keep_unless_seen(rejected(reason), refined=True)["status"] == "unsure"
         assert keep_unless_seen(rejected(reason), refined=False)["status"] == "rejected"
+        # A ball fell toward the rim, but a player or the rim hid what happened.
+        assert keep_unless_seen(rejected(reason, ball_approached=True), refined=False)["status"] == "unsure"
 
 
-def test_an_off_center_crossing_excludes_only_on_a_long_track():
-    assert keep_unless_seen(rejected("off_center", track_points=9), refined=True)["status"] == "unsure"
-    assert keep_unless_seen(rejected("off_center", track_points=10), refined=True)["status"] == "rejected"
+def test_a_ball_falling_toward_the_rim_is_noticed_even_when_it_is_lost_at_the_rim():
+    lost_at_rim = assess_rim_crossing(fall()[:6], RIM)
+    assert lost_at_rim["reason"] == "no_crossing"
+    assert lost_at_rim["ball_approached"] is True
+    assert assess_rim_crossing([[] for _ in range(16)], RIM)["ball_approached"] is False
+
+
+def test_an_off_center_crossing_excludes_only_on_a_long_falling_track():
+    assert keep_unless_seen(rejected("off_center", track_points=9, track_span=2.0), refined=True)["status"] == "unsure"
+    # A jersey next to the rim barely moves up or down.
+    assert keep_unless_seen(rejected("off_center", track_points=12, track_span=0.45), refined=True)["status"] == "unsure"
+    assert keep_unless_seen(rejected("off_center", track_points=10, track_span=1.0), refined=True)["status"] == "rejected"
+
+
+def test_an_off_center_fall_reports_how_far_the_ball_fell():
+    result = assess_rim_crossing(fall(x_start=1.2, x_end=0.9), RIM)
+    assert result["reason"] == "off_center"
+    assert result["track_span"] == 3.75
 
 
 def test_a_visible_ball_excludes_only_where_the_net_hides_nearly_every_make():

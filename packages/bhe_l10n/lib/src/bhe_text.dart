@@ -876,7 +876,7 @@ const _englishText = <String, String>{
   '未确认：没看清球是否穿过篮筐，请人工确认': 'Unsure: the ball crossing the rim was not seen clearly, please review',
   '未确认：没看清球是否从篮筐上方落下，请人工确认': 'Unsure: the ball coming down from above the rim was not seen clearly, please review',
   '未确认：没看清球是否从网底落下，请人工确认': 'Unsure: the ball leaving the bottom of the net was not seen clearly, please review',
-  '未确认：球像是偏离篮筐口，但轨迹太短，请人工确认': 'Unsure: the ball seems to miss the rim opening, but the track is short, please review',
+  '未确认：球像是偏离篮筐口，但轨迹不像一颗下落的球，请人工确认': 'Unsure: the ball seems to miss the rim opening, but the track does not look like a falling ball, please review',
   '未确认：球全程可见，这个视频的篮网不一定挡得住球，请人工确认': 'Unsure: the ball stayed visible, but the net in this video may not hide it, please review',
   '未确认：请人工确认': 'Unsure: please review',
   '未复核：篮筐在画面中太小，请人工确认': 'Not checked: the rim is too small in the frame, please review manually',
