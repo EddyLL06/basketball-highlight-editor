@@ -194,7 +194,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows_release.ps1 `
 
 Windows 当前属于兼容路径，仍需验证 Flutter 工具链、Python/Torch/OpenCV/Ultralytics、FFmpeg DLL 和安装流程；它不能替代正式安装器、签名和用户验收。
 
-Windows 发布包采用不含 `libx264` 的 LGPL FFmpeg。导出依次尝试 `libx264`、`libopenh264` 和 `mpeg4`，仅在前一种编码失败时切换；最后一种使用高质量 MPEG-4 Part 2，仍封装为 MP4，但不保证所有仅支持 H.264 的播放器都能播放。逐片导出与合并失败后的重新编码采用同一规则。打包前运行 `scripts/check_media_pipeline.py --root <runtime>`，实际生成代理、片段和合并视频；检查失败时停止打包。常规 Python CI 也会在 Windows 上用发布包同款 LGPL FFmpeg 执行该检查。
+Windows 发布包采用不含 `libx264` 的 LGPL FFmpeg。导出依次尝试硬件编码 `h264_nvenc`（NVIDIA）、`h264_qsv`（Intel）、`h264_amf`（AMD）、`h264_mf`（Media Foundation），再尝试 `libx264`、`libopenh264` 和 `mpeg4`，仅在前一种编码失败时切换；第一个成功的编码器用于同一次导出的后续片段。最后一种使用高质量 MPEG-4 Part 2，仍封装为 MP4，但不保证所有仅支持 H.264 的播放器都能播放。逐片导出与合并失败后的重新编码采用同一规则。代理视频在 Windows 上先用 D3D11VA 显卡解码，失败时回退纯软件解码。打包前运行 `scripts/check_media_pipeline.py --root <runtime>`，实际生成代理、片段和合并视频；检查失败时停止打包。常规 Python CI 也会在 Windows 上用发布包同款 LGPL FFmpeg 执行该检查。
 
 ### 自动发布模式与热修复 tag
 
