@@ -2861,37 +2861,35 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
           ConstrainedBox(
             // Keep the timeline and footer on screen for tall sources.
             constraints: const BoxConstraints(maxHeight: 440),
-            child: SizedBox(
-              height: 440,
-              width: double.infinity,
-              key: const Key('analysis-range-video-frame'),
-              child: DecoratedBox(
-                decoration: const BoxDecoration(color: Colors.black),
-                child: _error != null
-                    ? Center(
-                        child: Text(
-                          context.bheText('视频加载失败，请重新进入此步骤。'),
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: c.error, fontSize: 12),
-                        ),
-                      )
-                    : controller == null || !_ready
-                    ? const Center(
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Stack(
-                        children: [
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: Video(
-                                controller: controller,
-                                // 铺满(cover):非 16:9 视频不再两侧留黑边;
-                                // 此步骤无叠加标注,裁剪无对齐副作用。
-                                fit: BoxFit.cover,
-                                controls: NoVideoControls,
-                              ),
+            child: Center(
+              child: AspectRatio(
+                key: const Key('analysis-range-video-frame'),
+            aspectRatio: widget.aspectRatio,
+            child: DecoratedBox(
+              decoration: const BoxDecoration(color: Colors.black),
+              child: _error != null
+                  ? Center(
+                      child: Text(
+                        context.bheText('视频加载失败，请重新进入此步骤。'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: c.error, fontSize: 12),
+                      ),
+                    )
+                  : controller == null || !_ready
+                  ? const Center(
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Stack(
+                      children: [
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: Video(
+                              controller: controller,
+                              fit: BoxFit.contain,
+                              controls: NoVideoControls,
                             ),
                           ),
+                        ),
                         Positioned.fill(
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
@@ -2944,9 +2942,10 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
                         ),
                       ],
                     ),
-                  ),
-                ),
-              ),
+            ),
+          ),
+            ),
+          ),
           const SizedBox(height: Spacing.xs),
           Row(
             children: [

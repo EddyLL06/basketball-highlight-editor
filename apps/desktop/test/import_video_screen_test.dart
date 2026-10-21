@@ -12,7 +12,7 @@ void main() {
     const Size(1920, 1080),
     const Size(1080, 1920),
   ]) {
-    testWidgets('analysis range preview fills the frame for $frame', (
+    testWidgets('analysis range preview follows source ratio $frame', (
       tester,
     ) async {
       tester.view.physicalSize = const Size(1100, 700);
@@ -31,9 +31,9 @@ void main() {
       final preview = find.byKey(const Key('analysis-range-video-frame'));
       expect(preview, findsOneWidget);
       final size = tester.getSize(preview);
-      // Cover mode: fixed-height, full-width frame regardless of the source
-      // aspect ratio — no letterbox bars for 4:3 sources.
-      expect(size.height, 440);
+      expect(size.aspectRatio, closeTo(frame.aspectRatio, 0.001));
+      // Tall sources must not push the timeline and footer off screen.
+      expect(size.height, lessThanOrEqualTo(440));
       expect(size.width, greaterThan(frame.aspectRatio > 1 ? 500 : 200));
       expect(
         tester.getRect(find.byKey(const Key('import-footer'))).bottom,
