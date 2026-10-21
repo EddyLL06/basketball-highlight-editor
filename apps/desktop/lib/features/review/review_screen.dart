@@ -1562,7 +1562,6 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
         candidate: widget.candidate,
       ).endMs;
       _clipEndHandled = false;
-      if (widget.isOriginalVideo) _loopCandidate = false;
       unawaited(
         _queueOpen(
           widget.videoPath,
