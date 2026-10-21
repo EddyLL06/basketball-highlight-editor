@@ -12,6 +12,33 @@ void main() {
     expect(t.textTheme.displayLarge?.fontFamily, 'Inter');
     expect(t.textTheme.displayLarge?.fontWeight, FontWeight.w500);
   });
+  test('every text style uses the theme text color', () {
+    for (final (brightness, colors) in [
+      (Brightness.light, lightAppColors),
+      (Brightness.dark, darkAppColors),
+    ]) {
+      final t = appTheme(brightness).textTheme;
+      for (final style in [
+        t.displayLarge,
+        t.displayMedium,
+        t.displaySmall,
+        t.headlineLarge,
+        t.headlineMedium,
+        t.headlineSmall,
+        t.titleLarge,
+        t.titleMedium,
+        t.titleSmall,
+        t.bodyLarge,
+        t.bodyMedium,
+        t.bodySmall,
+        t.labelLarge,
+        t.labelMedium,
+        t.labelSmall,
+      ]) {
+        expect(style?.color, colors.textPrimary);
+      }
+    }
+  });
   test('numericTextStyle has tabular figures', () {
     final fs = numericTextStyle(const TextStyle());
     expect(fs.fontFeatures?.any((f) => f.feature == 'tnum'), isTrue);

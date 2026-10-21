@@ -161,6 +161,10 @@ TextTheme _buildTextTheme(AppColors colors) => TextTheme(
     letterSpacing: -0.35,
     color: colors.textPrimary,
   ),
+  displaySmall: TextStyle(fontFamily: 'Inter', color: colors.textPrimary),
+  headlineLarge: TextStyle(fontFamily: 'Inter', color: colors.textPrimary),
+  headlineMedium: TextStyle(fontFamily: 'Inter', color: colors.textPrimary),
+  headlineSmall: TextStyle(fontFamily: 'Inter', color: colors.textPrimary),
   titleLarge: TextStyle(
     fontFamily: 'Inter',
     fontSize: 18,
@@ -174,6 +178,7 @@ TextTheme _buildTextTheme(AppColors colors) => TextTheme(
     fontWeight: FontWeight.w500,
     color: colors.textPrimary,
   ),
+  titleSmall: TextStyle(fontFamily: 'Inter', color: colors.textPrimary),
   bodyLarge: TextStyle(
     fontFamily: 'Inter',
     fontSize: 14,
@@ -188,6 +193,7 @@ TextTheme _buildTextTheme(AppColors colors) => TextTheme(
     height: 1.5,
     color: colors.textPrimary,
   ),
+  bodySmall: TextStyle(fontFamily: 'Inter', color: colors.textPrimary),
   labelLarge: TextStyle(
     fontFamily: 'Inter',
     fontSize: 13,
