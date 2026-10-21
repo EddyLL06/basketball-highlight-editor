@@ -1,6 +1,7 @@
 from basketball_highlight.rim_check import (
     apply_video_occlusion,
     assess_rim_crossing,
+    keep_unless_seen,
     net_motion_score,
     skipped_result,
     tight_crop_box,
@@ -48,6 +49,12 @@ def test_low_confidence_frames_count_as_occlusion():
     frames = fall()
     frames[6] = [ball(0.07, 0.0, conf=0.3)]
     result = assess_rim_crossing(frames, RIM)
+    assert result["status"] == "made"
+
+
+def test_a_ball_rolling_on_the_rim_edge_can_still_be_a_make():
+    result = assess_rim_crossing(fall(x_start=0.8, x_end=0.4, hidden={6, 7}), RIM)
+    assert 0.5 < result["x_cross"] < 0.7
     assert result["status"] == "made"
 
 
@@ -152,7 +159,7 @@ def test_net_motion_is_the_push_after_the_crossing_over_the_quiet_before():
 
 def test_a_still_net_rejects_the_crossing_when_the_net_does_not_hide_the_ball():
     makes = [late_fall(9.0, hidden={6, 7}), late_fall(9.0)] + [late_fall(9.0) for _ in range(6)]
-    in_front = [late_fall(1.5), late_fall(1.0, hidden={6, 7})]
+    in_front = [late_fall(0.5), late_fall(0.2, hidden={6, 7})]
     judged = apply_video_occlusion(makes + in_front)
     assert judged[0]["occlusion_rule"] is False
     assert [result["status"] for result in judged[:8]] == ["made"] * 8
@@ -166,3 +173,37 @@ def test_net_motion_is_ignored_while_the_occlusion_rule_applies():
     assert judged[0]["occlusion_rule"] is True
     assert judged[8]["status"] == "made"
     assert judged[9]["reason"] == "not_occluded"
+
+
+def test_a_net_that_moves_a_little_is_not_proof_of_a_miss():
+    # How hard a make pushes the net depends on the camera and the net.
+    makes = [late_fall(9.0, hidden={6, 7}), late_fall(9.0)] + [late_fall(9.0) for _ in range(6)]
+    judged = apply_video_occlusion(makes + [late_fall(1.5)])
+    assert judged[-1]["status"] == "made"
+
+
+def rejected(reason, **features):
+    return {"status": "rejected", "reason": reason, **features}
+
+
+def test_an_unseen_ball_excludes_only_when_refine_did_not_see_a_crossing_either():
+    for reason in ("no_crossing", "no_entry", "no_exit"):
+        assert keep_unless_seen(rejected(reason), refined=True)["status"] == "unsure"
+        assert keep_unless_seen(rejected(reason), refined=False)["status"] == "rejected"
+
+
+def test_an_off_center_crossing_excludes_only_on_a_long_track():
+    assert keep_unless_seen(rejected("off_center", track_points=9), refined=True)["status"] == "unsure"
+    assert keep_unless_seen(rejected("off_center", track_points=10), refined=True)["status"] == "rejected"
+
+
+def test_a_visible_ball_excludes_only_where_the_net_hides_nearly_every_make():
+    assert keep_unless_seen(rejected("not_occluded", occluded_share=0.7), refined=True)["status"] == "unsure"
+    assert keep_unless_seen(rejected("not_occluded", occluded_share=0.86), refined=True)["status"] == "rejected"
+
+
+def test_seen_misses_and_makes_are_kept_as_judged():
+    for reason in ("exit_off_center", "rebound", "net_still"):
+        assert keep_unless_seen(rejected(reason), refined=True)["status"] == "rejected"
+    made = {"status": "made", "reason": None}
+    assert keep_unless_seen(made, refined=False) == made

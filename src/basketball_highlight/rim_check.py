@@ -5,7 +5,7 @@ of about five rim widths, so the ball stays large and no crossing frame is
 skipped. A make must:
 
 1. come down from above the rim opening,
-2. cross the rim plane close to the rim center,
+2. cross the rim plane inside the rim, a ball rolling on the rim included,
 3. reach the net bottom close to the rim center and keep falling,
 4. not bounce back up near the rim,
 5. be hidden or blurred for at least one frame while passing the rim/net.
@@ -14,9 +14,16 @@ skipped. A make must:
    rule is dropped for a video where most central crossings stay visible.
    Such a video instead needs the net to move after the crossing.
 
+A candidate is excluded only on what the detector saw: a ball crossing
+outside the rim, leaving the side of the net, bouncing up, staying in front
+of a net that hides makes, or a net that did not move. A small or blurred
+ball drops out near the rim, so "the ball was not seen" excludes a candidate
+only when the refine stage did not see a crossing either. Other failed
+checks are "unsure" and stay for review.
+
 Coordinates are normalized to the rim: x = (x - center_x) / width and
-y = (y - rim_y) / width. Thresholds were measured on reviewed projects with
-rims of 47-62 px; smaller rims are skipped and left for manual review.
+y = (y - rim_y) / width. Rims smaller than 30 px are skipped and left for
+manual review.
 """
 from statistics import median
 
@@ -30,16 +37,24 @@ WINDOW_AFTER_S = 1.0
 
 MIN_BALL_CONF = 0.15
 STRONG_BALL_CONF = 0.5
-MAX_CROSS_OFFSET = 0.45
+# The rim opening spans +-0.5; a ball rolling on the rim crosses up to 0.7.
+MAX_CROSS_OFFSET = 0.7
 MAX_EXIT_OFFSET = 0.7
 MIN_HIDDEN_FRAMES = 1
 # Reviewed videos where the net hides the ball: 86% and 95% of central
-# crossings were hidden. A close camera with a thin net: 16%.
+# crossings were hidden, 70% for a far camera. A close camera with a thin
+# net: 16%.
 MIN_OCCLUDED_SHARE = 0.5
 MIN_OCCLUSION_SAMPLES = 8
-# Close, low camera with a thin net (one video): makes scored 2.6 and up,
-# falls in front of the rim 2.2 and below.
-MIN_NET_MOTION = 2.4
+# A visible ball proves a miss only where the net hides nearly every make.
+STRONG_OCCLUDED_SHARE = 0.8
+# Net motion after the crossing minus before. Its scale depends on the camera
+# and the net (makes scored 2.6 and up on a close camera, -0.7 to 4 on a far
+# one), so only a net that moved less than before proves a miss.
+MIN_NET_MOTION = 0.0
+# A shorter off-center track may not be the shot ball.
+MIN_OFF_CENTER_TRACK_POINTS = 10
+UNSEEN_REASONS = ("no_crossing", "no_entry", "no_exit")
 
 _ZONE_X = 2.5
 _ZONE_TOP = -2.5
@@ -253,6 +268,25 @@ def assess_rim_crossing(frames, rim, net_motion_series=None):
         "net_motion": net_motion_score(net_motion_series, best["cross_frame"])
         if best and net_motion_series else None,
     }
+
+
+def keep_unless_seen(result, refined):
+    """Turn a rejection that no detection proves into "unsure".
+
+    ``refined`` tells whether the refine stage saw a crossing.
+    """
+    if result.get("status") != "rejected":
+        return result
+    reason = result.get("reason")
+    if reason in UNSEEN_REASONS:
+        proven = not refined
+    elif reason == "off_center":
+        proven = result.get("track_points", 0) >= MIN_OFF_CENTER_TRACK_POINTS
+    elif reason == "not_occluded":
+        proven = (result.get("occluded_share") or 0.0) >= STRONG_OCCLUDED_SHARE
+    else:
+        proven = True
+    return result if proven else {**result, "status": "unsure"}
 
 
 def apply_video_occlusion(results):

@@ -23,6 +23,7 @@ from basketball_highlight.rim_check import (
     AUTO_REVIEW_REASON,
     apply_video_occlusion,
     assess_rim_crossing,
+    keep_unless_seen,
     skipped_result,
 )
 from basketball_highlight.ranking import dedupe_candidates
@@ -225,7 +226,8 @@ def apply_rim_checks(
             continue
         checks.append(assess_rim_crossing(frames, item["rim"], result.get("net_motion_series")))
     for match, check in zip(matches, apply_video_occlusion(checks)):
-        match["rim_check"] = check
+        # Coarse fallbacks are candidates the refine stage did not confirm.
+        match["rim_check"] = keep_unless_seen(check, refined=not match.get("coarse_crossing"))
 
 
 def build_rim_check_command(

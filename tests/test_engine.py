@@ -2439,8 +2439,8 @@ def _standard_rim_check_fakes(captured, rim_calls):
             inputs = json.loads(
                 Path(command[command.index("--candidates") + 1]).read_text(encoding="utf-8")
             )["candidates"]
-            # 5s: falls in front of the rim (always visible); 10s: hidden by the net.
-            frames = {5.0: fall(), 10.0: fall(hidden={6, 7})}
+            # 5s: passes outside the rim; 10s: hidden by the net.
+            frames = {5.0: fall(x_start=1.2, x_end=0.9), 10.0: fall(hidden={6, 7})}
             output = {"results": [
                 {"status": "made", "frames": frames[item["time"]]} for item in inputs
             ]}
@@ -2493,10 +2493,10 @@ def test_standard_analysis_auto_excludes_candidates_that_fail_the_rim_check(
 
     checkpoint, candidates = _run_standard_analysis(service, store, video, model)
 
-    front_pass, make = candidates[5_000], candidates[10_000]
-    assert front_pass["review_status"] == "excluded"
-    assert front_pass["review_reason"] == "auto_rim_check"
-    assert json.loads(front_pass["evidence_json"])["rim_check"]["reason"] == "not_occluded"
+    outside, make = candidates[5_000], candidates[10_000]
+    assert outside["review_status"] == "excluded"
+    assert outside["review_reason"] == "auto_rim_check"
+    assert json.loads(outside["evidence_json"])["rim_check"]["reason"] == "off_center"
     assert make["review_status"] == "pending"
     assert json.loads(make["evidence_json"])["rim_check"]["status"] == "made"
     assert "verify_rim_crossing" in checkpoint["stage_timings_ms"]

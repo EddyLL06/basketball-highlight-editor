@@ -20,7 +20,7 @@
 | 导出审核数据 | [`REVIEW_DATASET_EXPORT.md`](REVIEW_DATASET_EXPORT.md) |
 | 了解 Fast/Standard 分析模式 | [`research/ANALYSIS_MODES_V1.md`](research/ANALYSIS_MODES_V1.md) |
 | 查看已记录的性能样本 | [`benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md`](benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md) |
-| 查看篮筐复核的准确率样本 | [`benchmarks/RIM_CHECK_BENCHMARK_20261020.md`](benchmarks/RIM_CHECK_BENCHMARK_20261020.md) |
+| 查看篮筐复核的准确率样本 | [`benchmarks/RIM_CHECK_RECALL_BENCHMARK_20261021.md`](benchmarks/RIM_CHECK_RECALL_BENCHMARK_20261021.md)、[`benchmarks/RIM_CHECK_BENCHMARK_20261020.md`](benchmarks/RIM_CHECK_BENCHMARK_20261020.md) |
 | 核对模型、数据和依赖授权 | [`MODEL_AND_DATA_LICENSES.md`](MODEL_AND_DATA_LICENSES.md) 和 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) |
 | 发布前检查源码树 | [`OPEN_SOURCE_AUDIT.md`](OPEN_SOURCE_AUDIT.md) |
 
@@ -49,6 +49,7 @@
 - [`USER_FLOW_V1.md`](USER_FLOW_V1.md)：导入、分析、审核、导出和异常路径。
 - [`research/ANALYSIS_MODES_V1.md`](research/ANALYSIS_MODES_V1.md)：两档模式规则、缓存、继承和质量闸门。
 - [`benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md`](benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md)：单个样本的冷启动耗时记录，不是准确率承诺。
+- [`benchmarks/RIM_CHECK_RECALL_BENCHMARK_20261021.md`](benchmarks/RIM_CHECK_RECALL_BENCHMARK_20261021.md)：篮筐复核改为只按看到的证据排除后，在 3 个已审核视频上的漏判与打勾准确率，不是准确率承诺。
 - [`benchmarks/RIM_CHECK_BENCHMARK_20261020.md`](benchmarks/RIM_CHECK_BENCHMARK_20261020.md)：篮筐逐帧复核在 4 个已审核视频上的准确率记录，不是准确率承诺。
 
 ## 开源与发布

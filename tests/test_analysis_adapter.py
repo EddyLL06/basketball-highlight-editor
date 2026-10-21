@@ -339,7 +339,7 @@ def test_rim_checks_reject_a_still_net_for_a_video_where_the_net_never_hides_the
         {
             "status": "rejected",
             "frames": [[] for _ in range(30)] + (fall(hidden={6, 7}) if index < 2 else fall()),
-            "net_motion_series": net(1.0 if index == 5 else 9.0),
+            "net_motion_series": net(0.5 if index == 5 else 9.0),
         }
         for index in range(10)
     ]}
@@ -349,6 +349,18 @@ def test_rim_checks_reject_a_still_net_for_a_video_where_the_net_never_hides_the
     assert candidate_to_row(
         matches[5], "video-1", "roi-1", 20_000, 0.5, 0.5, "v1"
     )["auto_review_status"] == "excluded"
+
+
+def test_rim_checks_exclude_an_unseen_crossing_only_when_refine_did_not_see_it_either():
+    matches = [{"time": 0.0}, {"time": 1.0, "coarse_crossing": {"time": 1.0}}]
+    inputs = [{"time": match["time"], "rim": RIM} for match in matches]
+    output = {"results": [{"status": "rejected", "frames": [[] for _ in range(16)]} for _ in matches]}
+    apply_rim_checks(matches, inputs, output)
+    assert [(match["rim_check"]["status"], match["rim_check"]["reason"]) for match in matches] == [
+        ("unsure", "no_crossing"), ("rejected", "no_crossing"),
+    ]
+    rows = [candidate_to_row(match, "video-1", "roi-1", 20_000, 0.5, 0.5, "v1") for match in matches]
+    assert [row["auto_review_status"] for row in rows] == [None, "excluded"]
 
 
 def test_run_pipeline_reuses_completed_manifest_stage(tmp_path: Path):

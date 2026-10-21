@@ -3327,7 +3327,7 @@ class _CandidateInspector extends StatelessWidget {
           const SizedBox(height: 10),
           Tooltip(
             message: context.bheText(
-              '按原视频逐帧放大篮筐区域，确认球从篮筐上方进入、被篮网遮挡并从网底落下。未通过的候选会自动排除，可随时改回保留。',
+              '按原视频逐帧放大篮筐区域，确认球从篮筐上方进入、被篮网遮挡并从网底落下。只有看清球没进的候选会自动排除；没看清的保留并标为未确认，都可以随时修改。',
             ),
             child: Row(
               key: const Key('inspector-rim-check'),
@@ -6230,6 +6230,17 @@ bool _isAutoExcluded(Map<String, dynamic> candidate) =>
           }[reason] ??
           '未通过',
       color: c.error,
+    ),
+    'unsure' => (
+      label: const <String, String>{
+            'no_crossing': '未确认：没看清球是否穿过篮筐，请人工确认',
+            'no_entry': '未确认：没看清球是否从篮筐上方落下，请人工确认',
+            'no_exit': '未确认：没看清球是否从网底落下，请人工确认',
+            'off_center': '未确认：球像是偏离篮筐口，但轨迹太短，请人工确认',
+            'not_occluded': '未确认：球全程可见，这个视频的篮网不一定挡得住球，请人工确认',
+          }[reason] ??
+          '未确认：请人工确认',
+      color: c.warning,
     ),
     'skipped' => (
       label: reason == 'small_rim'
