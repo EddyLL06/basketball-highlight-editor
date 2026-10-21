@@ -76,8 +76,31 @@ def parse_args():
     parser.add_argument("--start-time", type=float, default=0.0,
                         help="Source timestamp where the proxy range begins.")
     parser.add_argument("--codec", choices=("auto", "libx264", "h264_videotoolbox"), default="auto")
-    parser.add_argument("--hwaccel", choices=("auto", "none", "videotoolbox"), default="auto")
+    parser.add_argument("--hwaccel", choices=("auto", "none", "videotoolbox", "d3d11va"), default="auto")
     return parser.parse_args()
+
+
+def proxy_attempts(codec, hwaccel, system):
+    """Encoder and decoder pairs to try in order."""
+    auto_codec = codec == "auto"
+    if auto_codec:
+        codec = "h264_videotoolbox" if system == "Darwin" else "libx264"
+    if hwaccel == "auto":
+        hwaccel = {"Darwin": "videotoolbox", "Windows": "d3d11va"}.get(system, "none")
+    attempts = [(codec, hwaccel)]
+    if not auto_codec:
+        return attempts
+    if codec != "libx264":
+        attempts.append(("libx264", "none"))
+    # Windows 发布包随附的 FFmpeg 可能是 LGPL 构建(BtbN 等),不含
+    # GPL 的 libx264。追加 mpeg4(MPEG-4 Part 2)作为最终回退——
+    # 它内置于所有 FFmpeg 构建且无需外部库;画质略低但代理视频
+    # 仅用于分析,不影响最终导出质量。Windows 上先带着显卡解码试,
+    # 显卡解码不可用时再纯软件。
+    if hwaccel == "d3d11va":
+        attempts.append(("mpeg4", hwaccel))
+    attempts.append(("mpeg4", "none"))
+    return attempts
 
 
 def build_proxy_command(
@@ -137,24 +160,10 @@ def main(args):
         ):
             source_duration = None
 
-    codec = args.codec
-    if codec == "auto":
-        codec = "h264_videotoolbox" if platform.system() == "Darwin" else "libx264"
-    hwaccel = args.hwaccel
-    if hwaccel == "auto":
-        hwaccel = "videotoolbox" if platform.system() == "Darwin" else "none"
     temporary = output.with_name(f".{output.stem}.{uuid4().hex}.part{output.suffix}")
     temporary_metadata = output.with_suffix(output.suffix + f".{uuid4().hex}.part")
     try:
-        attempts = [(codec, hwaccel)]
-        if args.codec == "auto" and codec != "libx264":
-            attempts.append(("libx264", "none"))
-        # Windows 发布包随附的 FFmpeg 可能是 LGPL 构建(BtbN 等),不含
-        # GPL 的 libx264。追加 mpeg4(MPEG-4 Part 2)作为最终回退——
-        # 它内置于所有 FFmpeg 构建且无需外部库;画质略低但代理视频
-        # 仅用于分析,不影响最终导出质量。
-        if args.codec == "auto":
-            attempts.append(("mpeg4", "none"))
+        attempts = proxy_attempts(args.codec, args.hwaccel, platform.system())
         last_command = None
         for attempt_codec, attempt_hwaccel in attempts:
             temporary.unlink(missing_ok=True)
