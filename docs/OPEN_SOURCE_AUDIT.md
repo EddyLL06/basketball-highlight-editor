@@ -22,7 +22,7 @@
 
 以下项目仍需在正式稳定版前清理、替换或取得明确授权：
 
-- `models/bball_model.onnx`；桌面发布所需的 `models/bball_model.pt` 已作为明确的内置运行时模型保留；
+- `models/bball_model.onnx`；桌面发布所需的 `models/bball_model.pt` 已作为明确的内置运行时模型保留；Android NPU 预编译模型 `apps/mobile/android/app/src/main/assets/models/bball_model_qnn_v81.onnx` 由它编译而来、只能在真机上生成，同样保留；
 - `apps/mobile/assets/models/bball_model.onnx`；
 - `apps/mobile/android/app/src/main/jniLibs/arm64-v8a/*.so`；
 - `apps/desktop/assets/fonts/*.ttf` 当前是占位文本，不是可分发的有效字体文件；

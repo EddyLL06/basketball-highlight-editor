@@ -33,7 +33,10 @@ BLOCKED_SUFFIXES = {
 # The desktop release intentionally bundles the project model so a fresh clone
 # and the generated packages work without a silent download from an unknown
 # address. Other model/native artifacts remain blocked by the audit.
-ALLOWED_RELEASE_ARTIFACTS = {"models/bball_model.pt"}
+ALLOWED_RELEASE_ARTIFACTS = {
+    "models/bball_model.pt",
+    "apps/mobile/android/app/src/main/assets/models/bball_model_qnn_v81.onnx",
+}
 BLOCKED_PATH_PARTS = (
     ".research/opensource-refs-",
     ".venv/",
