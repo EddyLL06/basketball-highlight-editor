@@ -309,4 +309,22 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       return;
     }
   }
+
+  @override
+  Future<bool> extractCover({
+    required String videoPath,
+    required int timeMs,
+    required String outputPath,
+  }) async {
+    try {
+      return await _channel.invokeMethod<bool>('extractCover', {
+            'videoPath': videoPath,
+            'timeMs': timeMs,
+            'outputPath': outputPath,
+          }) ==
+          true;
+    } on Object {
+      return false;
+    }
+  }
 }

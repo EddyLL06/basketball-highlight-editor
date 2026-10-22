@@ -30,6 +30,9 @@ class MobileAppState extends ChangeNotifier {
     video: null,
   );
   List<ProjectSnapshot> recentProjects = const [];
+
+  /// Cover image per project id, taken from a shot frame after analysis.
+  Map<String, String> coverPaths = const {};
   AnalysisStage stage = AnalysisStage.idle;
   double progress = 0;
   String progressMessage = '';
@@ -113,6 +116,50 @@ class MobileAppState extends ChangeNotifier {
   Future<File> _projectFile(String id) async {
     final directory = await _projectsDirectory();
     return File('${directory.path}/$id.json');
+  }
+
+  Future<File> _coverFile(String id) async {
+    final directory = await _projectsDirectory();
+    return File('${directory.path}/${id}_cover.jpg');
+  }
+
+  Future<void> _loadCovers() async {
+    final covers = <String, String>{};
+    for (final item in recentProjects) {
+      final file = await _coverFile(item.id);
+      if (await file.exists()) covers[item.id] = file.path;
+    }
+    coverPaths = covers;
+    notifyListeners();
+    for (final item in recentProjects) {
+      if (!covers.containsKey(item.id)) await _updateCover(item);
+    }
+  }
+
+  /// Uses the first kept shot that passed the rim check, else the first kept
+  /// shot, else the first candidate.
+  Future<void> _updateCover(ProjectSnapshot snapshot) async {
+    final video = snapshot.video;
+    if (video == null || snapshot.candidates.isEmpty) return;
+    final candidates = [...snapshot.candidates]
+      ..sort((a, b) => a.eventMs.compareTo(b.eventMs));
+    final kept = candidates
+        .where((item) => item.selection == CandidateSelection.included)
+        .toList();
+    final cover = kept.firstWhere(
+      (item) => item.rimCheckStatus == 'made',
+      orElse: () => kept.isEmpty ? candidates.first : kept.first,
+    );
+    final file = await _coverFile(snapshot.id);
+    final saved = await analysisEngine.extractCover(
+      videoPath: video.path,
+      timeMs: cover.eventMs,
+      outputPath: file.path,
+    );
+    if (!saved) return;
+    await FileImage(file).evict();
+    coverPaths = {...coverPaths, snapshot.id: file.path};
+    notifyListeners();
   }
 
   Future<String> _sha256(File file) async {
@@ -236,6 +283,7 @@ class MobileAppState extends ChangeNotifier {
         recentProjects = loadedProjects;
         if (recentProjects.isNotEmpty) project = recentProjects.first;
         await _persistProjects();
+        unawaited(_loadCovers());
       } else if (await legacyFile.exists()) {
         project = const ProjectPackageCodec().decode(
           await legacyFile.readAsString(),
@@ -281,6 +329,7 @@ class MobileAppState extends ChangeNotifier {
           analysing = false;
           analysisStartedAt = null;
           await _queueSave();
+          unawaited(_updateCover(project));
         } else if (update.stage == AnalysisStage.cancelled ||
             update.stage == AnalysisStage.failed) {
           project = project.copyWith(
@@ -718,6 +767,9 @@ class MobileAppState extends ChangeNotifier {
     _resetTransientState();
     final file = await _projectFile(deletedId);
     if (await file.exists()) await file.delete();
+    final cover = await _coverFile(deletedId);
+    if (await cover.exists()) await cover.delete();
+    coverPaths = {...coverPaths}..remove(deletedId);
     recentProjects = recentProjects
         .where((item) => item.id != deletedId)
         .toList();
@@ -752,7 +804,7 @@ class MobileAppState extends ChangeNotifier {
       candidates: project.candidates
           .map(
             (candidate) => candidate.id == id
-                ? candidate.copyWith(selection: selection)
+                ? candidate.copyWith(selection: selection, reviewed: true)
                 : candidate,
           )
           .toList(),
@@ -1062,6 +1114,7 @@ class MobileAppState extends ChangeNotifier {
         lastAnalysisMessage: '分析完成',
       );
       await _queueSave();
+      unawaited(_updateCover(project));
     } on Object catch (error) {
       if (generation != _analysisGeneration) return;
       stage = AnalysisStage.failed;

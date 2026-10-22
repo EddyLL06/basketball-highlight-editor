@@ -190,6 +190,45 @@ void main() {
     expect(restored.name, '旧项目');
   });
 
+  test('review state survives saving and auto exclusion stays unreviewed', () {
+    const candidate = Candidate(
+      id: 'candidate_3000',
+      startMs: 0,
+      endMs: 6000,
+      eventMs: 3000,
+    );
+
+    final reviewed = Candidate.fromJson(
+      jsonDecode(
+            jsonEncode(
+              candidate
+                  .copyWith(
+                    selection: CandidateSelection.excluded,
+                    reviewed: true,
+                  )
+                  .toJson(),
+            ),
+          )
+          as Map<String, dynamic>,
+    );
+    final autoExcluded = Candidate.fromJson({
+      'id': 'candidate_4000',
+      'start_ms': 1000,
+      'end_ms': 7000,
+      'event_ms': 4000,
+      'selection': 'excluded',
+      'review_reason': 'auto_rim_check',
+      'rim_check': {'status': 'rejected'},
+    });
+
+    expect(candidate.reviewed, isFalse);
+    expect(reviewed.reviewed, isTrue);
+    expect(reviewed.selection, CandidateSelection.excluded);
+    expect(autoExcluded.reviewed, isFalse);
+    expect(autoExcluded.selection, CandidateSelection.excluded);
+    expect(autoExcluded.rimCheckStatus, 'rejected');
+  });
+
   test('reads net motion from the dedicated signal field', () {
     final candidate = Candidate.fromJson({
       'id': 'net_signal_candidate',

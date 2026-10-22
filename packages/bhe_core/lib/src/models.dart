@@ -11,6 +11,7 @@ enum AnalysisStage {
   coarseScan,
   generateCandidates,
   refineCandidates,
+  rimCheck,
   persistCandidates,
   completed,
   cancelled,
@@ -148,6 +149,7 @@ class Candidate {
     this.rangeEdited = false,
     this.confidence = 0,
     this.selection = CandidateSelection.included,
+    this.reviewed = false,
     this.player,
     this.note,
     this.trajectoryScore,
@@ -188,6 +190,7 @@ class Candidate {
     this.signals,
     this.gates,
     this.verification,
+    this.rimCheck,
   });
 
   final String id;
@@ -200,6 +203,10 @@ class Candidate {
   final bool rangeEdited;
   final double confidence;
   final CandidateSelection selection;
+
+  /// Whether the user kept or excluded this candidate. Analysis defaults and
+  /// automatic exclusions leave it false.
+  final bool reviewed;
   final String? player;
   final String? note;
   final double? trajectoryScore;
@@ -240,6 +247,12 @@ class Candidate {
   final Map<String, dynamic>? gates;
   final Map<String, dynamic>? verification;
 
+  /// Frame-by-frame rim check verdict: `status` is made, unsure, rejected or
+  /// skipped.
+  final Map<String, dynamic>? rimCheck;
+
+  String? get rimCheckStatus => rimCheck?['status'] as String?;
+
   Candidate copyWith({
     int? startMs,
     int? endMs,
@@ -247,6 +260,7 @@ class Candidate {
     int? defaultEndMs,
     bool? rangeEdited,
     CandidateSelection? selection,
+    bool? reviewed,
     String? player,
     bool clearPlayer = false,
     String? note,
@@ -263,6 +277,7 @@ class Candidate {
         ((startMs != null || endMs != null) ? true : this.rangeEdited),
     confidence: confidence,
     selection: selection ?? this.selection,
+    reviewed: reviewed ?? this.reviewed,
     player: clearPlayer ? null : (player ?? this.player),
     note: clearNote ? null : (note ?? this.note),
     trajectoryScore: trajectoryScore,
@@ -303,6 +318,7 @@ class Candidate {
     signals: signals,
     gates: gates,
     verification: verification,
+    rimCheck: rimCheck,
   );
 
   Duration get duration => Duration(milliseconds: endMs - startMs);
@@ -323,6 +339,7 @@ class Candidate {
     if (rangeEdited) 'range_edited': true,
     'confidence': confidence,
     'selection': selection.name,
+    if (reviewed) 'reviewed': true,
     if (player != null) 'player': player,
     if (note != null) 'note': note,
     if (trajectoryScore != null) 'trajectory_score': trajectoryScore,
@@ -379,6 +396,7 @@ class Candidate {
     if (signals != null) 'signals': signals,
     if (gates != null) 'gates': gates,
     if (verification != null) 'verification': verification,
+    if (rimCheck != null) 'rim_check': rimCheck,
   };
 
   factory Candidate.fromJson(Map<String, dynamic> json) {
@@ -430,6 +448,7 @@ class Candidate {
         (value) => value.name == json['selection'],
         orElse: () => CandidateSelection.included,
       ),
+      reviewed: json['reviewed'] == true,
       player: json['player'] as String?,
       note: json['note'] as String?,
       trajectoryScore: _scoreValueOrNull(
@@ -544,6 +563,7 @@ class Candidate {
       signals: _dynamicMap(json['signals']),
       gates: _dynamicMap(json['gates']),
       verification: _dynamicMap(json['verification']),
+      rimCheck: _dynamicMap(json['rim_check']),
     );
   }
 }

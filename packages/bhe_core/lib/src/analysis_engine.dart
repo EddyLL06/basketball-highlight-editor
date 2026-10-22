@@ -52,6 +52,14 @@ abstract interface class MobileAnalysisEngine {
   Stream<AnalysisProgress> recoverAnalysis();
 
   Future<void> cancel();
+
+  /// Saves one video frame as a small JPEG for the project cover. Returns
+  /// false when the frame could not be read.
+  Future<bool> extractCover({
+    required String videoPath,
+    required int timeMs,
+    required String outputPath,
+  });
 }
 
 class MobileAnalysisEngineUnavailable implements MobileAnalysisEngine {
@@ -70,6 +78,13 @@ class MobileAnalysisEngineUnavailable implements MobileAnalysisEngine {
 
   @override
   Future<void> cancel() async {}
+
+  @override
+  Future<bool> extractCover({
+    required String videoPath,
+    required int timeMs,
+    required String outputPath,
+  }) async => false;
 
   @override
   Future<Map<String, dynamic>?> suggestRoi({

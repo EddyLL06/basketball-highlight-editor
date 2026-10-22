@@ -74,6 +74,24 @@ String? _translateDynamic(String source) {
   final allCandidates = RegExp(r'^全部 (\d+) 个候选片段$').firstMatch(source);
   if (allCandidates != null)
     return 'All ${allCandidates.group(1)} candidate clips';
+  final reviewProgress = RegExp(r'^已审核 (\d+) / (\d+)$').firstMatch(source);
+  if (reviewProgress != null) {
+    return 'Reviewed ${reviewProgress.group(1)} / ${reviewProgress.group(2)}';
+  }
+  final shownCandidates = RegExp(r'^显示 (\d+) / (\d+)$').firstMatch(source);
+  if (shownCandidates != null) {
+    return 'Showing ${shownCandidates.group(1)} / ${shownCandidates.group(2)}';
+  }
+  final filteredCandidates = RegExp(r'^当前筛选的 (\d+) 个候选片段$').firstMatch(source);
+  if (filteredCandidates != null) {
+    return '${filteredCandidates.group(1)} filtered candidate clips';
+  }
+  final overwriteFiltered = RegExp(
+    r'^将覆盖筛选出的 (\d+) 个片段，其中 (\d+) 个曾手动调整。$',
+  ).firstMatch(source);
+  if (overwriteFiltered != null) {
+    return 'Overwrite ${overwriteFiltered.group(1)} filtered clips; ${overwriteFiltered.group(2)} were manually adjusted.';
+  }
   final candidateCount = RegExp(r'^候选 (\d+)$').firstMatch(source);
   if (candidateCount != null) return 'Candidates ${candidateCount.group(1)}';
   final applyToClips = RegExp(r'^应用到 (\d+) 个片段$').firstMatch(source);
@@ -864,6 +882,24 @@ const _englishText = <String, String>{
   '篮筐复核': 'Rim check',
   '未确认': 'Unsure',
   '按篮筐复核结果筛选': 'Filter by rim check',
+  '未审核': 'Unreviewed',
+  '没有符合筛选的候选': 'No candidates match the filters',
+  '清除筛选': 'Clear filters',
+  '球员': 'Player',
+  '已标注': 'Tagged',
+  '未标注': 'Untagged',
+  '按球员筛选': 'Filter by player',
+  '播放片段': 'Play clip',
+  '预览结尾': 'Preview ending',
+  '设为开始': 'Set start here',
+  '设为结束': 'Set end here',
+  '开头 −2 秒': 'Start −2 s',
+  '结尾 +2 秒': 'End +2 s',
+  '前后各 +2 秒': '+2 s on both ends',
+  '进球时刻': 'Shot moment',
+  '原范围': 'Original range',
+  '片段时间轴': 'Clip timeline',
+  '拖动两端调整范围，点时间轴跳到该位置。': 'Drag either end to adjust the range; tap the timeline to jump there.',
   '按原视频逐帧放大篮筐区域，确认球从篮筐上方进入、被篮网遮挡并从网底落下。只有看清球没进的候选会自动排除；没看清的保留并标为未确认，都可以随时修改。':
       'Zooms into the rim on every source frame to confirm the ball enters from above, is hidden by the net and drops out of the bottom. Only candidates clearly seen missing are auto-excluded; unclear ones stay and are marked unsure. You can change any of them.',
   '通过：球穿过篮网落下': 'Passed: the ball dropped through the net',

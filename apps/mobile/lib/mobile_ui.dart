@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
+import 'clip_range_editor.dart';
 import 'mobile_app_state.dart';
 import 'mobile_theme.dart';
 
@@ -528,6 +529,7 @@ class _ProjectView extends StatelessWidget {
               ))
                 _RecentProjectRow(
                   project: project,
+                  coverPath: state.coverPaths[project.id],
                   onTap: () => state.openProject(project.id),
                 ),
             ],
@@ -1263,8 +1265,13 @@ class _SettingRow extends StatelessWidget {
 }
 
 class _RecentProjectRow extends StatelessWidget {
-  const _RecentProjectRow({required this.project, required this.onTap});
+  const _RecentProjectRow({
+    required this.project,
+    required this.onTap,
+    this.coverPath,
+  });
   final ProjectSnapshot project;
+  final String? coverPath;
   final VoidCallback onTap;
 
   @override
@@ -1274,14 +1281,39 @@ class _RecentProjectRow extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: EdgeInsets.symmetric(
+          horizontal: coverPath == null ? 14 : 10,
+          vertical: coverPath == null ? 12 : 8,
+        ),
         child: Row(
           children: [
-            const Icon(
-              LucideIcons.fileVideo,
-              size: 18,
-              color: BhePalette.textSecondary,
-            ),
+            if (coverPath == null)
+              const Icon(
+                LucideIcons.fileVideo,
+                size: 18,
+                color: BhePalette.textSecondary,
+              )
+            else
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.file(
+                  File(coverPath!),
+                  key: Key('project-cover-${project.id}'),
+                  width: 72,
+                  height: 48,
+                  fit: BoxFit.cover,
+                  cacheWidth: 216,
+                  errorBuilder: (_, _, _) => const SizedBox(
+                    width: 72,
+                    height: 48,
+                    child: Icon(
+                      LucideIcons.fileVideo,
+                      size: 18,
+                      color: BhePalette.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(project.name, overflow: TextOverflow.ellipsis),
@@ -1398,6 +1430,7 @@ class _AnalysisViewState extends State<_AnalysisView> {
       (AnalysisStage.coarseScan, context.bheText('扫描视频')),
       (AnalysisStage.generateCandidates, context.bheText('生成候选')),
       (AnalysisStage.refineCandidates, context.bheText('精筛候选')),
+      (AnalysisStage.rimCheck, context.bheText('篮筐复核')),
       (AnalysisStage.persistCandidates, context.bheText('保存结果')),
     ];
     final current = steps.indexWhere((item) => item.$1 == state.stage);
@@ -1557,7 +1590,7 @@ class _ReviewViewState extends State<_ReviewView> {
   Future<void> _playerQueue = Future<void>.value();
   bool _disposed = false;
   int selectedIndex = 0;
-  bool annotations = true;
+  bool annotations = false;
   bool autoReplay = true;
   bool clipOnly = true;
   double speed = 1;
@@ -1565,11 +1598,42 @@ class _ReviewViewState extends State<_ReviewView> {
   bool _seeking = false;
   bool _completionPromptShown = false;
   DateTime _lastVideoPaint = DateTime.fromMillisecondsSinceEpoch(0);
+  String statusFilter = 'all';
+  String rimFilter = 'all';
+  String playerFilter = 'all';
 
   MobileAppState get state => widget.state;
-  List<Candidate> get candidates =>
+  List<Candidate> get allCandidates =>
       [...state.project.candidates]
         ..sort((a, b) => a.eventMs.compareTo(b.eventMs));
+  List<Candidate> get candidates => allCandidates
+      .where(
+        (candidate) => _matchesFilters(
+          candidate,
+          status: statusFilter,
+          rim: rimFilter,
+          player: playerFilter,
+        ),
+      )
+      .toList();
+  bool get filtering =>
+      statusFilter != 'all' || rimFilter != 'all' || playerFilter != 'all';
+
+  Future<void> _changeFilters({
+    String? status,
+    String? rim,
+    String? player,
+  }) async {
+    setState(() {
+      statusFilter = status ?? statusFilter;
+      rimFilter = rim ?? rimFilter;
+      playerFilter = player ?? playerFilter;
+      selectedIndex = 0;
+      _completionPromptShown = false;
+    });
+    final first = selected;
+    if (first != null) await _replay(first);
+  }
   Candidate? get selected => candidates.isEmpty
       ? null
       : candidates[selectedIndex.clamp(0, candidates.length - 1)];
@@ -1762,6 +1826,7 @@ class _ReviewViewState extends State<_ReviewView> {
             onSeek: _seek,
             onSelect: (index) => _select(index),
             onReview: (index, selection) => _reviewAt(index, selection),
+            currentCandidates: () => candidates,
             onExit: () => Navigator.of(pageContext).pop(),
             onToggleAnnotations: () =>
                 setState(() => annotations = !annotations),
@@ -1854,7 +1919,13 @@ class _ReviewViewState extends State<_ReviewView> {
           title: context.bheText('批量设置片段时长'),
           child: Column(
             children: [
-              Text(context.bheText('全部 ${candidates.length} 个候选片段')),
+              Text(
+                context.bheText(
+                  filtering
+                      ? '当前筛选的 ${candidates.length} 个候选片段'
+                      : '全部 ${candidates.length} 个候选片段',
+                ),
+              ),
               const SizedBox(height: 8),
               _BatchSecondsSlider(
                 label: context.bheText('进球前'),
@@ -1869,7 +1940,9 @@ class _ReviewViewState extends State<_ReviewView> {
               Text(
                 context.bheText(
                   overwriteManual
-                      ? '将覆盖全部 ${candidates.length} 个片段，其中 $manualCount 个曾手动调整。'
+                      ? filtering
+                            ? '将覆盖筛选出的 ${candidates.length} 个片段，其中 $manualCount 个曾手动调整。'
+                            : '将覆盖全部 ${candidates.length} 个片段，其中 $manualCount 个曾手动调整。'
                       : '将更新 ${candidates.length - manualCount} 个片段，保留 $manualCount 个手动调整片段。',
                 ),
                 style: Theme.of(context).textTheme.bodySmall,
@@ -1902,6 +1975,9 @@ class _ReviewViewState extends State<_ReviewView> {
       final updated = state.applyBatchClipRange(
         beforeSeconds: before.round(),
         afterSeconds: after.round(),
+        candidateIds: filtering
+            ? candidates.map((candidate) => candidate.id)
+            : null,
         overwriteManual: overwriteManual,
       );
       if (updated > 0) setState(() {});
@@ -1911,7 +1987,7 @@ class _ReviewViewState extends State<_ReviewView> {
   @override
   Widget build(BuildContext context) {
     final candidate = selected;
-    if (candidate == null) {
+    if (candidate == null && allCandidates.isEmpty) {
       return _ReviewEmpty(
         onOpenProject: widget.onOpenProject,
         onAddManual: state.project.video == null
@@ -1925,6 +2001,22 @@ class _ReviewViewState extends State<_ReviewView> {
     if (_candidateKeys.length > candidates.length) {
       _candidateKeys.removeRange(candidates.length, _candidateKeys.length);
     }
+    final rail = _CandidateRail(
+      controller: _railController,
+      itemKeys: _candidateKeys,
+      candidates: candidates,
+      allCandidates: allCandidates,
+      players: state.project.players,
+      statusFilter: statusFilter,
+      rimFilter: rimFilter,
+      playerFilter: playerFilter,
+      onFiltersChanged: _changeFilters,
+      selectedIndex: selectedIndex,
+      onSelect: _select,
+      onAdd: () => _addManualCandidate(context),
+      onBatchRange: () => _showBatchRangeSheet(context),
+    );
+    if (candidate == null) return rail;
     final video = state.project.video!;
     return LayoutBuilder(
       builder: (context, constraints) => Column(
@@ -1932,18 +2024,7 @@ class _ReviewViewState extends State<_ReviewView> {
           Expanded(
             child: Column(
               children: [
-                Expanded(
-                  flex: 4,
-                  child: _CandidateRail(
-                    controller: _railController,
-                    itemKeys: _candidateKeys,
-                    candidates: candidates,
-                    selectedIndex: selectedIndex,
-                    onSelect: _select,
-                    onAdd: () => _addManualCandidate(context),
-                    onBatchRange: () => _showBatchRangeSheet(context),
-                  ),
-                ),
+                Expanded(flex: 4, child: rail),
                 Expanded(
                   flex: 6,
                   child: _ReviewVideoStage(
@@ -2057,76 +2138,19 @@ class _ReviewViewState extends State<_ReviewView> {
       end = (start + 1000).clamp(0, video.durationMs).toDouble();
       start = (end - 1000).clamp(0, video.durationMs).toDouble();
     }
-    var previewPosition = start.round();
-    var requestedPosition = previewPosition;
-    final range = await showModalBottomSheet<({int start, int end})>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => _SheetFrame(
-          title: context.bheText('补漏候选'),
-          child: Column(
-            children: [
-              Text(
-                context.bheText('用视频控制确认时间，再拖动两端确定要审核的片段。'),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 10),
-              _VideoPreview(
-                path: video.path,
-                aspectRatio: video.width / video.height,
-                seekStepMs: 1500,
-                initialPositionMs: start.round(),
-                requestedPositionMs: requestedPosition,
-                stopAtMs: end.round(),
-                onPositionChanged: (position) {
-                  if (context.mounted) {
-                    setSheetState(() => previewPosition = position);
-                  }
-                },
-              ),
-              const SizedBox(height: 10),
-              Text(
-                '${_formatMs(start.round())} — ${_formatMs(end.round())}  ·  ${_formatMs((end - start).round())}',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              _RangeEditorSlider(
-                max: video.durationMs.toDouble().clamp(1, double.infinity),
-                start: start,
-                end: end,
-                position: previewPosition.toDouble(),
-                onChanged: (values) {
-                  if (values.end - values.start < 1000) return;
-                  final seekTo = _movedRangeHandle(
-                    values: values,
-                    previousStart: start,
-                    previousEnd: end,
-                  );
-                  setSheetState(() {
-                    start = values.start;
-                    end = values.end;
-                    previewPosition = seekTo;
-                    requestedPosition = seekTo;
-                  });
-                },
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: () => Navigator.pop(context, (
-                    start: start.round(),
-                    end: end.round(),
-                  )),
-                  icon: const Icon(LucideIcons.plus, size: 18),
-                  label: Text(context.bheText('加入审核列表')),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    await _pausePlayback();
+    if (!context.mounted) return;
+    final range = await showClipRangeEditor(
+      context,
+      videoPath: video.path,
+      aspectRatio: video.width / video.height,
+      durationMs: video.durationMs,
+      startMs: start.round(),
+      endMs: end.round(),
+      title: context.bheText('补漏候选'),
+      description: '用视频控制确认时间，再拖动两端确定要审核的片段。',
+      confirmLabel: context.bheText('加入审核列表'),
+      confirmIcon: LucideIcons.plus,
     );
     if (range == null) return;
     final id = 'manual_${DateTime.now().microsecondsSinceEpoch}';
@@ -2139,11 +2163,17 @@ class _ReviewViewState extends State<_ReviewView> {
         reason: 'manual',
         verdict: 'manual',
         evidenceSource: 'manual',
+        reviewed: true,
       ),
     );
-    final index = state.project.candidates.indexWhere(
-      (candidate) => candidate.id == id,
-    );
+    if (filtering) {
+      setState(() {
+        statusFilter = 'all';
+        rimFilter = 'all';
+        playerFilter = 'all';
+      });
+    }
+    final index = candidates.indexWhere((candidate) => candidate.id == id);
     if (index >= 0) await _select(index);
   }
 
@@ -2160,8 +2190,12 @@ class _ReviewViewState extends State<_ReviewView> {
     state.toggleCandidate(candidate.id, selection);
     if (selection == CandidateSelection.included ||
         selection == CandidateSelection.excluded) {
-      if (index < items.length - 1) {
-        final next = index + 1;
+      // A status filter can hide the candidate just reviewed; the next one
+      // then moves into its place.
+      final remaining = candidates;
+      final shown = remaining.indexWhere((item) => item.id == candidate.id);
+      final next = shown >= 0 ? shown + 1 : index;
+      if (next < remaining.length) {
         await _select(next);
         return next;
       } else if (!_completionPromptShown) {
@@ -2201,74 +2235,20 @@ class _ReviewViewState extends State<_ReviewView> {
   Future<void> _editRange(BuildContext context, Candidate candidate) async {
     final video = state.project.video;
     if (video == null) return;
-    var start = candidate.startMs.toDouble();
-    var end = candidate.endMs.toDouble();
-    var previewPosition = start.round();
-    var requestedPosition = previewPosition;
-    final result = await showModalBottomSheet<({int start, int end})>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => _SheetFrame(
-          title: context.bheText('调整片段范围'),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _VideoPreview(
-                path: video.path,
-                aspectRatio: video.width / video.height,
-                seekStepMs: 1500,
-                initialPositionMs: start.round(),
-                requestedPositionMs: requestedPosition,
-                stopAtMs: end.round(),
-                onPositionChanged: (position) {
-                  if (context.mounted) {
-                    setSheetState(() => previewPosition = position);
-                  }
-                },
-              ),
-              const SizedBox(height: 10),
-              Text(
-                '${_formatMs(start.round())} — ${_formatMs(end.round())}',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              _RangeEditorSlider(
-                max: video.durationMs.toDouble().clamp(1, double.infinity),
-                start: start,
-                end: end,
-                position: previewPosition.toDouble(),
-                onChanged: (values) {
-                  if (values.end - values.start < 1000) return;
-                  final seekTo = _movedRangeHandle(
-                    values: values,
-                    previousStart: start,
-                    previousEnd: end,
-                  );
-                  setSheetState(() {
-                    start = values.start;
-                    end = values.end;
-                    previewPosition = seekTo;
-                    requestedPosition = seekTo;
-                  });
-                },
-              ),
-              Text(
-                context.bheText('先用上方视频找到位置，再拖动滑杆两端微调片段起止。'),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 8),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, (
-                  start: start.round(),
-                  end: end.round(),
-                )),
-                child: Text(context.bheText('应用')),
-              ),
-            ],
-          ),
-        ),
-      ),
+    await _pausePlayback();
+    if (!context.mounted) return;
+    final result = await showClipRangeEditor(
+      context,
+      videoPath: video.path,
+      aspectRatio: video.width / video.height,
+      durationMs: video.durationMs,
+      startMs: candidate.startMs,
+      endMs: candidate.endMs,
+      eventMs: candidate.eventMs,
+      defaultStartMs: candidate.defaultStartMs,
+      defaultEndMs: candidate.defaultEndMs,
+      title: context.bheText('调整片段范围'),
+      confirmLabel: context.bheText('应用'),
     );
     if (result != null) {
       state.updateCandidate(
@@ -2584,6 +2564,7 @@ class _FullscreenReviewPage extends StatefulWidget {
     required this.onSeekTo,
     required this.onSelect,
     required this.onReview,
+    required this.currentCandidates,
     required this.onExit,
     required this.onToggleAnnotations,
     required this.onToggleAutoReplay,
@@ -2607,6 +2588,7 @@ class _FullscreenReviewPage extends StatefulWidget {
   final ValueChanged<int> onSeekTo;
   final Future<void> Function(int index) onSelect;
   final Future<int?> Function(int index, CandidateSelection selection) onReview;
+  final List<Candidate> Function() currentCandidates;
   final VoidCallback onExit;
   final VoidCallback onToggleAnnotations;
   final VoidCallback onToggleAutoReplay;
@@ -2658,16 +2640,10 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
   }
 
   Future<void> _reviewCandidate(CandidateSelection selection) async {
-    final reviewedId = _candidate.id;
     final next = await widget.onReview(_selectedIndex, selection);
     if (!mounted) return;
     setState(() {
-      _candidates = [
-        for (final candidate in _candidates)
-          candidate.id == reviewedId
-              ? candidate.copyWith(selection: selection)
-              : candidate,
-      ];
+      _candidates = widget.currentCandidates();
       if (next != null) {
         _selectedIndex = next.clamp(0, math.max(0, _candidates.length - 1));
       }
@@ -2921,12 +2897,17 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  _formatMs(candidate.eventMs),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                  ),
+                                Row(
+                                  children: [
+                                    Text(
+                                      _formatMs(candidate.eventMs),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    _RimCheckTag(candidate: candidate),
+                                  ],
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
@@ -3315,11 +3296,48 @@ class _CandidateOverlayPainter extends CustomPainter {
       oldDelegate.positionMs != positionMs;
 }
 
+/// The rim check verdict next to a candidate's time: passed, unsure, or
+/// excluded by the check.
+class _RimCheckTag extends StatelessWidget {
+  const _RimCheckTag({required this.candidate});
+
+  final Candidate candidate;
+
+  @override
+  Widget build(BuildContext context) {
+    final excluded = candidate.selection == CandidateSelection.excluded;
+    final (label, color) = switch (candidate.rimCheckStatus) {
+      'rejected' when excluded => ('自动排除', BhePalette.error),
+      'made' when !excluded => ('通过', BhePalette.green),
+      'unsure' when !excluded => ('未确认', BhePalette.warning),
+      _ => (null, null),
+    };
+    if (label == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(left: 6),
+      child: Text(
+        context.bheText(label),
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
 class _CandidateRail extends StatelessWidget {
   const _CandidateRail({
     required this.controller,
     required this.itemKeys,
     required this.candidates,
+    required this.allCandidates,
+    required this.players,
+    required this.statusFilter,
+    required this.rimFilter,
+    required this.playerFilter,
+    required this.onFiltersChanged,
     required this.selectedIndex,
     required this.onSelect,
     required this.onAdd,
@@ -3328,6 +3346,13 @@ class _CandidateRail extends StatelessWidget {
   final ScrollController controller;
   final List<GlobalKey> itemKeys;
   final List<Candidate> candidates;
+  final List<Candidate> allCandidates;
+  final List<String> players;
+  final String statusFilter;
+  final String rimFilter;
+  final String playerFilter;
+  final Future<void> Function({String? status, String? rim, String? player})
+  onFiltersChanged;
   final int selectedIndex;
   final ValueChanged<int> onSelect;
   final VoidCallback onAdd;
@@ -3336,27 +3361,49 @@ class _CandidateRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
+    final total = allCandidates.length;
+    final reviewed = allCandidates.where((item) => item.reviewed).length;
+    final filtering =
+        statusFilter != 'all' || rimFilter != 'all' || playerFilter != 'all';
+    final numbers = {
+      for (var index = 0; index < allCandidates.length; index++)
+        allCandidates[index].id: index + 1,
+    };
     return ColoredBox(
       color: Theme.of(context).cardTheme.color ?? BhePalette.surface,
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 8, 2),
+            padding: const EdgeInsets.fromLTRB(12, 2, 4, 0),
             child: Row(
               children: [
                 Text(
-                  l10n?.candidateCount(candidates.length) ??
-                      '候选 ${candidates.length}',
+                  filtering
+                      ? '${context.bheText('显示 ${candidates.length} / $total')} · ${context.bheText('已审核 $reviewed / $total')}'
+                      : context.bheText('已审核 $reviewed / $total'),
+                  key: const Key('review-progress'),
                   style: Theme.of(context).textTheme.labelMedium,
                 ),
-                const Spacer(),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      value: total == 0 ? 0 : reviewed / total,
+                      minHeight: 3,
+                      color: BhePalette.green,
+                      backgroundColor: BhePalette.border,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
                 TextButton.icon(
                   onPressed: onBatchRange,
                   icon: const Icon(LucideIcons.clock3, size: 16),
                   label: Text(l10n?.clipDuration ?? '时长'),
                   style: TextButton.styleFrom(
-                    minimumSize: const Size(44, 34),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(44, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
                   ),
                 ),
                 TextButton.icon(
@@ -3364,20 +3411,48 @@ class _CandidateRail extends StatelessWidget {
                   icon: const Icon(LucideIcons.plus, size: 16),
                   label: Text(l10n?.addManualCandidate ?? '补漏'),
                   style: TextButton.styleFrom(
-                    minimumSize: const Size(44, 34),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(44, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
                   ),
                 ),
               ],
             ),
           ),
+          _ReviewFilterBar(
+            candidates: allCandidates,
+            players: players,
+            statusFilter: statusFilter,
+            rimFilter: rimFilter,
+            playerFilter: playerFilter,
+            onChanged: onFiltersChanged,
+          ),
           Expanded(
-            child: ListView.separated(
-              controller: controller,
-              padding: const EdgeInsets.fromLTRB(8, 2, 8, 8),
-              itemCount: candidates.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 6),
-              itemBuilder: (context, index) {
+            child: candidates.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          context.bheText('没有符合筛选的候选'),
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        TextButton(
+                          onPressed: () => onFiltersChanged(
+                            status: 'all',
+                            rim: 'all',
+                            player: 'all',
+                          ),
+                          child: Text(context.bheText('清除筛选')),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.separated(
+                    controller: controller,
+                    padding: const EdgeInsets.fromLTRB(8, 2, 8, 8),
+                    itemCount: candidates.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 6),
+                    itemBuilder: (context, index) {
                 final candidate = candidates[index];
                 final selected = index == selectedIndex;
                 final included =
@@ -3390,7 +3465,7 @@ class _CandidateRail extends StatelessWidget {
                     duration: const Duration(milliseconds: 180),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
-                      vertical: 7,
+                      vertical: 5,
                     ),
                     decoration: BoxDecoration(
                       color: selected
@@ -3418,14 +3493,28 @@ class _CandidateRail extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                '#${index + 1}  ${candidate.displayTime}',
-                                style: Theme.of(context).textTheme.titleMedium,
-                                overflow: TextOverflow.ellipsis,
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      '#${numbers[candidate.id]}  ${candidate.displayTime}',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleMedium,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  _RimCheckTag(candidate: candidate),
+                                ],
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                '${_formatMs(candidate.startMs)} — ${_formatMs(candidate.endMs)}  ·  ${_formatMs(candidate.duration.inMilliseconds)}',
+                                [
+                                  '${_formatMs(candidate.startMs)} — ${_formatMs(candidate.endMs)}',
+                                  _formatMs(candidate.duration.inMilliseconds),
+                                  if (!candidate.reviewed)
+                                    context.bheText('未审核'),
+                                ].join('  ·  '),
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
@@ -3451,12 +3540,297 @@ class _CandidateRail extends StatelessWidget {
                   ),
                 );
               },
-            ),
+                  ),
           ),
         ],
       ),
     );
   }
+}
+
+bool _matchesFilters(
+  Candidate candidate, {
+  required String status,
+  required String rim,
+  required String player,
+}) {
+  if (status == 'included' &&
+      candidate.selection != CandidateSelection.included) {
+    return false;
+  }
+  if (status == 'excluded' &&
+      candidate.selection != CandidateSelection.excluded) {
+    return false;
+  }
+  if (rim != 'all' && candidate.rimCheckStatus != rim) return false;
+  return switch (player) {
+    'all' => true,
+    'tagged' => candidate.player != null,
+    'untagged' => candidate.player == null,
+    _ => candidate.player == player.substring('player:'.length),
+  };
+}
+
+class _ReviewFilterBar extends StatelessWidget {
+  const _ReviewFilterBar({
+    required this.candidates,
+    required this.players,
+    required this.statusFilter,
+    required this.rimFilter,
+    required this.playerFilter,
+    required this.onChanged,
+  });
+  final List<Candidate> candidates;
+  final List<String> players;
+  final String statusFilter;
+  final String rimFilter;
+  final String playerFilter;
+  final Future<void> Function({String? status, String? rim, String? player})
+  onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final included = candidates
+        .where((item) => item.selection == CandidateSelection.included)
+        .length;
+    // Rim counts follow the status filter, as on desktop.
+    final statusMatched = candidates
+        .where(
+          (item) => _matchesFilters(
+            item,
+            status: statusFilter,
+            rim: 'all',
+            player: 'all',
+          ),
+        )
+        .toList();
+    int rimCount(String status) =>
+        statusMatched.where((item) => item.rimCheckStatus == status).length;
+    final hasRimCheck = candidates.any(
+      (item) =>
+          const {'made', 'unsure', 'rejected'}.contains(item.rimCheckStatus),
+    );
+    final hasPlayers =
+        players.isNotEmpty || candidates.any((item) => item.player != null);
+    final playerLabel = switch (playerFilter) {
+      'all' => context.bheText('球员'),
+      'tagged' => context.bheText('已标注'),
+      'untagged' => context.bheText('未标注'),
+      _ => playerFilter.substring('player:'.length),
+    };
+    return SizedBox(
+      height: 34,
+      child: ListView(
+        key: const Key('review-filter-bar'),
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(10, 2, 10, 4),
+        children: [
+          _FilterChip(
+            key: const Key('review-filter-all'),
+            label: context.bheText('全部'),
+            count: candidates.length,
+            selected: statusFilter == 'all',
+            onTap: () => onChanged(status: 'all'),
+          ),
+          _FilterChip(
+            key: const Key('review-filter-included'),
+            label: context.bheText('保留'),
+            count: included,
+            selected: statusFilter == 'included',
+            onTap: () => onChanged(status: 'included'),
+          ),
+          _FilterChip(
+            key: const Key('review-filter-excluded'),
+            label: context.bheText('排除'),
+            count: candidates.length - included,
+            selected: statusFilter == 'excluded',
+            onTap: () => onChanged(status: 'excluded'),
+          ),
+          if (hasRimCheck) ...[
+            const _FilterDivider(),
+            for (final (status, label, color) in [
+              ('made', '通过', BhePalette.green),
+              ('unsure', '未确认', BhePalette.warning),
+              ('rejected', '未通过', BhePalette.error),
+            ])
+              if (status != 'rejected' || rimCount(status) > 0)
+                _FilterChip(
+                  key: Key('review-rim-filter-$status'),
+                  label: context.bheText(label),
+                  count: rimCount(status),
+                  color: color,
+                  selected: rimFilter == status,
+                  onTap: () =>
+                      onChanged(rim: rimFilter == status ? 'all' : status),
+                ),
+          ],
+          if (hasPlayers) ...[
+            const _FilterDivider(),
+            _FilterChip(
+              key: const Key('review-player-filter'),
+              label: playerLabel,
+              icon: LucideIcons.chevronDown,
+              selected: playerFilter != 'all',
+              onTap: () async {
+                final value = await _showPlayerFilterSheet(
+                  context,
+                  candidates: candidates,
+                  players: players,
+                  current: playerFilter,
+                );
+                if (value != null) await onChanged(player: value);
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.count,
+    this.color,
+    this.icon,
+  });
+  final String label;
+  final int? count;
+  final bool selected;
+  final Color? color;
+  final IconData? icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = color ?? BhePalette.orange;
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(15),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected
+                ? accent.withValues(alpha: .16)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(
+              color: selected ? accent : BhePalette.borderStrong,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (color != null) ...[
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 5),
+              ],
+              Text(
+                count == null ? label : '$label $count',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  color: selected ? BhePalette.text : BhePalette.textSecondary,
+                ),
+              ),
+              if (icon != null) ...[
+                const SizedBox(width: 2),
+                Icon(icon, size: 14, color: BhePalette.textSecondary),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FilterDivider extends StatelessWidget {
+  const _FilterDivider();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 1,
+    margin: const EdgeInsets.fromLTRB(2, 6, 8, 6),
+    color: BhePalette.borderStrong,
+  );
+}
+
+Future<String?> _showPlayerFilterSheet(
+  BuildContext context, {
+  required List<Candidate> candidates,
+  required List<String> players,
+  required String current,
+}) {
+  final tagged = candidates.where((item) => item.player != null).length;
+  final names = {
+    ...players,
+    for (final item in candidates)
+      if (item.player != null) item.player!,
+  };
+  final options = <(String, String, int)>[
+    ('all', context.bheText('全部球员'), candidates.length),
+    ('tagged', context.bheText('已标注'), tagged),
+    ('untagged', context.bheText('未标注'), candidates.length - tagged),
+    for (final name in names)
+      (
+        'player:$name',
+        name,
+        candidates.where((item) => item.player == name).length,
+      ),
+  ];
+  return showModalBottomSheet<String>(
+    context: context,
+    useSafeArea: true,
+    isScrollControlled: true,
+    builder: (context) => _SheetFrame(
+      title: context.bheText('按球员筛选'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final (value, label, count) in options)
+            ListTile(
+              key: Key('review-player-option-$value'),
+              contentPadding: EdgeInsets.zero,
+              title: value.startsWith('player:')
+                  ? Align(
+                      alignment: Alignment.centerLeft,
+                      child: _PlayerTagChip(player: label),
+                    )
+                  : Text(label),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('$count'),
+                  const SizedBox(width: 8),
+                  Icon(
+                    value == current ? LucideIcons.check : null,
+                    size: 18,
+                    color: BhePalette.orange,
+                  ),
+                ],
+              ),
+              onTap: () => Navigator.pop(context, value),
+            ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _BatchSecondsSlider extends StatelessWidget {
@@ -4383,6 +4757,7 @@ String _reasonLabel(String value) => switch (value) {
   'no_shot' => '投篮轨迹不足',
   'rim_out' => '可能擦框偏出',
   'uncertain' => '证据不足，建议人工确认',
+  'coarse_crossing_fine_review' => '粗扫通过',
   _ => value,
 };
 
