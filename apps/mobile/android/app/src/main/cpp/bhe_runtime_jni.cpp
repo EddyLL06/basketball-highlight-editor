@@ -51,6 +51,7 @@ char* bhe_runtime_push_frame_yuv(
 void bhe_runtime_free_session(void* session);
 char* bhe_runtime_finish_session(void* session);
 void bhe_runtime_free_string(char* value);
+char* bhe_runtime_judge_rim_checks(const char* input);
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -284,6 +285,18 @@ Java_com_bhe_bhe_1mobile_NativeRuntime_finishSession(JNIEnv* env, jclass, jlong 
     if (session == 0) return env->NewStringUTF("{\"error\":\"invalid runtime session\"}");
     char* output = bhe_runtime_finish_session(reinterpret_cast<void*>(session));
     if (output == nullptr) return env->NewStringUTF("{\"error\":\"runtime returned no response\"}");
+    jstring result = env->NewStringUTF(output);
+    bhe_runtime_free_string(output);
+    return result;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_bhe_bhe_1mobile_NativeRuntime_judgeRimChecks(JNIEnv* env, jclass, jstring input) {
+    if (input == nullptr) return env->NewStringUTF("{\"error\":\"rim check input is null\"}");
+    const char* value = env->GetStringUTFChars(input, nullptr);
+    char* output = bhe_runtime_judge_rim_checks(value);
+    env->ReleaseStringUTFChars(input, value);
+    if (output == nullptr) return env->NewStringUTF("{\"error\":\"runtime returned no rim check result\"}");
     jstring result = env->NewStringUTF(output);
     bhe_runtime_free_string(output);
     return result;

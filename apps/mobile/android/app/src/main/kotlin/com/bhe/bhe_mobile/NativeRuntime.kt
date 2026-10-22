@@ -158,4 +158,7 @@ object NativeRuntime {
 
     @JvmStatic
     external fun finishSession(session: Long): String
+
+    @JvmStatic
+    external fun judgeRimChecks(input: String): String
 }

@@ -35,6 +35,13 @@ class MainActivity : FlutterActivity() {
         val timeMs: Long,
     )
 
+    // Zoomed check of each hoop cluster, the same as desktop
+    // detect_auto_roi.py: a square of this many box sizes around the cluster
+    // at native resolution, re-detected at the model input size.
+    private val verifyCropBoxSizes = 5f
+    private val verifyMinCropPx = 96f
+    private val verifyFrames = 2
+
     private data class StableHoop(
         val bbox: FloatArray,
         val confidence: Float,
@@ -78,6 +85,7 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "analyzeVideo" -> analyzeVideo(call, result)
                     "suggestRoi" -> suggestRoi(call, result)
+                    "extractCover" -> extractCover(call, result)
                     "getAnalysisState" -> getAnalysisState(result)
                     "cancelAnalysis" -> {
                         AnalysisTaskManager.cancel()
@@ -200,6 +208,7 @@ class MainActivity : FlutterActivity() {
                 session = NativeRuntime.createSession(config.toString())
                 if (session == 0L) throw IllegalStateException("无法创建自动识别会话")
                 val observations = mutableListOf<HoopObservation>()
+                val verifyBitmaps = mutableListOf<Bitmap>()
                 var decodedWidth = 0f
                 var decodedHeight = 0f
                 val decoderPipeline = FramePipeline(videoPath).also {
@@ -237,13 +246,17 @@ class MainActivity : FlutterActivity() {
                                 timeMs = targetTimestampUs / 1000L,
                             )
                         }
-                        if (observations.size >= 5) return@decodeFrames
                     } finally {
-                        bitmap.recycle()
+                        if (verifyBitmaps.size < verifyFrames) verifyBitmaps += bitmap else bitmap.recycle()
                     }
                 }
-                val stable = selectStableHoop(observations, decodedWidth, decodedHeight)
-                    ?: throw IllegalStateException("未识别到稳定的篮筐")
+                val stable = try {
+                    selectStableHoop(observations, decodedWidth, decodedHeight) { bbox ->
+                        zoomVerify(session, verifyBitmaps, bbox, timestamps.last())
+                    }
+                } finally {
+                    verifyBitmaps.forEach(Bitmap::recycle)
+                } ?: throw IllegalStateException("未识别到稳定的篮筐")
                 val bbox = stable.bbox
                 val width = decodedWidth.coerceAtLeast(1f)
                 val height = decodedHeight.coerceAtLeast(1f)
@@ -292,11 +305,14 @@ class MainActivity : FlutterActivity() {
         observations: List<HoopObservation>,
         frameWidth: Float,
         frameHeight: Float,
+        verify: (FloatArray) -> Float,
     ): StableHoop? {
         if (observations.size < 2 || frameWidth <= 0f || frameHeight <= 0f) return null
-        val radius = max(60f, frameWidth * .10f)
         val clusters = mutableListOf<MutableList<HoopObservation>>()
         for (observation in observations) {
+            // A far hoop is only a few pixels wide; a fixed share of the
+            // frame merges it with nearby lookalikes such as windows.
+            val radius = max(16f, 2f * max(observation.bbox[2] - observation.bbox[0], observation.bbox[3] - observation.bbox[1]))
             val centerX = (observation.bbox[0] + observation.bbox[2]) / 2f
             val centerY = (observation.bbox[1] + observation.bbox[3]) / 2f
             var best: MutableList<HoopObservation>? = null
@@ -314,12 +330,15 @@ class MainActivity : FlutterActivity() {
         }
         val stableClusters = clusters.filter { it.size >= 2 }
         if (stableClusters.isEmpty()) return null
-        val selected = stableClusters.maxWithOrNull(
-            compareBy<MutableList<HoopObservation>> { it.size }
-                .thenBy { median(it.map(HoopObservation::confidence)) }
-                .thenBy { median(it.map { item -> (item.bbox[2] - item.bbox[0]) * (item.bbox[3] - item.bbox[1]) }) },
-        ) ?: return null
-        val bbox = FloatArray(4) { index -> median(selected.map { it.bbox[index] }) }
+        fun clusterBox(cluster: List<HoopObservation>) =
+            FloatArray(4) { index -> median(cluster.map { it.bbox[index] }) }
+        val selected = stableClusters.map { it to verify(clusterBox(it)) }.maxWithOrNull(
+            compareBy<Pair<MutableList<HoopObservation>, Float>> { it.second }
+                .thenBy { it.first.size }
+                .thenBy { median(it.first.map(HoopObservation::confidence)) }
+                .thenBy { median(it.first.map { item -> (item.bbox[2] - item.bbox[0]) * (item.bbox[3] - item.bbox[1]) }) },
+        )?.first ?: return null
+        val bbox = clusterBox(selected)
         val bestConfidence = selected.maxBy { it.confidence }
         return StableHoop(
             bbox = bbox,
@@ -328,6 +347,39 @@ class MainActivity : FlutterActivity() {
             samples = selected.size,
             stability = min(1.0, selected.size.toDouble() / observations.size.toDouble()),
         )
+    }
+
+    /** Best hoop confidence centred inside [bbox] on a zoomed crop. */
+    private fun zoomVerify(session: Long, frames: List<Bitmap>, bbox: FloatArray, lastTimeMs: Long): Float {
+        val centerX = (bbox[0] + bbox[2]) / 2f
+        val centerY = (bbox[1] + bbox[3]) / 2f
+        var best = 0f
+        frames.forEachIndexed { index, frame ->
+            val side = min(
+                max(verifyMinCropPx, verifyCropBoxSizes * max(bbox[2] - bbox[0], bbox[3] - bbox[1])),
+                min(frame.width, frame.height).toFloat(),
+            ).toInt()
+            val left = (centerX - side / 2f).coerceIn(0f, (frame.width - side).toFloat()).toInt()
+            val top = (centerY - side / 2f).coerceIn(0f, (frame.height - side).toFloat()).toInt()
+            val crop = Bitmap.createBitmap(frame, left, top, side, side)
+            val response = try {
+                JSONObject(NativeRuntime.pushFrameBitmap(session, lastTimeMs + 1_000L * (index + 1), crop))
+            } finally {
+                if (crop !== frame) crop.recycle()
+            }
+            val detections = response.optJSONArray("detections") ?: return@forEachIndexed
+            for (item in 0 until detections.length()) {
+                val detection = detections.optJSONObject(item) ?: continue
+                if (detection.optInt("class_id", -1) != 1) continue
+                val x = (detection.optDouble("x1") + detection.optDouble("x2")).toFloat() / 2f
+                val y = (detection.optDouble("y1") + detection.optDouble("y2")).toFloat() / 2f
+                // A neighbouring hoop inside the crop must not confirm this cluster.
+                if (x in (bbox[0] - left)..(bbox[2] - left) && y in (bbox[1] - top)..(bbox[3] - top)) {
+                    best = max(best, detection.optDouble("confidence").toFloat())
+                }
+            }
+        }
+        return best
     }
 
     private fun expandedRoi(bbox: FloatArray, frameWidth: Float, frameHeight: Float): Map<String, Double> {
@@ -368,6 +420,45 @@ class MainActivity : FlutterActivity() {
             "right" to ((centerX + boxWidth / 2f) / frameWidth).coerceIn(0f, 1f).toDouble(),
             "bottom" to ((rimY + rimHeight / 2f) / frameHeight).coerceIn(0f, 1f).toDouble(),
         )
+    }
+
+    private fun extractCover(call: MethodCall, result: MethodChannel.Result) {
+        val videoPath = call.argument<String>("videoPath")
+        val timeMs = call.argument<Number>("timeMs")?.toLong()
+        val outputPath = call.argument<String>("outputPath")
+        if (videoPath == null || timeMs == null || outputPath == null) {
+            result.error("INVALID_ARGUMENT", "封面参数无效", null)
+            return
+        }
+        Thread {
+            val retriever = MediaMetadataRetriever()
+            val saved = try {
+                retriever.setDataSource(videoPath)
+                val source = retriever.getFrameAtTime(timeMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                if (source == null) {
+                    false
+                } else {
+                    val scale = min(1f, 480f / max(source.width, source.height))
+                    val frame = Bitmap.createScaledBitmap(
+                        source,
+                        max(1, (source.width * scale).toInt()),
+                        max(1, (source.height * scale).toInt()),
+                        true,
+                    )
+                    val partial = File("$outputPath.partial")
+                    partial.outputStream().use { frame.compress(Bitmap.CompressFormat.JPEG, 82, it) }
+                    if (frame !== source) frame.recycle()
+                    source.recycle()
+                    partial.renameTo(File(outputPath))
+                }
+            } catch (error: Exception) {
+                Log.w("BHE-Cover", "cover extraction failed", error)
+                false
+            } finally {
+                retriever.release()
+            }
+            mainHandler.post { result.success(saved) }
+        }.start()
     }
 
     private fun analyzeVideo(call: MethodCall, result: MethodChannel.Result) {

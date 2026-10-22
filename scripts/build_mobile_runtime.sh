@@ -6,6 +6,8 @@ PACKAGE="$ROOT/packages/bhe_runtime"
 OUT="$ROOT/apps/mobile/android/app/src/main/jniLibs"
 NDK="${BHE_ANDROID_NDK:-${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}}"
 ORT_DIR="${BHE_ORT_ANDROID_DIR:-}"
+QNN_DIR="${BHE_QNN_ANDROID_DIR:-}"
+QNN_LIBS=(libQnnHtp.so libQnnHtpV81Stub.so libQnnHtpV81Skel.so libQnnSystem.so)
 TARGET="aarch64-linux-android"
 ABI="arm64-v8a"
 
@@ -69,6 +71,15 @@ if ! cmp -s "$RUNTIME_SOURCE" "$DEST/libbhe_runtime.so" 2>/dev/null; then
 fi
 if ! cmp -s "$ORT_SOURCE" "$DEST/libonnxruntime.so" 2>/dev/null; then
   cp "$ORT_SOURCE" "$DEST/libonnxruntime.so"
+fi
+
+if [[ -n "$QNN_DIR" ]]; then
+  for library in "${QNN_LIBS[@]}"; do
+    [[ -f "$QNN_DIR/$ABI/$library" ]] || die "未找到 QNN 库：$QNN_DIR/$ABI/$library"
+    cp "$QNN_DIR/$ABI/$library" "$DEST/$library"
+  done
+else
+  echo "未设置 BHE_QNN_ANDROID_DIR，安装包不含高通 NPU 库，分析只用 CPU。"
 fi
 
 echo "Android Runtime 已生成：$DEST"

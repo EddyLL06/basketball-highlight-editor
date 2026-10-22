@@ -44,6 +44,9 @@ env:
   PYTHON_VERSION: "3.11.16"
   ANDROID_NDK_VERSION: "27.0.12077973"
   ONNXRUNTIME_VERSION: "1.28.0"
+  ONNXRUNTIME_ANDROID_QNN_SHA256: "f3e760fa1459b42a89fdd606679477620f68e97035ae96db9f9d128b34607a84"
+  QNN_RUNTIME_VERSION: "2.42.0"
+  QNN_RUNTIME_SHA256: "ecb69bd6a7b1be4717ef10805199fb49ec6b60ca3f481d3068ed9605fba91d5b"
 
 jobs:
   release-plan:
@@ -403,14 +406,29 @@ jobs:
           set -euo pipefail
           archive="$RUNNER_TEMP/onnxruntime-android.aar"
           runtime_dir="$RUNNER_TEMP/onnxruntime-android"
-          url="https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/${ONNXRUNTIME_VERSION}/onnxruntime-android-${ONNXRUNTIME_VERSION}.aar"
+          url="https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android-qnn/${ONNXRUNTIME_VERSION}/onnxruntime-android-qnn-${ONNXRUNTIME_VERSION}.aar"
           curl --fail --location --retry 3 --retry-delay 2 "$url" -o "$archive"
+          echo "${ONNXRUNTIME_ANDROID_QNN_SHA256}  $archive" | sha256sum -c -
           mkdir -p "$runtime_dir"
           unzip -q "$archive" -d "$runtime_dir"
           test -f "$runtime_dir/jni/arm64-v8a/libonnxruntime.so"
           mkdir -p "$runtime_dir/arm64-v8a"
           cp "$runtime_dir/jni/arm64-v8a/libonnxruntime.so" "$runtime_dir/arm64-v8a/"
           echo "BHE_ORT_ANDROID_DIR=$runtime_dir" >> "$GITHUB_ENV"
+
+      - name: Download Qualcomm QNN runtime libraries
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/qnn-runtime.aar"
+          qnn_dir="$RUNNER_TEMP/qnn-runtime"
+          url="https://repo1.maven.org/maven2/com/qualcomm/qti/qnn-runtime/${QNN_RUNTIME_VERSION}/qnn-runtime-${QNN_RUNTIME_VERSION}.aar"
+          curl --fail --location --retry 3 --retry-delay 2 "$url" -o "$archive"
+          echo "${QNN_RUNTIME_SHA256}  $archive" | sha256sum -c -
+          mkdir -p "$qnn_dir"
+          unzip -q "$archive" -d "$qnn_dir"
+          mkdir -p "$qnn_dir/arm64-v8a"
+          cp "$qnn_dir"/jni/arm64-v8a/lib*.so "$qnn_dir/arm64-v8a/"
+          echo "BHE_QNN_ANDROID_DIR=$qnn_dir" >> "$GITHUB_ENV"
 
       - name: Build Rust Android Runtime
         run: BHE_ANDROID_NDK="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" scripts/build_mobile_runtime.sh
@@ -428,7 +446,7 @@ jobs:
             --build-name="$version" \
             --build-number="${GITHUB_RUN_NUMBER}"
           apk="build/app/outputs/flutter-apk/app-release.apk"
-          for library in libbhe_runtime.so libbhe_runtime_jni.so libonnxruntime.so; do
+          for library in libbhe_runtime.so libbhe_runtime_jni.so libonnxruntime.so libQnnHtp.so libQnnHtpV81Skel.so; do
             unzip -p "$apk" "lib/arm64-v8a/$library" > "$RUNNER_TEMP/$library"
             test -s "$RUNNER_TEMP/$library"
           done
@@ -436,6 +454,7 @@ jobs:
             | grep -q 'Java_com_bhe_bhe_1mobile_NativeRuntime_pushFrameRaw'
           readelf --dynamic --wide "$RUNNER_TEMP/libbhe_runtime_jni.so" \
             | grep -q 'Shared library: \[libbhe_runtime.so\]'
+          unzip -l "$apk" assets/models/bball_model_qnn_v81.onnx | grep -q bball_model_qnn_v81.onnx
           mkdir -p "$GITHUB_WORKSPACE/dist"
           cp "$apk" \
             "$GITHUB_WORKSPACE/dist/BHE-android-arm64-v8a-v${version}-debug-signed.apk"

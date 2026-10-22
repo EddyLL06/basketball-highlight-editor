@@ -15,6 +15,10 @@ android {
         }
     }
 
+    androidResources {
+        noCompress += "onnx"
+    }
+
     val hasNativeRuntime = file("src/main/jniLibs/arm64-v8a/libbhe_runtime.so").isFile &&
         file("src/main/jniLibs/arm64-v8a/libonnxruntime.so").isFile
     if (hasNativeRuntime) {

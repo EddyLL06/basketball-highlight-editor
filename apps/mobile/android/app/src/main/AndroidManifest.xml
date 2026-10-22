@@ -9,6 +9,9 @@
         android:label="BHE"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <uses-native-library
+            android:name="libcdsprpc.so"
+            android:required="false" />
         <service
             android:name=".AnalysisForegroundService"
             android:exported="false"

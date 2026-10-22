@@ -35,9 +35,20 @@ object AnalysisTaskManager {
     private const val COARSE_MAX_DIMENSION = 960
     private const val COARSE_WINDOW_MS = 4_000L
     private const val FINE_WINDOW_MS = 1_500L
+    private const val COARSE_FALLBACK_MERGE_MS = 2_000L
+    // Same window, crop, detector input and confidence as the desktop
+    // `verify_rim_crossing.py`, so both judge the same detections.
+    private const val RIM_CHECK_WINDOW_MS = 1_000L
+    private const val RIM_CHECK_MODEL_SIZE = 640
+    private const val RIM_CHECK_CONFIDENCE = 0.05
+    private const val RIM_CHECK_MIN_RIM_PX = 30.0
+    private const val RIM_CHECK_CROP_RIM_WIDTHS = 5.0
+    private const val RIM_CHECK_MIN_CROP_PX = 96.0
     private const val USE_PROXY_COARSE_SCAN = true
 
     private var thread: Thread? = null
+    private var intraThreads = InferenceTuner.CPU_THREADS
+    private var activeProvider = ""
     private var listener: Listener? = null
     private var context: Context? = null
     private var cancelRequested = AtomicBoolean(false)
@@ -133,13 +144,41 @@ object AnalysisTaskManager {
     }
 
     private fun run(appContext: Context, request: JSONObject) {
-        var coarsePipeline: FramePipeline? = null
         val wakeLock = (appContext.getSystemService(Context.POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BHE::Analysis")
             .apply { setReferenceCounted(false); acquire() }
         try {
+            try {
+                analyze(appContext, request)
+            } catch (error: Exception) {
+                if (error is InterruptedException || activeProvider != "qnn" || cancelRequested.get()) throw error
+                // The NPU passed the startup check but failed later. Forget
+                // that choice and redo the whole analysis on the CPU so all
+                // candidates come from one provider.
+                Log.w(TAG, "QNN analysis failed; retrying on CPU", error)
+                InferenceTuner.forget(appContext, request.getString("modelPath"), request.optInt("modelSize", 640))
+                analyze(appContext, JSONObject(request.toString()).put("executionProvider", "cpu"))
+            }
+        } catch (_: InterruptedException) {
+            fail("ANALYSIS_CANCELLED", "分析已取消", cancelled = true)
+        } catch (error: Exception) {
+            Log.e(TAG, "analysis failed", error)
+            fail("ANALYSIS_FAILED", error.message ?: "移动端分析失败", cancelled = false)
+        } finally {
+            wakeLock.release()
+            synchronized(this) { thread = null }
+            appContext.stopService(Intent(appContext, AnalysisForegroundService::class.java).apply {
+                action = AnalysisForegroundService.ACTION_STOP
+            })
+        }
+    }
+
+    private fun analyze(appContext: Context, request: JSONObject) {
+        var coarsePipeline: FramePipeline? = null
+        activeProvider = ""
+        try {
             val videoPath = request.getString("videoPath")
-            val modelPath = request.getString("modelPath")
+            val sourceModelPath = request.getString("modelPath")
             val startMs = request.getLong("startMs")
             val endMs = request.getLong("endMs")
             val fps = request.getDouble("fps").coerceIn(1.0, 10.0)
@@ -172,12 +211,16 @@ object AnalysisTaskManager {
             val requestedBatchSize = request.optInt("inferenceBatchSize", 4).coerceIn(1, 8)
             val tuned = if (requestedEp == "auto") {
                 updateProgress("prepareProxy", 0.07, 0, totalFull, "正在选择最快的本地推理方式")
-                InferenceTuner.select(appContext, videoPath, modelPath, startMs, request)
+                InferenceTuner.select(appContext, videoPath, sourceModelPath, startMs, request)
             } else {
                 InferenceTuner.Selection(requestedEp, requestedBatchSize, 0.0, true)
             }
             val resolvedEp = tuned.provider
+            activeProvider = resolvedEp
             val inferenceBatchSize = tuned.batchSize
+            val modelPath = tuned.modelPath ?: sourceModelPath
+            intraThreads = tuned.threads
+            request.put("inferenceBatchSize", inferenceBatchSize)
             synchronized(this) {
                 state.put("executionProvider", resolvedEp)
                     .put("inferenceBatchSize", inferenceBatchSize)
@@ -188,6 +231,7 @@ object AnalysisTaskManager {
                 TAG,
                 "analysis runtime requested=$requestedEp/$requestedBatchSize provider=$resolvedEp batch=$inferenceBatchSize " +
                     "benchmarkFps=${String.format(Locale.US, "%.2f", tuned.measuredFps)} cached=${tuned.cached} " +
+                    "threads=$intraThreads model=${File(modelPath).name} " +
                     "coarseFps=$COARSE_FPS fineFps=$fps",
             )
 
@@ -303,6 +347,7 @@ object AnalysisTaskManager {
                 sampleTimes(max(startMs, eventMs - FINE_WINDOW_MS), min(actualEndMs, eventMs + FINE_WINDOW_MS), fps).size
             }.coerceAtLeast(1)
             val aggregateCandidates = JSONArray()
+            val windowRims = mutableMapOf<Long, JSONObject?>()
             var completedFrames = 0
             var fineDetectionCount = 0
             var fineBallDetectionCount = 0
@@ -320,7 +365,7 @@ object AnalysisTaskManager {
                 ) { processed, total ->
                     updateProgress(
                         "refineCandidates",
-                        0.52 + (completedFrames + processed).toDouble() / fineTotal * 0.44,
+                        0.52 + (completedFrames + processed).toDouble() / fineTotal * 0.38,
                         completedFrames + processed,
                         fineTotal,
                         "正在分析候选 ${candidateEvents.indexOf(eventMs) + 1}/${candidateEvents.size}",
@@ -332,20 +377,33 @@ object AnalysisTaskManager {
                 fineRimDetectionCount += window.rimDetectionCount
                 fineCandidatePeak = max(fineCandidatePeak, window.candidatePeak)
                 inferenceNanos += window.inferenceNanos
+                windowRims[eventMs] = window.rim
                 val candidates = window.response.optJSONArray("candidates")
                 for (index in 0 until (candidates?.length() ?: 0)) {
                     candidates?.optJSONObject(index)?.let { aggregateCandidates.put(it) }
                 }
             }
-            val finalResponse = JSONObject().put("candidates", dedupeJsonCandidates(aggregateCandidates, request.getLong("dedupeMs")))
-            if (finalResponse.optJSONArray("candidates")?.length() == 0) {
-                val coarseCandidates = coarseResult?.candidateTimes.orEmpty().distinct().sorted()
-                if (coarseCandidates.isNotEmpty()) {
-                    val fallback = JSONArray()
-                    coarseCandidates.forEach { fallback.put(reviewFallbackCandidate(it, startMs, actualEndMs, request)) }
-                    finalResponse.put("candidates", fallback)
-                    Log.i(TAG, "fine empty; retained ${coarseCandidates.size} coarse crossings for review")
+            val refined = dedupeJsonCandidates(aggregateCandidates, request.getLong("dedupeMs"))
+            val merged = (0 until refined.length()).map { refined.getJSONObject(it) }.toMutableList()
+            val refinedTimes = merged.map { it.getLong("event_ms") }
+            // Like desktop, a coarse crossing the refiner could not confirm
+            // stays for review; the rim check then excludes the clear misses.
+            var fallbackCount = 0
+            if (coarseResult != null) {
+                for (eventMs in candidateEvents) {
+                    if (refinedTimes.any { abs(it - eventMs) <= COARSE_FALLBACK_MERGE_MS }) continue
+                    val fallback = reviewFallbackCandidate(eventMs, startMs, actualEndMs, request)
+                    windowRims[eventMs]?.let { fallback.put("rim", it) }
+                    merged += fallback
+                    fallbackCount++
                 }
+            }
+            val finalResponse = JSONObject().put("candidates", JSONArray(merged.sortedBy { it.getLong("event_ms") }))
+            finalResponse.optJSONArray("candidates")?.let { candidates ->
+                runRimChecks(
+                    videoPath, modelPath, candidates, effectiveRimRoi, hoopRoi, netRoi,
+                    duration, request, resolvedEp,
+                )
             }
             val result = jsonObjectToMap(finalResponse).toMutableMap()
             result["processed_frames"] = completedFrames
@@ -357,23 +415,13 @@ object AnalysisTaskManager {
                 TAG,
                 "fine summary: frames=$completedFrames/$fineTotal detections=$fineDetectionCount balls=$fineBallDetectionCount " +
                     "rims=$fineRimDetectionCount candidatePeak=$fineCandidatePeak finalCandidates=" +
-                    "$finalCandidateCount coarseCandidates=${candidateEvents.size} " +
+                    "$finalCandidateCount fallback=$fallbackCount coarseCandidates=${candidateEvents.size} " +
                     "totalMs=$processingMs inferenceMs=$inferenceMs ep=$resolvedEp",
             )
             updateProgress("persistCandidates", 0.98, completedFrames, fineTotal, "正在写入分析结果")
             complete(result)
-        } catch (_: InterruptedException) {
-            fail("ANALYSIS_CANCELLED", "分析已取消", cancelled = true)
-        } catch (error: Exception) {
-            Log.e(TAG, "analysis failed", error)
-            fail("ANALYSIS_FAILED", error.message ?: "移动端分析失败", cancelled = false)
         } finally {
             coarsePipeline?.release()
-            wakeLock.release()
-            synchronized(this) { thread = null }
-            appContext.stopService(Intent(appContext, AnalysisForegroundService::class.java).apply {
-                action = AnalysisForegroundService.ACTION_STOP
-            })
         }
     }
 
@@ -398,6 +446,7 @@ object AnalysisTaskManager {
         val rimDetectionCount: Int,
         val candidatePeak: Int,
         val inferenceNanos: Long,
+        val rim: JSONObject?,
     )
 
     private fun coarseCandidateTimes(coarse: CoarseResult): List<Long> =
@@ -442,7 +491,7 @@ object AnalysisTaskManager {
             .put("crop_scale", request.getDouble("cropScale"))
             .put("max_cross_gap_ms", request.getLong("maxCrossGapMs"))
             .put("dedupe_ms", request.getLong("dedupeMs"))
-            .put("intra_threads", 2)
+            .put("intra_threads", intraThreads)
             .put("execution_provider", executionProvider)
             .put("inference_batch_size", request.optInt("inferenceBatchSize", 4).coerceIn(1, 8))
         request.optString("optimizedModelPath").takeIf { it.isNotEmpty() }?.let {
@@ -513,11 +562,186 @@ object AnalysisTaskManager {
                 "fine performance eventMs=$eventMs frames=$processed nativeMs=${nanosToMs(inferenceNanos)} " +
                     "nativeFps=${formatFps(processed, inferenceNanos)} runtime=${NativeRuntime.sessionInfo(session)}",
             )
-            return FineWindowResult(response, processed, detectionCount, ballDetectionCount, rimDetectionCount, candidatePeak, inferenceNanos)
+            val rim = JSONObject(NativeRuntime.sessionInfo(session)).optJSONObject("rim")
+            return FineWindowResult(response, processed, detectionCount, ballDetectionCount, rimDetectionCount, candidatePeak, inferenceNanos, rim)
         } finally {
             NativeRuntime.freeSession(session)
             pipeline.release()
         }
+    }
+
+    /**
+     * Re-checks every final candidate frame by frame on a tight crop around
+     * the rim and stores the verdict as `rim_check`. Candidates the check saw
+     * miss are excluded; unclear ones stay included and are marked unsure.
+     * The net motion signal is not computed here, so a video whose net does
+     * not hide the ball keeps its visible crossings instead of judging them.
+     */
+    private fun runRimChecks(
+        videoPath: String,
+        modelPath: String,
+        candidates: JSONArray,
+        rimRoi: JSONObject?,
+        analysisRoi: JSONObject,
+        netRoi: JSONObject,
+        duration: Long,
+        request: JSONObject,
+        executionProvider: String,
+    ) {
+        if (rimRoi == null || candidates.length() == 0) return
+        val startedAt = System.nanoTime()
+        val probe = FramePipeline(videoPath).also { it.prepare() }
+        val width = probe.displayWidth.toDouble()
+        val height = probe.displayHeight.toDouble()
+        val fps = probe.frameRate
+        probe.release()
+        val inputs = JSONArray()
+        var session = 0L
+        var sessionCrop = ""
+        var decodedFrames = 0
+        var rimWidth = 0.0
+        try {
+            for (index in 0 until candidates.length()) {
+                if (cancelRequested.get()) throw InterruptedException("分析已取消")
+                val candidate = candidates.getJSONObject(index)
+                val eventMs = candidate.getLong("event_ms")
+                // Like desktop, judge each candidate against the rim its
+                // refine window saw, so a camera that drifted keeps its crop.
+                val candidateRim = candidate.optJSONObject("rim") ?: rimRoi
+                val left = candidateRim.getDouble("left") * width
+                val right = candidateRim.getDouble("right") * width
+                rimWidth = right - left
+                val rim = JSONObject()
+                    .put("center_x", (left + right) / 2.0)
+                    .put("rim_y", (candidateRim.getDouble("top") + candidateRim.getDouble("bottom")) / 2.0 * height)
+                    .put("width", rimWidth)
+                val side = max(RIM_CHECK_MIN_CROP_PX, RIM_CHECK_CROP_RIM_WIDTHS * rimWidth).coerceAtMost(min(width, height))
+                val cropX = round((rim.getDouble("center_x") - side / 2.0).coerceIn(0.0, width - side))
+                val cropY = round((rim.getDouble("rim_y") + 0.75 * rimWidth - side / 2.0).coerceIn(0.0, height - side))
+                val crop = JSONObject()
+                    .put("left", cropX / width)
+                    .put("top", cropY / height)
+                    .put("right", (cropX + side) / width)
+                    .put("bottom", (cropY + side) / height)
+                val frames = JSONArray()
+                if (rimWidth >= RIM_CHECK_MIN_RIM_PX) {
+                    if (session != 0L && sessionCrop != crop.toString()) {
+                        NativeRuntime.freeSession(session)
+                        session = 0L
+                    }
+                    if (session == 0L) {
+                        sessionCrop = crop.toString()
+                        val config = JSONObject()
+                            .put("model_path", modelPath)
+                            .put("hoop_roi", candidateRim)
+                            .put("analysis_roi", crop)
+                            .put("net_roi", netRoi)
+                            .put("duration_ms", duration)
+                            .put("confidence_threshold", RIM_CHECK_CONFIDENCE)
+                            .put("clip_before_ms", request.getLong("beforeMs"))
+                            .put("clip_after_ms", request.getLong("afterMs"))
+                            .put("model_size", RIM_CHECK_MODEL_SIZE)
+                            .put("crop_scale", 1.0)
+                            .put("intra_threads", intraThreads)
+                            .put("execution_provider", executionProvider)
+                            .put("inference_batch_size", 1)
+                            .put("detection_only", true)
+                        request.optString("optimizedModelPath").takeIf { it.isNotEmpty() }?.let {
+                            config.put("optimized_model_path", it)
+                        }
+                        session = NativeRuntime.createSession(config.toString())
+                        if (session == 0L) throw IllegalStateException("Rust Runtime 无法加载篮筐复核模型")
+                    }
+                    val first = max(0L, eventMs - RIM_CHECK_WINDOW_MS)
+                    val last = min(duration, eventMs + RIM_CHECK_WINDOW_MS)
+                    val timestampsUs = sampleTimes(first, last + 1, fps).map { it * 1000L }
+                    val pipeline = FramePipeline(videoPath, 960).also { it.prepare(timestampsUs.first()) }
+                    try {
+                        pipeline.decodeFramesYuv(timestampsUs, { cancelRequested.get() }) { image, bitmap, _, targetTimestampUs ->
+                            try {
+                                val response = if (image != null) {
+                                    val planes = image.planes
+                                    NativeRuntime.pushFrameYuv(
+                                        session, targetTimestampUs / 1000L, image.width, image.height,
+                                        planes[0].buffer, planes[0].buffer.position(), planes[0].buffer.remaining(), planes[0].rowStride, planes[0].pixelStride,
+                                        planes[1].buffer, planes[1].buffer.position(), planes[1].buffer.remaining(), planes[1].rowStride, planes[1].pixelStride,
+                                        planes[2].buffer, planes[2].buffer.position(), planes[2].buffer.remaining(), planes[2].rowStride, planes[2].pixelStride,
+                                        pipeline.rotationDegreesValue,
+                                    )
+                                } else {
+                                    NativeRuntime.pushFrameBitmap(session, targetTimestampUs / 1000L, requireNotNull(bitmap))
+                                }
+                                val parsed = JSONObject(response)
+                                parsed.optString("error").takeIf { it.isNotEmpty() }?.let { throw IllegalStateException(it) }
+                                val detections = JSONArray()
+                                val found = parsed.optJSONArray("detections")
+                                for (item in 0 until (found?.length() ?: 0)) {
+                                    val detection = found!!.getJSONObject(item)
+                                    val name = when (detection.optInt("class_id", -1)) {
+                                        0 -> "ball"
+                                        1 -> "hoop"
+                                        else -> continue
+                                    }
+                                    detections.put(
+                                        JSONObject()
+                                            .put("name", name)
+                                            .put("confidence", detection.getDouble("confidence"))
+                                            .put(
+                                                "xyxy",
+                                                JSONArray()
+                                                    .put(detection.getDouble("x1"))
+                                                    .put(detection.getDouble("y1"))
+                                                    .put(detection.getDouble("x2"))
+                                                    .put(detection.getDouble("y2")),
+                                            ),
+                                    )
+                                }
+                                frames.put(detections)
+                            } finally {
+                                image?.close()
+                                if (bitmap != null && !bitmap.isRecycled) bitmap.recycle()
+                            }
+                        }
+                    } finally {
+                        pipeline.release()
+                    }
+                    decodedFrames += frames.length()
+                }
+                inputs.put(
+                    JSONObject()
+                        .put("rim", rim)
+                        .put("frames", frames)
+                        .put("refined", candidate.optString("evidence_source") != "android_coarse_crossing"),
+                )
+                updateProgress(
+                    "rimCheck",
+                    0.90 + (index + 1).toDouble() / candidates.length() * 0.08,
+                    index + 1,
+                    candidates.length(),
+                    "正在逐帧复核篮筐 ${index + 1}/${candidates.length()}",
+                )
+            }
+        } finally {
+            if (session != 0L) NativeRuntime.freeSession(session)
+        }
+        val judged = JSONObject(NativeRuntime.judgeRimChecks(JSONObject().put("candidates", inputs).toString()))
+        judged.optString("error").takeIf { it.isNotEmpty() }?.let { throw IllegalStateException(it) }
+        val results = judged.getJSONArray("results")
+        var excluded = 0
+        for (index in 0 until candidates.length()) {
+            val check = results.getJSONObject(index)
+            val candidate = candidates.getJSONObject(index).put("rim_check", check)
+            if (check.optString("status") == "rejected") {
+                candidate.put("selection", "excluded").put("review_reason", "auto_rim_check")
+                excluded++
+            }
+        }
+        Log.i(
+            TAG,
+            "rim check: candidates=${candidates.length()} excluded=$excluded frames=$decodedFrames rimWidthPx=" +
+                "${String.format(Locale.US, "%.1f", rimWidth)} fps=${String.format(Locale.US, "%.2f", fps)} " +
+                "totalMs=${nanosToMs(System.nanoTime() - startedAt)} ep=$executionProvider",
+        )
     }
 
     private fun dedupeJsonCandidates(candidates: JSONArray, dedupeMs: Long): JSONArray {
@@ -579,7 +803,7 @@ object AnalysisTaskManager {
             // Coarse candidates are emitted only by the Rust crossing pass.
             .put("detection_only", false)
             .put("coarse_mode", true)
-            .put("intra_threads", 2)
+            .put("intra_threads", intraThreads)
             .put("execution_provider", executionProvider)
             .put("inference_batch_size", inferenceBatchSize)
         val sessionCreateStarted = System.nanoTime()

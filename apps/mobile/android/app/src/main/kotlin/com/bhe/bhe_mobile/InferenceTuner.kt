@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.os.Build
+import android.system.Os
 import android.util.Log
 import org.json.JSONObject
 import java.io.File
@@ -13,15 +14,22 @@ import java.util.Locale
 object InferenceTuner {
     private const val TAG = "BHE-InferenceTuner"
     private const val PREFS = "bhe_inference_tuner"
+    const val CPU_THREADS = 6
+    // Precompiled for the Snapdragon 8 Elite Gen 5 NPU (HTP v81) with the
+    // bundled QNN 2.42 libraries. Other chips fail to load it and use the CPU.
+    private const val QNN_CONTEXT_ASSET = "models/bball_model_qnn_v81.onnx"
+    private const val SIGNATURE_MIN_CONFIDENCE = 0.25
 
     data class Selection(
         val provider: String,
         val batchSize: Int,
         val measuredFps: Double,
         val cached: Boolean,
+        val modelPath: String? = null,
+        val threads: Int = CPU_THREADS,
     )
 
-    private data class Profile(val provider: String, val batchSize: Int)
+    private data class Profile(val provider: String, val batchSize: Int, val threads: Int, val modelPath: String)
     private data class DetectionSignature(val countPerFrame: Int, val peakConfidence: Double)
     private data class Benchmark(val selection: Selection, val signature: DetectionSignature)
 
@@ -32,33 +40,35 @@ object InferenceTuner {
         startMs: Long,
         request: JSONObject,
     ): Selection {
-        val key = cacheKey(modelPath, request.optInt("modelSize", 640))
+        val modelSize = request.optInt("modelSize", 640)
+        val key = cacheKey(modelPath, modelSize)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val cachedProvider = prefs.getString("${key}_provider", null)
         val cachedBatch = prefs.getInt("${key}_batch", 0)
         val cachedFps = prefs.getFloat("${key}_fps", 0f).toDouble()
-        if (cachedProvider != null && cachedBatch in 1..8) {
+        val qnnModel = if (modelSize == 640) qnnContextModel(context) else null
+        if (cachedProvider == "cpu" && cachedBatch in 1..8) {
             return Selection(cachedProvider, cachedBatch, cachedFps, true)
         }
+        if (cachedProvider == "qnn" && qnnModel != null) {
+            return Selection(cachedProvider, 1, cachedFps, true, qnnModel, 1)
+        }
 
-        val bitmap = sampleBitmap(videoPath, startMs) ?: return Selection("auto", 1, 0.0, false)
-        val profiles = listOf(
-            Profile("xnnpack", 1),
-            Profile("xnnpack", 4),
-            Profile("nnapi_fp32_no_cpu", 1),
-            Profile("nnapi_fp32_no_cpu", 4),
-            Profile("nnapi_fp16_no_cpu", 1),
+        val bitmap = sampleBitmap(videoPath, startMs) ?: return Selection("cpu", 1, 0.0, false)
+        val profiles = listOfNotNull(
+            Profile("cpu", 1, CPU_THREADS, modelPath),
+            qnnModel?.let { Profile("qnn", 1, 1, it) },
         )
         try {
             val benchmarks = profiles.mapNotNull { profile ->
-                benchmarkProfile(profile, bitmap, modelPath, request)
+                benchmarkProfile(profile, bitmap, request)
             }
-            val baseline = benchmarks.firstOrNull { it.selection.provider == "xnnpack" && it.selection.batchSize == 1 }
+            val baseline = benchmarks.firstOrNull { it.selection.provider == "cpu" }
             val results = benchmarks.filter { benchmark ->
                 baseline == null || signaturesMatch(baseline.signature, benchmark.signature)
             }.map { it.selection }
             val best = results.maxByOrNull { it.measuredFps }
-                ?: return Selection("auto", 1, 0.0, false)
+                ?: return Selection("cpu", 1, 0.0, false)
             prefs.edit()
                 .putString("${key}_provider", best.provider)
                 .putInt("${key}_batch", best.batchSize)
@@ -75,14 +85,22 @@ object InferenceTuner {
         }
     }
 
+    fun forget(context: Context, modelPath: String, modelSize: Int) {
+        val key = cacheKey(modelPath, modelSize)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove("${key}_provider")
+            .remove("${key}_batch")
+            .remove("${key}_fps")
+            .apply()
+    }
+
     private fun benchmarkProfile(
         profile: Profile,
         bitmap: Bitmap,
-        modelPath: String,
         request: JSONObject,
     ): Benchmark? {
         val config = JSONObject()
-            .put("model_path", modelPath)
+            .put("model_path", profile.modelPath)
             .put("hoop_roi", fullRoi())
             .put("analysis_roi", request.getJSONObject("hoopRoi"))
             .put("net_roi", fullRoi())
@@ -91,7 +109,7 @@ object InferenceTuner {
             .put("crop_scale", request.optDouble("cropScale", 2.0))
             .put("input_max_dimension", 960)
             .put("detection_only", true)
-            .put("intra_threads", 2)
+            .put("intra_threads", profile.threads)
             .put("execution_provider", profile.provider)
             .put("inference_batch_size", profile.batchSize)
         val session = NativeRuntime.createSession(config.toString())
@@ -116,7 +134,14 @@ object InferenceTuner {
                 "profile provider=${profile.provider} batch=${profile.batchSize} fps=${format(fps)} runtime=$info",
             )
             Benchmark(
-                Selection(profile.provider, profile.batchSize, fps, false),
+                Selection(
+                    profile.provider,
+                    profile.batchSize,
+                    fps,
+                    false,
+                    profile.modelPath.takeIf { profile.provider == "qnn" },
+                    profile.threads,
+                ),
                 detectionSignature(measuredResponse, profile.batchSize),
             )
         } catch (error: Exception) {
@@ -136,10 +161,15 @@ object InferenceTuner {
     private fun detectionSignature(response: JSONObject, batchSize: Int): DetectionSignature {
         val detections = response.optJSONArray("detections")
         var peak = 0.0
+        var count = 0
         for (index in 0 until (detections?.length() ?: 0)) {
-            peak = maxOf(peak, detections?.optJSONObject(index)?.optDouble("confidence", 0.0) ?: 0.0)
+            val confidence = detections?.optJSONObject(index)?.optDouble("confidence", 0.0) ?: 0.0
+            peak = maxOf(peak, confidence)
+            // FP16 accelerators shift scores slightly, so boxes right at the
+            // detection threshold may appear on one provider only.
+            if (confidence >= SIGNATURE_MIN_CONFIDENCE) count++
         }
-        return DetectionSignature((detections?.length() ?: 0) / batchSize.coerceAtLeast(1), peak)
+        return DetectionSignature(count / batchSize.coerceAtLeast(1), peak)
     }
 
     private fun signaturesMatch(baseline: DetectionSignature, candidate: DetectionSignature): Boolean {
@@ -169,9 +199,30 @@ object InferenceTuner {
         }
     }
 
+    private fun qnnContextModel(context: Context): String? {
+        val target = File(context.filesDir, QNN_CONTEXT_ASSET)
+        return try {
+            val size = context.assets.openFd(QNN_CONTEXT_ASSET).use { it.length }
+            if (!target.isFile || target.length() != size) {
+                target.parentFile?.mkdirs()
+                val partial = File(target.path + ".partial")
+                context.assets.open(QNN_CONTEXT_ASSET).use { input ->
+                    partial.outputStream().use { input.copyTo(it) }
+                }
+                if (!partial.renameTo(target)) throw IllegalStateException("cannot store ${target.path}")
+            }
+            // FastRPC loads the NPU skeleton library from this search path.
+            Os.setenv("ADSP_LIBRARY_PATH", context.applicationInfo.nativeLibraryDir, true)
+            target.path
+        } catch (error: Exception) {
+            Log.i(TAG, "QNN context unavailable: ${error.message}")
+            null
+        }
+    }
+
     private fun cacheKey(modelPath: String, modelSize: Int): String {
         val file = File(modelPath)
-        val raw = "${Build.MANUFACTURER}|${Build.MODEL}|${Build.SOC_MODEL}|$modelSize|${file.length()}|${file.lastModified()}"
+        val raw = "cpu-qnn-v2|${Build.MANUFACTURER}|${Build.MODEL}|${Build.SOC_MODEL}|$modelSize|${file.length()}|${file.lastModified()}"
         return MessageDigest.getInstance("SHA-256")
             .digest(raw.toByteArray())
             .take(12)

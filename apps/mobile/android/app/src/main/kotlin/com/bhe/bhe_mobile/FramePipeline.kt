@@ -37,6 +37,13 @@ class FramePipeline(
     private var rotationDegrees = 0
     val rotationDegreesValue: Int
         get() = rotationDegrees
+    /** Frame size after the track rotation, the space detections use. */
+    val displayWidth: Int
+        get() = if (rotationDegrees % 180 == 0) videoWidth else videoHeight
+    val displayHeight: Int
+        get() = if (rotationDegrees % 180 == 0) videoHeight else videoWidth
+    var frameRate = 30.0
+        private set
     private var fallbackRetriever: MediaMetadataRetriever? = null
     private var outputImageUnavailableLogged = false
     private var fallbackCount = 0
@@ -51,6 +58,15 @@ class FramePipeline(
                 trackIndex = i
                 videoWidth = format.getInteger(MediaFormat.KEY_WIDTH)
                 videoHeight = format.getInteger(MediaFormat.KEY_HEIGHT)
+                if (format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
+                    // The key is an integer or a float depending on the container.
+                    val rate = try {
+                        format.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble()
+                    } catch (_: ClassCastException) {
+                        format.getFloat(MediaFormat.KEY_FRAME_RATE).toDouble()
+                    }
+                    if (rate > 0) frameRate = rate
+                }
                 ext.selectTrack(i)
                 break
             }
