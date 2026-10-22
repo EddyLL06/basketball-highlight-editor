@@ -10,6 +10,8 @@
 | `ultralytics` / PyTorch | 桌面检测与推理 | `requirements.txt` 和实际安装环境 | 锁定版本并核验许可证 |
 | OpenCV / NumPy / pandas / psutil | 视频采样、数据处理和运行时监控 | `requirements.txt` | 锁定版本并核验许可证 |
 | `ort` / ONNX Runtime | 移动端 Rust 推理路径 | `packages/bhe_runtime/Cargo.toml` 和 Android/iOS 原生库 | 核对 crate、动态库和 XCFramework 条款 |
+| 高通 QNN Runtime | Android NPU 推理（`libQnnHtp*.so`、`libQnnSystem.so`） | `.github/workflows/release-packages.yml` 中的 `QNN_RUNTIME_VERSION` | 随 APK 附上 Maven 包内 `LICENSE.pdf` 的条款 |
+| `fast_image_resize` | 移动端 Rust 画面缩放 | `packages/bhe_runtime/Cargo.toml` | 核对 crate 许可证 |
 | FFmpeg / FFprobe | 元数据、代理、预览和导出 | 系统或发布运行时 | 核对构建配置、LGPL/GPL 边界和 notices |
 | `media_kit` / `video_player` | 桌面/移动视频播放 | `apps/*/pubspec.yaml` | 保留对应包和插件 notices |
 | Inter 字体 | 桌面 UI 字体（如重新加入） | `apps/desktop/assets` | 核对字体文件和许可证 |

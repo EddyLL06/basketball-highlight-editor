@@ -8,7 +8,7 @@
 2. **桌面二进制版**：额外携带 Python、依赖、FFmpeg/FFprobe、模型和 Flutter 应用。
 3. **Android 侧载测试版**：额外携带 ONNX 模型、Rust Runtime 和 ONNX Runtime Android 库。
 
-推送普通 `v*` tag 后，GitHub Actions 会自动构建 macOS Intel、macOS Apple Silicon、Windows x64 和 Android `arm64-v8a` 包；带平台后缀的热修复 tag 只构建该平台，规则见第 4 节。产物上传到对应 GitHub Release。桌面包会携带便携 Python、依赖、FFmpeg/FFprobe 和 `models/bball_model.pt`；Android 包在 CI 中导出 ONNX 模型、编译 Rust Runtime 并下载官方 ONNX Runtime Android 库。
+推送普通 `v*` tag 后，GitHub Actions 会自动构建 macOS Intel、macOS Apple Silicon、Windows x64 和 Android `arm64-v8a` 包；带平台后缀的热修复 tag 只构建该平台，规则见第 4 节。产物上传到对应 GitHub Release。桌面包会携带便携 Python、依赖、FFmpeg/FFprobe 和 `models/bball_model.pt`；Android 包在 CI 中导出 ONNX 模型、编译 Rust Runtime，并下载官方 ONNX Runtime Android（QNN 版）和高通 QNN Runtime 库；预编译 NPU 模型随源码提交。
 
 ## 1. 源码公开前检查
 

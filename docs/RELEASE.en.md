@@ -8,7 +8,7 @@ Treat releases as three separate deliverables:
 2. **Desktop binary**: Flutter plus Python, dependencies, FFmpeg/FFprobe, and a model.
 3. **Android sideload test build**: ONNX model, Rust Runtime, and ONNX Runtime Android library.
 
-After a normal `v*` tag is pushed, GitHub Actions builds Intel macOS, Apple Silicon macOS, Windows x64, and Android `arm64-v8a` packages. Platform-suffixed hotfix tags build only that platform; see section 4. Packages are uploaded to the matching GitHub Release. Desktop packages include portable Python, dependencies, FFmpeg/FFprobe, and `models/bball_model.pt`; the Android job exports the ONNX model, compiles the Rust runtime, and downloads the official ONNX Runtime Android library.
+After a normal `v*` tag is pushed, GitHub Actions builds Intel macOS, Apple Silicon macOS, Windows x64, and Android `arm64-v8a` packages. Platform-suffixed hotfix tags build only that platform; see section 4. Packages are uploaded to the matching GitHub Release. Desktop packages include portable Python, dependencies, FFmpeg/FFprobe, and `models/bball_model.pt`; the Android job exports the ONNX model, compiles the Rust runtime, and downloads the official ONNX Runtime Android (QNN build) and Qualcomm QNN Runtime libraries; the precompiled NPU model is committed with the source.
 
 ## 1. Source-publication checklist
 

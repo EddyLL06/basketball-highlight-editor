@@ -116,6 +116,8 @@ For more screens, controls, shortcuts, and the light theme, see [`docs/USER_FLOW
 
 BHE now also has Android and iOS mobile app versions. On a phone, you can open a project, import or inspect a game video, review candidate clips, and export the selected clips separately or as one merged reel. Android currently includes the native local-analysis path; iOS local analysis depends on the Rust Runtime and ONNX Runtime artifacts being built and linked for the target.
 
+Like desktop, Android standard analysis runs the frame-by-frame rim check and excludes candidates it saw miss by default. Phones with the Snapdragon 8 Elite Gen 5 analyze on the NPU (about 4.5 minutes for a 10-minute video); other phones fall back to the CPU and are noticeably slower.
+
 The mobile app keeps the same core flow as desktop: prepare a project, inspect the video and candidates, then export. Portrait mode is convenient for browsing candidates, while landscape mode gives the video and review controls more room.
 
 <p align="center">
