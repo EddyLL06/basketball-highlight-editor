@@ -15,6 +15,7 @@ ios-ep = ["ort/coreml"]
 
 [dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+fast_image_resize = { version = "5", features = ["image"] }
 ndarray = "0.17"
 ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "api-27"] }
 serde = { version = "1.0", features = ["derive"] }

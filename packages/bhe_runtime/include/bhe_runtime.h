@@ -25,6 +25,7 @@ char *bhe_runtime_push_frame_raw(
 );
 void bhe_runtime_free_session(RuntimeSession *session);
 char *bhe_runtime_analyze_json(const char *input);
+char *bhe_runtime_judge_rim_checks(const char *input);
 char *bhe_runtime_version(void);
 void bhe_runtime_free_string(char *value);
 

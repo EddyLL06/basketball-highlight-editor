@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use base64::Engine;
 use image::{
-    imageops::{resize, rotate180, rotate270, rotate90, FilterType},
+    imageops::{rotate180, rotate270, rotate90, FilterType},
     RgbImage,
 };
 #[cfg(test)]
@@ -17,6 +17,8 @@ use ort::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+pub mod rim_check;
 
 /// Inference input resolution. 640 is the default for YOLOv8n-style models
 /// converted to ONNX. Desktop uses 1280; if the mobile model was exported at
@@ -49,7 +51,7 @@ pub enum RuntimeError {
     Base64(#[from] base64::DecodeError),
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Roi {
     pub left: f32,
     pub top: f32,
@@ -282,6 +284,10 @@ pub struct Candidate {
     pub signals: serde_json::Value,
     pub gates: serde_json::Value,
     pub verification: serde_json::Value,
+    /// Rim geometry this candidate was decided with; the rim check crops
+    /// around it instead of the session-wide calibration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rim: Option<Roi>,
 }
 
 // (time_ms, x, y, confidence, width, height); x/y and box dimensions are
@@ -490,6 +496,7 @@ pub struct RuntimeSession {
     rim_roi: Roi,
     rim_calibrated: bool,
     rim_observations: Vec<Detection>,
+    net_rim_compatible: bool,
     frame_width: u32,
     frame_height: u32,
     last_time_ms: i64,
@@ -547,6 +554,7 @@ struct RuntimeSessionInfo {
     batch_failed: bool,
     processed_frames: u64,
     session_init_ms: u64,
+    rim: Roi,
 }
 
 struct PendingFrame {
@@ -766,6 +774,7 @@ impl RuntimeSession {
             net_gray_history: Vec::new(),
             previous_net_gray: Vec::new(),
             net_zone_history: Vec::new(),
+            net_rim_compatible: true,
             rgb_work_buffer: Vec::new(),
             roi_work_buffer: Vec::new(),
             roi_work_dimensions: (0, 0),
@@ -792,6 +801,7 @@ impl RuntimeSession {
             batch_failed: self.batch_failed,
             processed_frames: self.processed_frames,
             session_init_ms: self.session_init_ms,
+            rim: self.rim_roi.clone(),
         }
     }
 
@@ -1261,7 +1271,7 @@ impl RuntimeSession {
         self.frame_width = source_width;
         self.frame_height = source_height;
         self.last_time_ms = time_ms;
-        if !self.config.detection_only {
+        if !self.config.detection_only && !self.config.coarse_mode {
             self.update_net_motion(time_ms, &analysis_frame, net_roi, net_motion_roi);
         }
         let resized_frame = if (scale - 1.0).abs() < f32::EPSILON {
@@ -1452,7 +1462,7 @@ impl RuntimeSession {
             self.frame_width = frame.source_width;
             self.frame_height = frame.source_height;
             self.last_time_ms = frame.time_ms;
-            if !self.config.detection_only {
+            if !self.config.detection_only && !self.config.coarse_mode {
                 self.update_net_motion(
                     frame.time_ms,
                     &frame.analysis_frame,
@@ -1642,7 +1652,11 @@ impl RuntimeSession {
             let keep_from = self.rim_observations.len() - 64;
             self.rim_observations.drain(..keep_from);
         }
-        if self.config.coarse_mode || self.config.rim.is_some() {
+        if self.config.coarse_mode {
+            return;
+        }
+        if let Some(supplied) = self.config.rim.clone() {
+            self.update_local_rim(&supplied, width, height);
             return;
         }
         if self.rim_observations.len() < 2 {
@@ -1735,6 +1749,24 @@ impl RuntimeSession {
         };
         self.rim_roi = hoop_detection_to_rim(&selected_bbox, width, height);
         self.rim_calibrated = true;
+    }
+
+    fn update_local_rim(&mut self, supplied: &Roi, width: u32, height: u32) {
+        if let Some((rim, net_compatible)) =
+            estimate_local_rim(&self.rim_observations, supplied, width, height)
+        {
+            self.rim_roi = rim;
+            self.set_net_rim_compatible(net_compatible);
+        }
+    }
+
+    fn set_net_rim_compatible(&mut self, compatible: bool) {
+        self.net_rim_compatible = compatible;
+        if !compatible {
+            for point in &mut self.net_zone_history {
+                point.measurement_valid = false;
+            }
+        }
     }
 }
 
@@ -2100,7 +2132,7 @@ impl RuntimeSession {
         if measurement_valid {
             self.net_zone_history.push(NetHistoryPoint {
                 time_ms,
-                measurement_valid: true,
+                measurement_valid: self.net_rim_compatible,
                 lower_inside,
                 below_inside,
                 upper_components: components[0],
@@ -2272,6 +2304,7 @@ impl RuntimeSession {
             candidate.confidence_label =
                 confidence_label(candidate.composite_score, candidate.net_score, &gates);
             candidate.decision_time_ms = Some(candidate.below.time_ms + 800);
+            candidate.rim = Some(rim.clone());
             refresh_candidate_evidence(candidate, &final_gates, "confirmed");
             candidate.trajectory = track
                 .points
@@ -2499,6 +2532,7 @@ impl RuntimeSession {
                     self.frame_height,
                 );
                 let mut candidate = Candidate {
+                    rim: Some(self.rim_roi.clone()),
                     id: format!("candidate_{event_ms}"),
                     track_id,
                     start_ms: (event_ms - self.config.clip_before_ms).max(0),
@@ -2675,6 +2709,7 @@ fn coarse_crossing_candidates(
                 height: None,
             };
             candidates.push(Candidate {
+                rim: None,
                 id: format!("coarse_{event_ms}"),
                 track_id: 0,
                 start_ms: (event_ms - config.clip_before_ms).max(0),
@@ -4978,6 +5013,26 @@ fn crop_analysis_roi_reuse(
     Ok((crop, left, top))
 }
 
+fn resize(image: &RgbImage, width: u32, height: u32, filter: FilterType) -> RgbImage {
+    use fast_image_resize as fr;
+    let filter = match filter {
+        FilterType::Nearest => fr::ResizeAlg::Nearest,
+        FilterType::Triangle => fr::ResizeAlg::Convolution(fr::FilterType::Bilinear),
+        FilterType::CatmullRom => fr::ResizeAlg::Convolution(fr::FilterType::CatmullRom),
+        FilterType::Gaussian => fr::ResizeAlg::Convolution(fr::FilterType::Gaussian),
+        FilterType::Lanczos3 => fr::ResizeAlg::Convolution(fr::FilterType::Lanczos3),
+    };
+    let mut resized = RgbImage::new(width, height);
+    fr::Resizer::new()
+        .resize(
+            image,
+            &mut resized,
+            &fr::ResizeOptions::new().resize_alg(filter),
+        )
+        .expect("RGB resize dimensions are valid");
+    resized
+}
+
 fn resize_reuse(
     image: &RgbImage,
     width: u32,
@@ -5038,6 +5093,88 @@ fn hoop_detection_to_rim(detection: &Detection, width: u32, height: u32) -> Roi 
         right: ((center_x + box_width / 2.0) / width as f32).clamp(0.0, 1.0),
         bottom: ((rim_y + rim_height / 2.0) / height as f32).clamp(0.0, 1.0),
     }
+}
+
+/// Port of `refine_dynamic_candidates.estimate_local_rim`: the supplied
+/// rim is a whole-video calibration, so a camera that drifts later in the
+/// video needs the hoop seen inside this window. Distance gates are in
+/// rim widths because the decoded frame size differs from desktop.
+fn estimate_local_rim(
+    observations: &[Detection],
+    supplied: &Roi,
+    width: u32,
+    height: u32,
+) -> Option<(Roi, bool)> {
+    let (frame_width, frame_height) = (width as f32, height as f32);
+    let fallback_x = (supplied.left + supplied.right) / 2.0 * frame_width;
+    let fallback_y = (supplied.top + supplied.bottom) / 2.0 * frame_height;
+    let fallback_width = (supplied.right - supplied.left) * frame_width;
+    let fallback_height = (supplied.bottom - supplied.top) * frame_height;
+    let hoops: Vec<_> = observations
+        .iter()
+        .filter(|item| {
+            let box_width = item.x2 - item.x1;
+            let box_height = item.y2 - item.y1;
+            item.confidence >= 0.35
+                && ((item.x1 + item.x2) / 2.0 - fallback_x).abs() <= fallback_width * 6.0
+                && ((item.y1 + item.y2) / 2.0 - fallback_y).abs() <= fallback_width * 5.0
+                && (0.45 * fallback_width..=1.9 * fallback_width).contains(&box_width)
+                && (0.45 * fallback_height..=1.9 * fallback_height).contains(&(box_height * 0.45))
+        })
+        .collect();
+    if hoops.len() < 3 {
+        return None;
+    }
+    let mut centers_x: Vec<_> = hoops.iter().map(|item| (item.x1 + item.x2) / 2.0).collect();
+    let mut rims_y: Vec<_> = hoops
+        .iter()
+        .map(|item| (item.y1 + item.y2) / 2.0 - (item.y2 - item.y1) * 0.28)
+        .collect();
+    let mut widths: Vec<_> = hoops.iter().map(|item| item.x2 - item.x1).collect();
+    let mut heights: Vec<_> = hoops.iter().map(|item| item.y2 - item.y1).collect();
+    let center_x = median_f32(&mut centers_x);
+    let rim_y = median_f32(&mut rims_y);
+    let rim_width = median_f32(&mut widths);
+    let rim_height = median_f32(&mut heights) * 0.45;
+    let center_mad = median_f32(
+        &mut centers_x
+            .iter()
+            .map(|value| (value - center_x).abs())
+            .collect::<Vec<_>>(),
+    );
+    let rim_y_mad = median_f32(
+        &mut rims_y
+            .iter()
+            .map(|value| (value - rim_y).abs())
+            .collect::<Vec<_>>(),
+    );
+    let width_mad = median_f32(
+        &mut widths
+            .iter()
+            .map(|value| (value - rim_width).abs())
+            .collect::<Vec<_>>(),
+    );
+    if center_mad > 4.0_f32.max(fallback_width * 0.18)
+        || rim_y_mad > 4.0_f32.max(fallback_height * 0.35)
+        || width_mad > 3.0_f32.max(rim_width * 0.22)
+    {
+        return Some((supplied.clone(), true));
+    }
+    let rim = Roi {
+        left: ((center_x - rim_width / 2.0) / frame_width).clamp(0.0, 1.0),
+        top: ((rim_y - rim_height / 2.0) / frame_height).clamp(0.0, 1.0),
+        right: ((center_x + rim_width / 2.0) / frame_width).clamp(0.0, 1.0),
+        bottom: ((rim_y + rim_height / 2.0) / frame_height).clamp(0.0, 1.0),
+    };
+    // `_records_for_rim`: the net zones stay on the supplied geometry, so
+    // they only measure this window when the hoop has not moved away.
+    let max_width = 1.0_f32.max(fallback_width).max(rim_width);
+    let max_height = 1.0_f32.max(fallback_height).max(rim_height);
+    let width_ratio = fallback_width / rim_width.max(1.0);
+    let net_compatible = (center_x - fallback_x).abs() <= max_width * 0.40
+        && (rim_y - fallback_y).abs() <= 6.0_f32.max(max_height * 0.80)
+        && (0.70..=1.40).contains(&width_ratio);
+    Some((rim, net_compatible))
 }
 
 /// Matches `generate_candidates.py::_hoops_from`: median detector box
@@ -5990,6 +6127,41 @@ mod tests {
     }
 
     #[test]
+    fn local_rim_follows_a_drifted_hoop_and_invalidates_the_net_zones() {
+        let supplied = Roi {
+            left: 491.5 / 960.0,
+            top: 295.5 / 720.0,
+            right: 508.5 / 960.0,
+            bottom: 304.5 / 720.0,
+        };
+        let hoop = |center_x: f32| Detection {
+            class_id: 1,
+            confidence: 0.8,
+            x1: center_x - 8.5,
+            y1: 295.6,
+            x2: center_x + 8.5,
+            y2: 315.6,
+        };
+        let lookalike = Detection {
+            x1: 791.5,
+            x2: 808.5,
+            ..hoop(0.0)
+        };
+
+        assert!(estimate_local_rim(&[hoop(514.0), hoop(514.0)], &supplied, 960, 720).is_none());
+
+        let drifted = [hoop(513.0), hoop(514.0), hoop(515.0), lookalike.clone()];
+        let (rim, net_compatible) = estimate_local_rim(&drifted, &supplied, 960, 720).unwrap();
+        assert!(((rim.left + rim.right) / 2.0 * 960.0 - 514.0).abs() < 0.01);
+        assert!(((rim.top + rim.bottom) / 2.0 * 720.0 - 300.0).abs() < 0.01);
+        assert!(!net_compatible);
+
+        let jitter = [hoop(502.0), hoop(503.0), hoop(503.0)];
+        let (_, net_compatible) = estimate_local_rim(&jitter, &supplied, 960, 720).unwrap();
+        assert!(net_compatible);
+    }
+
+    #[test]
     fn clip_end_is_bounded_by_video_duration() {
         assert_eq!(clip_end_ms(9_500, 3_000, Some(10_000)), 10_000);
         assert_eq!(clip_end_ms(9_500, 3_000, None), 12_500);
@@ -6306,6 +6478,24 @@ pub unsafe extern "C" fn bhe_runtime_analyze_json(input: *const c_char) -> *mut 
     }
     let result = CStr::from_ptr(input).to_string_lossy().into_owned();
     let output = match analyze_json(&result) {
+        Ok(value) => value,
+        Err(error) => serde_json::json!({"error": error.to_string()}).to_string(),
+    };
+    CString::new(output).unwrap().into_raw()
+}
+
+/// Judges the rim checks of one video; see `rim_check::judge_video_json`.
+///
+/// # Safety
+/// `input` must be a non-null pointer to a valid NUL-terminated UTF-8 string
+/// and remains valid for the duration of this call.
+#[no_mangle]
+pub unsafe extern "C" fn bhe_runtime_judge_rim_checks(input: *const c_char) -> *mut c_char {
+    if input.is_null() {
+        return std::ptr::null_mut();
+    }
+    let input = CStr::from_ptr(input).to_string_lossy().into_owned();
+    let output = match rim_check::judge_video_json(&input) {
         Ok(value) => value,
         Err(error) => serde_json::json!({"error": error.to_string()}).to_string(),
     };
