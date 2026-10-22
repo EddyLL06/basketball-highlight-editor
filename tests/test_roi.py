@@ -43,6 +43,44 @@ def test_select_stable_hoop_uses_highest_confidence_frame_for_preview():
     assert result["preview_time_ms"] == 4000
 
 
+def test_select_stable_hoop_keeps_nearby_lookalike_separate():
+    hoop = [490, 291, 508, 310]
+    windows = [553, 245, 569, 273]
+    detections = [
+        {"bbox": hoop, "confidence": 0.3},
+        {"bbox": hoop, "confidence": 0.2},
+        {"bbox": windows, "confidence": 0.4},
+        {"bbox": windows, "confidence": 0.35},
+        {"bbox": windows, "confidence": 0.3},
+    ]
+
+    result = select_stable_hoop(detections, 960, 720)
+
+    assert result is not None
+    assert result["cluster_count"] == 2
+    assert result["hoop_bbox"] == windows
+
+
+def test_select_stable_hoop_prefers_cluster_confirmed_on_zoom():
+    hoop = [490, 291, 508, 310]
+    windows = [553, 245, 569, 273]
+    detections = [
+        {"bbox": hoop, "confidence": 0.3},
+        {"bbox": hoop, "confidence": 0.2},
+        {"bbox": windows, "confidence": 0.4},
+        {"bbox": windows, "confidence": 0.35},
+        {"bbox": windows, "confidence": 0.3},
+    ]
+
+    result = select_stable_hoop(
+        detections, 960, 720, verify=lambda bbox: 0.88 if bbox == hoop else 0.01
+    )
+
+    assert result is not None
+    assert result["hoop_bbox"] == hoop
+    assert result["verified_confidence"] == 0.88
+
+
 def test_hoop_bbox_to_rim_roi_matches_refiner_plane_calibration():
     rim = hoop_bbox_to_rim_roi([480, 310, 500, 330], 960, 720)
 

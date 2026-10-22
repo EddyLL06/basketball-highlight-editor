@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from statistics import median
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:
@@ -102,8 +102,15 @@ def select_stable_hoop(
     *,
     min_confidence: float = 0.05,
     min_samples: int = 2,
+    verify: Callable[[list[float]], float] | None = None,
 ) -> dict[str, Any] | None:
-    """Select the most stable hoop cluster from sampled full-frame detections."""
+    """Select the most stable hoop cluster from sampled full-frame detections.
+
+    A far hoop is only a few pixels wide, so background texture such as a
+    column of windows can be detected as often and as confidently as the
+    hoop. ``verify`` scores each cluster's box on a zoomed crop and the
+    best-scoring cluster wins.
+    """
     candidates: list[dict[str, Any]] = []
     for detection in detections:
         bbox = detection.get("bbox") or detection.get("xyxy")
@@ -128,9 +135,10 @@ def select_stable_hoop(
     if len(candidates) < min_samples:
         return None
 
-    cluster_radius = max(60.0, frame_width * 0.10)
     clusters: list[list[dict[str, Any]]] = []
     for candidate in candidates:
+        x1, y1, x2, y2 = candidate["bbox"]
+        cluster_radius = max(16.0, 2.0 * max(x2 - x1, y2 - y1))
         best_cluster = None
         best_distance = None
         for cluster in clusters:
@@ -161,11 +169,18 @@ def select_stable_hoop(
             median(item["area"] for item in cluster),
         )
 
-    selected = max(clusters, key=cluster_key)
-    bbox = [
-        median(item["bbox"][index] for item in selected)
-        for index in range(4)
-    ]
+    def cluster_bbox(cluster: list[dict[str, Any]]) -> list[float]:
+        return [median(item["bbox"][index] for item in cluster) for index in range(4)]
+
+    verified_confidence = None
+    if verify is not None:
+        scored = [(verify(cluster_bbox(cluster)), cluster) for cluster in clusters]
+        verified_confidence, selected = max(
+            scored, key=lambda item: (item[0], cluster_key(item[1]))
+        )
+    else:
+        selected = max(clusters, key=cluster_key)
+    bbox = cluster_bbox(selected)
     confidence = median(item["confidence"] for item in selected)
     best_detection = max(selected, key=lambda item: item["confidence"])
     roi = expand_hoop_bbox_to_roi(bbox, frame_width, frame_height)
@@ -176,4 +191,8 @@ def select_stable_hoop(
         "preview_time_ms": round(best_detection["time"] * 1000),
         "samples": len(selected),
         "stability": round(min(1.0, len(selected) / max(1, len(candidates))), 3),
+        "cluster_count": len(clusters),
+        "verified_confidence": (
+            round(verified_confidence, 3) if verified_confidence is not None else None
+        ),
     }

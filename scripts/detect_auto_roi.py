@@ -23,6 +23,11 @@ HOOP_NAMES = {"hoop", "rim", "basketball hoop", "basketball_hoop"}
 AUTO_ROI_DURATION_SECONDS = 20.0
 AUTO_ROI_SAMPLE_FPS = 1.0
 AUTO_ROI_MAX_SAMPLES = 12
+# Zoomed check of each hoop cluster: a square of this many box sizes around
+# the cluster, at native resolution, re-detected at the model input size.
+VERIFY_CROP_BOX_SIZES = 5.0
+VERIFY_MIN_CROP_PX = 96.0
+VERIFY_FRAMES = 2
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,6 +61,45 @@ def select_device(requested: str) -> str:
 
 def _is_hoop(name: object) -> bool:
     return str(name).strip().lower().replace("-", " ") in HOOP_NAMES
+
+
+def zoom_verifier(model, frames, device: str, imgsz: int, conf: float):
+    """Return the best hoop confidence near the centre of a zoomed crop."""
+
+    def verify(bbox: list[float]) -> float:
+        x1, y1, x2, y2 = bbox
+        center_x = (x1 + x2) / 2.0
+        center_y = (y1 + y2) / 2.0
+        best = 0.0
+        for frame in frames[:VERIFY_FRAMES]:
+            height, width = frame.shape[:2]
+            side = min(
+                max(VERIFY_MIN_CROP_PX, VERIFY_CROP_BOX_SIZES * max(x2 - x1, y2 - y1)),
+                width,
+                height,
+            )
+            left = int(round(min(max(center_x - side / 2.0, 0.0), width - side)))
+            top = int(round(min(max(center_y - side / 2.0, 0.0), height - side)))
+            crop = frame[top : top + int(side), left : left + int(side)]
+            results = model.predict(
+                crop, device=device, conf=conf, imgsz=imgsz, rect=False, verbose=False
+            )
+            if not results:
+                continue
+            for box in results[0].boxes:
+                if not _is_hoop(results[0].names[int(box.cls[0])]):
+                    continue
+                bx1, by1, bx2, by2 = (float(value) for value in box.xyxy[0].tolist())
+                # Only a hoop centred inside this cluster's box confirms it;
+                # a neighbouring hoop inside the crop must not.
+                if (
+                    x1 - left <= (bx1 + bx2) / 2.0 <= x2 - left
+                    and y1 - top <= (by1 + by2) / 2.0 <= y2 - top
+                ):
+                    best = max(best, float(box.conf[0]))
+        return best
+
+    return verify
 
 
 def detect(args: argparse.Namespace) -> dict:
@@ -97,6 +141,7 @@ def detect(args: argparse.Namespace) -> dict:
     start_frame = target_frames[0]
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     detections = []
+    frames = []
     frame_index = start_frame
     sample_index = 0
     samples = 0
@@ -113,6 +158,8 @@ def detect(args: argparse.Namespace) -> dict:
         ok, frame = cap.retrieve()
         if not ok:
             break
+        if len(frames) < VERIFY_FRAMES:
+            frames.append(frame)
         results = model.predict(
             frame,
             device=device,
@@ -143,9 +190,6 @@ def detect(args: argparse.Namespace) -> dict:
                 )
         samples += 1
         sample_index += 1
-        # 攒够稳定中位数所需的检测即可提前结束。
-        if len(detections) >= 5:
-            break
         frame_index += 1
     cap.release()
 
@@ -155,6 +199,7 @@ def detect(args: argparse.Namespace) -> dict:
         height,
         min_confidence=args.conf,
         min_samples=2,
+        verify=zoom_verifier(model, frames, device, args.imgsz, args.conf),
     )
     result = {
         "success": selected is not None,
