@@ -139,6 +139,19 @@ After review, export every retained clip separately or merge the retained clips 
 
 See [`apps/mobile/README.md`](apps/mobile/README.md) for mobile builds, device testing, and native inference dependencies. Cross-platform boundaries are documented in [`docs/MOBILE_PC_FEATURE_MATRIX.md`](docs/MOBILE_PC_FEATURE_MATRIX.md).
 
+## Recent updates
+
+BHE is actively maintained, with new releases roughly every week. See [`CHANGELOG.md`](CHANGELOG.md) for the full list of changes.
+
+| Version | Date | Highlights |
+|---|---|---|
+| v0.1.9 | 2026-10-22 | Android analyzes on the NPU on Snapdragon 8 Elite Gen 5 phones (about 4.5 minutes for a 10-minute video); Android adds the frame-by-frame rim check and coarse fallback candidates, matching desktop results; a camera that drifts mid-game no longer loses goals in the second half; mobile review adds rim-check and player filters, the timeline range editor, and project covers |
+| v0.1.8 | 2026-10-21 | The rim check only excludes on evidence it actually saw, cutting missed goals on three reviewed videos from 47 to 0; review list can filter by rim-check result; Windows decodes proxies and encodes exports on the GPU; fixed black borders on non-16:9 videos on Windows and unreadable text in the light theme |
+| v0.1.7 | 2026-10-20 | Standard analysis adds a frame-by-frame rim check that auto-excludes missed shots; drag a video onto the home screen to create a project, with project covers; redesigned clip range editing and number-key player tags; fixed a batch of review and export freezes and state bugs |
+| v0.1.4 – v0.1.6 | 2026-10-17 | Review video fills the panel; fixed proxy generation and export in the Windows package, followed by several Windows hotfixes from 10-18 to 10-20 |
+| v0.1.1 – v0.1.3 | 2026-09-16 – 09-23 | Full Chinese and English UI on desktop and mobile; fixed Android native library loading and the ONNX Runtime version |
+| v0.1.0 | 2026-09-14 | First preview release: automated macOS, Windows, and Android test builds, downloadable from the website; mobile ported the desktop analysis algorithm |
+
 ## Scope
 
 The current pipeline targets **fixed-camera, single-hoop, single-video** workflows. It generates high-recall suspected scoring events for human review. It does not promise referee-grade truth, and is not designed for moving cameras, multiple hoops, live streaming, cloud collaboration, or zero-false-positive unattended editing.
