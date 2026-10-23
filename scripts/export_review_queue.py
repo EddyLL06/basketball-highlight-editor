@@ -103,7 +103,7 @@ def main(args):
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                 "-ss", f"{start:.3f}", "-i", str(video),
                 "-t", f"{end - start:.3f}",
-                "-map", "0:v:0?", "-map", "0:a?", "-c", "copy",
+                "-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy",
                 str(clip_path),
             ], check=True)
         rows.append({
