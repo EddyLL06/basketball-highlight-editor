@@ -167,6 +167,27 @@ void main() {
     expect(engine.started, ['v1', 'v2', 'v3']);
   });
 
+  test('resuming after a restart replaces the interrupted job', () async {
+    engine.addVideo('v1', roi: true);
+    engine.addVideo('v2', roi: true);
+    engine.jobs['job-old'] = {
+      'id': 'job-old',
+      'type': 'analysis',
+      'state': 'running',
+      'video_id': 'v1',
+      'stale': true,
+    };
+    engine.queue = {'video_ids': ['v1', 'v2'], 'before_seconds': 6, 'after_seconds': 3};
+    await notifier().openProject(directory.path);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(state().queuePaused, isTrue);
+
+    await notifier().resumeAnalysisQueue();
+    await settle(() => state().analysisQueue.isEmpty && !state().busy);
+    expect(engine.jobs['job-old']!['state'], 'cancelled');
+    expect(engine.started, ['v1', 'v2']);
+  });
+
   test('recording time helpers', () {
     JsonMap video(String? recordedAt, String name, {int duration = 60000}) => {
       'recorded_at': recordedAt,
@@ -373,7 +394,16 @@ class _GameEngine implements EngineTransport {
       case 'list_exports':
         return {'exports': <dynamic>[]};
       case 'get_active_jobs':
-        return {'jobs': <dynamic>[]};
+        return {
+          'jobs': [
+            for (final job in jobs.values)
+              if (job['state'] == 'running' && job['type'] == 'analysis')
+                {...job, 'recovery_state': job['stale'] == true ? 'stale_recoverable' : 'worker_attached'},
+          ],
+        };
+      case 'cancel_job':
+        jobs[payload['job_id']]!['state'] = 'cancelled';
+        return {'job': jobs[payload['job_id']]};
       case 'get_latest_job':
         return {'job': null};
       case 'get_analysis_mode':

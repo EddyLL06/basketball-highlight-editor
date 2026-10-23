@@ -1462,7 +1462,17 @@ class ProjectNotifier extends Notifier<ProjectState> {
     var started = false;
     await _runBusy(() async {
       await ref.read(engineBootstrapProvider.notifier).ensure();
-      final result = await ref.read(projectSessionProvider).startAnalysis(
+      final session = ref.read(projectSessionProvider);
+      // 关掉应用再打开时，中断的那段只剩一条待恢复的任务，取消后重新开始。
+      for (final job in await session.getActiveJobs()) {
+        if (job['recovery_state'] == 'worker_attached') {
+          state = state.copyWith(job: job);
+          started = true;
+          return;
+        }
+        await session.cancelJob(jobId: job['id'].toString());
+      }
+      final result = await session.startAnalysis(
         videoId: videoId,
         mode: state.analysisMode,
         sampleFps: 10,
