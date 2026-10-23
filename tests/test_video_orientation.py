@@ -154,3 +154,42 @@ def test_cover_art_is_not_used_for_the_footage_size(tmp_path: Path, monkeypatch)
 
     assert (info["width"], info["height"]) == (1920, 1080)
     assert info["fps"] == pytest.approx(30.0)
+
+
+def test_open_project_leaves_videos_alone_when_the_stored_size_is_not_a_swap(tmp_path: Path):
+    ffmpeg = _ffmpeg_or_skip()
+    source = _portrait_coded_clip(tmp_path, ffmpeg, displayed_landscape=True)
+    project_root = tmp_path / "project"
+    service = EngineService()
+    service.handle("create_project", {"name": "非互换测试", "root_path": str(project_root)})
+    store = ProjectStore(project_root)
+    video = store.link_video({
+        "source_path": str(source),
+        "source_size_bytes": source.stat().st_size,
+        "source_mtime_ns": source.stat().st_mtime_ns,
+        "duration_ms": 2000,
+        "width": 1280,
+        "height": 720,
+        "fps": 30.0,
+        "video_codec": "h264",
+        "audio_codec": None,
+    })
+    store.save_roi(video["id"], {"x1": 100, "y1": 200, "x2": 400, "y2": 500})
+
+    context = service.handle("open_project", {"project_root": str(project_root)})
+
+    assert "orientation_corrected" not in context
+    assert context["videos"][0]["roi"] is not None
+    assert (context["videos"][0]["width"], context["videos"][0]["height"]) == (1280, 720)
+
+
+def test_a_file_whose_only_video_stream_is_cover_art_still_reports_its_size(tmp_path: Path, monkeypatch):
+    info = _inspect_fake(tmp_path, monkeypatch, [{
+        "codec_type": "video",
+        "width": 1920,
+        "height": 1080,
+        "r_frame_rate": "30/1",
+        "disposition": {"attached_pic": 1},
+    }])
+
+    assert (info["width"], info["height"]) == (1920, 1080)

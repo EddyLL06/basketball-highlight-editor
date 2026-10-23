@@ -220,9 +220,10 @@ class EngineService:
                 continue
             try:
                 probed = self.inspect_video({"video_path": str(source)})
-            except ProtocolError:
+            except (ProtocolError, OSError):
                 continue
-            if (probed["width"], probed["height"]) == (video.get("width"), video.get("height")):
+            # 只修正横竖互换的记录（旧版本存的是编码尺寸），其它差异不动。
+            if (video.get("width"), video.get("height")) != (probed["height"], probed["width"]):
                 continue
             store.relink_video(video["id"], {
                 **probed,
@@ -467,17 +468,14 @@ class EngineService:
         streams = probe.get("streams")
         if not isinstance(streams, list):
             raise ProtocolError("VIDEO_OPEN_FAILED", "视频流信息无效")
-        video_stream = next(
-            (
-                item
-                for item in streams
-                if isinstance(item, dict)
-                and item.get("codec_type") == "video"
-                # 封面图（attached_pic）是静态图片，不能拿它的尺寸描述正片。
-                and not (item.get("disposition") or {}).get("attached_pic")
-            ),
-            None,
-        )
+        video_streams = [
+            item for item in streams if isinstance(item, dict) and item.get("codec_type") == "video"
+        ]
+        # 封面图（attached_pic）是静态图片，不能拿它的尺寸描述正片；只有封面时才退回使用它。
+        footage_streams = [
+            item for item in video_streams if not (item.get("disposition") or {}).get("attached_pic")
+        ]
+        video_stream = next(iter(footage_streams or video_streams), None)
         audio_stream = next(
             (item for item in streams if isinstance(item, dict) and item.get("codec_type") == "audio"),
             None,
@@ -551,7 +549,7 @@ class EngineService:
                 continue
             try:
                 return int(round(float(value)))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 continue
         return 0
 
