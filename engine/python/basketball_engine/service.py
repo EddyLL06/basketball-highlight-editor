@@ -431,7 +431,10 @@ class EngineService:
             "-v",
             "error",
             "-show_entries",
-            "format=duration,size:format_tags=creation_time:stream=index,codec_type,codec_name,width,height,r_frame_rate:stream_side_data=rotation:stream_tags=rotate",
+            "format=duration,size:format_tags=creation_time:"
+            "stream=index,codec_type,codec_name,width,height,r_frame_rate:"
+            "stream_side_data=rotation:stream_disposition=attached_pic:"
+            "stream_tags=rotate",
             "-of",
             "json",
             str(path),
@@ -465,7 +468,14 @@ class EngineService:
         if not isinstance(streams, list):
             raise ProtocolError("VIDEO_OPEN_FAILED", "视频流信息无效")
         video_stream = next(
-            (item for item in streams if isinstance(item, dict) and item.get("codec_type") == "video"),
+            (
+                item
+                for item in streams
+                if isinstance(item, dict)
+                and item.get("codec_type") == "video"
+                # 封面图（attached_pic）是静态图片，不能拿它的尺寸描述正片。
+                and not (item.get("disposition") or {}).get("attached_pic")
+            ),
             None,
         )
         audio_stream = next(
@@ -483,7 +493,8 @@ class EngineService:
             raise ProtocolError("VIDEO_DIMENSION_INVALID", "视频分辨率无效")
         # 编码方向和显示方向可能不同（手机、运动相机、屏幕录制常见），
         # 存显示方向的尺寸，才和播放器、代理视频、篮筐坐标一致。
-        if self._display_rotation(video_stream) % 180 == 90:
+        rotation = self._display_rotation(video_stream)
+        if rotation % 180 == 90:
             width, height = height, width
         fps = self._parse_ratio(video_stream.get("r_frame_rate"))
         format_data = probe.get("format")
@@ -521,17 +532,28 @@ class EngineService:
         }
         log_diagnostic(
             f"inspect {path.name} {video_summary(info)} "
+            f"{f'rotation={rotation}deg ' if rotation else ''}"
             f"free_disk={disk.free / 1024 ** 3:.1f}GB"
         )
         return info
 
     @staticmethod
     def _display_rotation(stream: Dict[str, Any]) -> int:
-        for item in stream.get("side_data_list") or []:
-            if isinstance(item, dict) and item.get("rotation") is not None:
-                return int(float(item["rotation"]))
-        rotate = (stream.get("tags") or {}).get("rotate")
-        return int(float(rotate)) if rotate is not None else 0
+        """Display rotation in degrees, as the player applies it (MP4 matrix or old rotate tag)."""
+        candidates = [
+            item.get("rotation")
+            for item in stream.get("side_data_list") or []
+            if isinstance(item, dict)
+        ]
+        candidates.append((stream.get("tags") or {}).get("rotate"))
+        for value in candidates:
+            if value is None:
+                continue
+            try:
+                return int(round(float(value)))
+            except (TypeError, ValueError):
+                continue
+        return 0
 
     def _ensure_disk_space(self, workspace: Path, source: Path) -> None:
         if not source.is_file():

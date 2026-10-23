@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 
@@ -92,3 +93,64 @@ def test_open_project_corrects_a_stored_portrait_size_and_drops_drawn_work(tmp_p
 
     again = service.handle("open_project", {"project_root": str(project_root)})
     assert "orientation_corrected" not in again
+
+
+def _probe_with(monkeypatch, streams: list[dict]) -> None:
+    payload = json.dumps({"format": {"duration": "10.0"}, "streams": streams})
+    monkeypatch.setattr(
+        "engine.python.basketball_engine.service.subprocess.run",
+        lambda *args, **kwargs: type("Completed", (), {"stdout": payload})(),
+    )
+
+
+def _inspect_fake(tmp_path: Path, monkeypatch, streams: list[dict]) -> dict:
+    source = tmp_path / "fixture.mp4"
+    source.write_bytes(b"video")
+    _probe_with(monkeypatch, streams)
+    return EngineService().handle("inspect_video", {"video_path": str(source)})
+
+
+def test_half_turn_rotation_keeps_the_stored_size(tmp_path: Path, monkeypatch):
+    info = _inspect_fake(tmp_path, monkeypatch, [{
+        "codec_type": "video",
+        "width": 1080,
+        "height": 1920,
+        "r_frame_rate": "30/1",
+        "side_data_list": [{"rotation": 180}],
+    }])
+
+    assert (info["width"], info["height"]) == (1080, 1920)
+
+
+def test_old_rotate_tag_is_honoured_when_there_is_no_display_matrix(tmp_path: Path, monkeypatch):
+    info = _inspect_fake(tmp_path, monkeypatch, [{
+        "codec_type": "video",
+        "width": 1080,
+        "height": 1920,
+        "r_frame_rate": "30/1",
+        "tags": {"rotate": "-90"},
+    }])
+
+    assert (info["width"], info["height"]) == (1920, 1080)
+
+
+def test_cover_art_is_not_used_for_the_footage_size(tmp_path: Path, monkeypatch):
+    info = _inspect_fake(tmp_path, monkeypatch, [
+        {
+            "codec_type": "video",
+            "width": 720,
+            "height": 1280,
+            "r_frame_rate": "90000/1",
+            "disposition": {"attached_pic": 1},
+        },
+        {
+            "codec_type": "video",
+            "width": 1920,
+            "height": 1080,
+            "r_frame_rate": "30/1",
+            "disposition": {"attached_pic": 0},
+        },
+    ])
+
+    assert (info["width"], info["height"]) == (1920, 1080)
+    assert info["fps"] == pytest.approx(30.0)
