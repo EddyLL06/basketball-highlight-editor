@@ -6,6 +6,7 @@ import 'package:bhe_l10n/bhe_l10n.dart';
 
 import '../../core/contact_actions.dart';
 import '../../core/engine_client.dart';
+import '../feedback/feedback_dialog.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
 
@@ -115,13 +116,10 @@ class _CourtsideAboutDialog extends StatelessWidget {
                   ),
                   const SizedBox(width: Spacing.sm),
                   FilledButton.icon(
-                    onPressed: () async {
-                      await openExternalUri(
-                        feedbackMailto(
-                          english: l10n?.localeName.startsWith('en') == true,
-                        ),
-                      );
-                      if (context.mounted) Navigator.pop(context);
+                    onPressed: () {
+                      final navigator = Navigator.of(context);
+                      navigator.pop();
+                      showFeedbackDialog(navigator.context);
                     },
                     icon: const Icon(LucideIcons.mail, size: 17),
                     label: Text(l10n?.sendFeedback ?? '发送反馈'),

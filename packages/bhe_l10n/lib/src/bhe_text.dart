@@ -1113,4 +1113,23 @@ const _englishText = <String, String>{
   '重新定位视频': 'Relink video',
   '有数值但信号弱': 'A value is available, but the signal is weak',
   '请检查视频后重试': 'Check the video and try again',
+  '反馈问题': 'Report a problem',
+  '遇到问题或想提建议，两步就行：': 'Found a problem or have an idea? Two steps:',
+  '复制诊断信息': 'Copy diagnostics',
+  '会带上版本、系统和最近的运行日志，用户名会自动隐藏，不包含视频内容。':
+      'Includes the version, system and recent logs. Your user name is hidden and no video content is included.',
+  '发给我': 'Send it to me',
+  '贴到交流群、小红书私信或邮件都可以，顺便说一下你做了什么操作。':
+      'Paste it into the community group, a direct message or an email, and tell me what you were doing.',
+  '错误详情': 'Error details',
+  '已复制，可以粘贴发给我了': 'Copied. Paste it to me',
+  '进交流群（官网扫码）': 'Community (website)',
+  '发邮件': 'Email',
+  'GitHub 提交': 'GitHub issue',
+  '反馈这个问题': 'Report this problem',
+  '遇到问题？点这里反馈': 'Something wrong? Report it here',
+  '刚才出错了？点这里反馈': 'Just hit an error? Report it here',
+  '点「反馈」可以一键复制诊断信息（版本、系统和运行日志），发到交流群或邮件给我，排查会快很多。':
+      'Click Feedback to copy diagnostics (version, system and logs) in one step, then send them to me. It makes problems much faster to fix.',
+  '现在反馈': 'Report now',
 };

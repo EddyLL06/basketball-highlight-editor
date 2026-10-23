@@ -10,6 +10,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:bhe_l10n/bhe_l10n.dart';
 
+import '../feedback/feedback_dialog.dart';
 import '../../components/cs_button.dart';
 import '../../components/cs_empty_state.dart';
 import '../../components/cs_progress_track.dart';
@@ -1253,6 +1254,13 @@ class _AnalysisBar extends StatelessWidget {
               label: l10n?.cancel ?? '取消',
               icon: Icons.stop_circle_outlined,
               onPressed: onCancel!,
+            ),
+          if (failed)
+            _SmallAction(
+              label: l10n?.text('反馈问题') ?? '反馈问题',
+              icon: Icons.feedback_outlined,
+              onPressed: () =>
+                  showFeedbackDialog(context, error: errorMessage),
             ),
           if (onRetry != null && !attached)
             _SmallAction(
