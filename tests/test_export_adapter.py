@@ -1,5 +1,6 @@
 import io
 from pathlib import Path
+import shutil
 import subprocess
 
 import pytest
@@ -270,7 +271,7 @@ def _ffmpeg_or_skip():
 
     ffmpeg = resolve_media_tool("ffmpeg")
     ffprobe = resolve_media_tool("ffprobe")
-    if not ffmpeg or not ffprobe:
+    if not shutil.which(ffmpeg) or not shutil.which(ffprobe):
         pytest.skip("需要 ffmpeg/ffprobe")
     return ffmpeg, ffprobe
 
