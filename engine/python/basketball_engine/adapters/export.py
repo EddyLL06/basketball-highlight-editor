@@ -31,9 +31,10 @@ class MediaCommandError(subprocess.CalledProcessError):
         self.stderr_tail = stderr_tail
 
     def __str__(self) -> str:
-        message = super().__str__()
+        # 界面只显示一行，原因放最前面；完整命令太长，会把原因挤掉。
         tail = (self.stderr_tail or "").strip()
-        return f"{message}\n{tail}" if tail else message
+        message = f"ffmpeg 退出码 {self.returncode}"
+        return f"{message}: {tail}" if tail else message
 
 
 def _collect_stderr(stream, tail: deque[str]) -> None:

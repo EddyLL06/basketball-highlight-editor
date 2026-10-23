@@ -217,7 +217,8 @@ def test_run_atomic_ffmpeg_keeps_stderr_tail_in_error(tmp_path: Path, monkeypatc
     with pytest.raises(subprocess.CalledProcessError) as error:
         run_atomic_ffmpeg(["ffmpeg", "-y", str(output)], output)
     message = str(error.value)
-    assert "exit status 234" in message
+    assert message.startswith("ffmpeg 退出码 234: ")
+    assert str(output.parent) not in message
     assert "no decoder found for: none" in message
     assert "Invalid argument" in message
     assert not output.exists()
@@ -266,3 +267,54 @@ def test_run_atomic_ffmpeg_stops_running_process_when_cancelled(tmp_path: Path, 
     assert processes[0].returncode == -15
     assert callbacks == [processes[0], None]
     assert not output.exists()
+
+
+def _ffmpeg_or_skip():
+    from engine.python.basketball_engine.media_tools import resolve_media_tool
+
+    ffmpeg = resolve_media_tool("ffmpeg")
+    ffprobe = resolve_media_tool("ffprobe")
+    if not ffmpeg or not ffprobe:
+        pytest.skip("需要 ffmpeg/ffprobe")
+    return ffmpeg, ffprobe
+
+
+def test_export_keeps_only_the_first_audio_track(tmp_path: Path):
+    # iPhone 视频除了 AAC 还带一条 FFmpeg 解不了的空间音频轨，全部映射会让导出失败。
+    ffmpeg, ffprobe = _ffmpeg_or_skip()
+    source = tmp_path / "two_audio.mp4"
+    subprocess.run(
+        [
+            ffmpeg, "-v", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30",
+            "-f", "lavfi", "-i", "sine=frequency=440",
+            "-f", "lavfi", "-i", "sine=frequency=880",
+            "-map", "0", "-map", "1", "-map", "2", "-t", "2",
+            "-c:v", "mpeg4", "-c:a", "aac", str(source),
+        ],
+        check=True,
+    )
+    result = export.export_goal_clips(
+        source,
+        [{"event_time_ms": 1000, "review_start_ms": 0, "review_end_ms": 1500}],
+        tmp_path / "out",
+        "separate",
+    )
+    streams = subprocess.run(
+        [ffprobe, "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", result["files"][0]],
+        check=True, capture_output=True, text=True,
+    ).stdout.split()
+    assert streams.count("audio") == 1
+    assert streams.count("video") == 1
+
+
+def test_run_atomic_ffmpeg_failure_message_includes_ffmpeg_reason(tmp_path: Path):
+    ffmpeg, _ = _ffmpeg_or_skip()
+    output = tmp_path / "clip.mp4"
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        run_atomic_ffmpeg(
+            [ffmpeg, "-y", "-v", "error", "-i", str(tmp_path / "missing.mp4"), str(output)],
+            output,
+        )
+    assert "missing.mp4" in str(error.value)
+    assert "ffmpeg 退出码" in str(error.value)
