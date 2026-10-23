@@ -3,6 +3,7 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+from .diagnostics import environment_summary, log_diagnostic
 from .protocol import ProtocolError, error_response, parse_request, response
 from .service import EngineService
 
@@ -13,6 +14,11 @@ def main() -> int:
     # Preview extraction can spend 20 seconds in FFmpeg. Keep it off the
     # interactive command loop; mutations still run serially in request order.
     previews = ThreadPoolExecutor(max_workers=1, thread_name_prefix="preview")
+    threading.Thread(
+        target=lambda: log_diagnostic(environment_summary()),
+        name="environment-log",
+        daemon=True,
+    ).start()
 
     def write_output(output):
         line = json.dumps(output, ensure_ascii=False, separators=(",", ":")) + "\n"

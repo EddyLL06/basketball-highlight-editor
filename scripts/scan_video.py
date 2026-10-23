@@ -120,6 +120,7 @@ def scan_video(args):
                 return
 
     device = select_device(args.device)
+    print(f"device={device}", flush=True)
     import cv2
 
     model = load_yolo_model(model_path)

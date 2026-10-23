@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +34,7 @@ from .adapters.export import export_goal_clips
 from .protocol import ProtocolError
 from .storage import ProjectStore, new_id
 from .media_tools import resolve_media_tool
+from .diagnostics import log_diagnostic, video_summary
 from basketball_highlight.rim_check import RIM_CHECK_VERSION
 from basketball_highlight.tracking import link_ball_detections
 
@@ -467,7 +469,7 @@ class EngineService:
             self._MIN_PROCESSING_SPACE_BYTES,
             round(path.stat().st_size * 0.20),
         )
-        return {
+        info = {
             "source_path": str(path),
             "source_exists": True,
             "source_status": "linked",
@@ -485,6 +487,11 @@ class EngineService:
             "estimated_processing_space_bytes": estimated_processing_space,
             "disk_space_sufficient": disk.free >= estimated_processing_space,
         }
+        log_diagnostic(
+            f"inspect {path.name} {video_summary(info)} "
+            f"free_disk={disk.free / 1024 ** 3:.1f}GB"
+        )
+        return info
 
     def _ensure_disk_space(self, workspace: Path, source: Path) -> None:
         if not source.is_file():
@@ -1305,6 +1312,18 @@ class EngineService:
                 ),
             }
 
+        label = f"analysis job={job_id}"
+        last_stage = {"name": "validate_input"}
+
+        def elapsed() -> str:
+            return f"{time.perf_counter() - analysis_started:.1f}s"
+
+        def log_end(state: str, code: str, message: str) -> None:
+            log_diagnostic(
+                f"{label} {state} stage={last_stage['name']} elapsed={elapsed()} "
+                f"code={code}: {message}"
+            )
+
         try:
             video_id = payload["video_id"]
             video = store.video(video_id)
@@ -1382,6 +1401,12 @@ class EngineService:
             analysis_key = hashlib.sha256(
                 json.dumps(analysis_parameters, ensure_ascii=False, sort_keys=True).encode("utf-8")
             ).hexdigest()[:16]
+            log_diagnostic(
+                f"{label} start mode={mode} video={video_id} {video_summary(video)} "
+                f"range={analysis_parameters['analysis_start_ms']}-{analysis_parameters['analysis_end_ms']}ms "
+                f"roi_source={calibration.get('source', 'manual')} net_roi={net_roi is not None} "
+                f"proxy={proxy_width}x{proxy_height}@{proxy_fps:g}fps"
+            )
             artifact_root = store.root / "artifacts"
             run_root = artifact_root / "detections" / f"{video_id}_{analysis_key}"
             proxy_video = artifact_root / "proxies" / f"{video_id}_{analysis_key}.mp4"
@@ -1428,6 +1453,9 @@ class EngineService:
             }
 
             def on_stage(stage: str, progress: float) -> None:
+                if stage != last_stage["name"]:
+                    last_stage["name"] = stage
+                    log_diagnostic(f"{label} stage={stage} progress={progress:.2f} elapsed={elapsed()}")
                 store.update_job(
                     job_id,
                     state="running",
@@ -1435,6 +1463,10 @@ class EngineService:
                     progress=progress,
                     checkpoint=checkpoint,
                 )
+
+            def on_output(stage: str, line: str) -> None:
+                if line.startswith("device="):
+                    log_diagnostic(f"{label} {stage} {line}")
 
             store.update_job(
                 job_id,
@@ -1450,6 +1482,7 @@ class EngineService:
                 on_stage,
                 cancel_check=cancel_event.is_set if cancel_event else None,
                 process_callback=lambda process: self._set_job_process(job_id, process),
+                output_callback=on_output,
                 manifest_path=manifest_path,
                 stage_outputs=(
                     [proxy_video, coarse_detections, coarse_candidates]
@@ -1627,7 +1660,23 @@ class EngineService:
                 ),
             }
             store.update_job(job_id, state="completed", stage="persist_candidates", progress=1.0, checkpoint=checkpoint)
+            proxy_info: Dict[str, Any] = {}
+            try:
+                proxy_info = json.loads(Path(f"{proxy_video}.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+            timings = " ".join(
+                f"{stage}={value / 1000:.1f}s" for stage, value in stage_timings_ms.items()
+            )
+            log_diagnostic(
+                f"{label} completed elapsed={elapsed()} candidates={len(rows)} "
+                f"detections={json.dumps(detection_counts, ensure_ascii=False)} "
+                f"cache_hits={pipeline.get('cache_hits', 0)} "
+                f"proxy_codec={proxy_info.get('codec')} hwaccel={proxy_info.get('hwaccel')} "
+                f"timings: {timings}"
+            )
         except PipelineCancelled:
+            log_end("cancelled", "JOB_CANCELLED", "任务已取消")
             store.update_job(
                 job_id,
                 state="cancelled",
@@ -1637,6 +1686,7 @@ class EngineService:
                 checkpoint=checkpoint_with_elapsed(),
             )
         except ProtocolError as exc:
+            log_end("failed", exc.code, exc.message)
             store.update_job(
                 job_id,
                 state="failed",
@@ -1646,6 +1696,7 @@ class EngineService:
                 checkpoint=checkpoint_with_elapsed(),
             )
         except Exception as exc:
+            log_end("failed", "ANALYSIS_FAILED", f"{exc}\n{traceback.format_exc(limit=-4)}")
             store.update_job(
                 job_id,
                 state="failed",
@@ -2288,10 +2339,25 @@ class EngineService:
         cancel_event = self._job_cancel_events.get(job_id)
         initial_job = store.get_job(job_id) or {}
         initial_checkpoint = self._decode_checkpoint(initial_job)
+        export_started = time.perf_counter()
+        label = f"export job={job_id}"
+        last_stage = {"name": "export_clips"}
+
+        def log_end(state: str, code: str, message: str) -> None:
+            log_diagnostic(
+                f"{label} {state} stage={last_stage['name']} "
+                f"elapsed={time.perf_counter() - export_started:.1f}s code={code}: {message}"
+            )
 
         def on_progress(stage: str, progress: float) -> None:
             if cancel_event and cancel_event.is_set():
                 raise PipelineCancelled("JOB_CANCELLED")
+            if stage != last_stage["name"]:
+                last_stage["name"] = stage
+                log_diagnostic(
+                    f"{label} stage={stage} progress={progress:.2f} "
+                    f"elapsed={time.perf_counter() - export_started:.1f}s"
+                )
             store.update_job(
                 job_id,
                 state="running",
@@ -2300,6 +2366,11 @@ class EngineService:
             )
 
         try:
+            snapshot = payload.get("candidate_snapshot") or []
+            log_diagnostic(
+                f"{label} start mode={payload.get('mode')} clips={len(snapshot)} "
+                f"sources={len({item.get('source_path') for item in snapshot if isinstance(item, dict)})}"
+            )
             store.update_job(job_id, state="running", stage="export_clips", progress=0.01)
             result = self._execute_export(
                 payload,
@@ -2320,7 +2391,16 @@ class EngineService:
                     "files": result.get("files", []),
                 },
             )
+            export = result.get("export") or {}
+            log_diagnostic(
+                f"{label} completed elapsed={time.perf_counter() - export_started:.1f}s "
+                f"files={len(result.get('files', []))} "
+                f"output={export.get('width')}x{export.get('height')} {export.get('video_codec')} "
+                f"duration={(export.get('duration_ms') or 0) / 1000:.1f}s "
+                f"size={(export.get('file_size_bytes') or 0) / 1024 / 1024:.0f}MB"
+            )
         except PipelineCancelled:
+            log_end("cancelled", "JOB_CANCELLED", "任务已取消")
             store.update_job(
                 job_id,
                 state="cancelled",
@@ -2329,6 +2409,7 @@ class EngineService:
                 error_message="任务已取消",
             )
         except ProtocolError as exc:
+            log_end("failed", exc.code, exc.message)
             store.update_job(
                 job_id,
                 state="failed",
@@ -2337,6 +2418,7 @@ class EngineService:
                 error_message=exc.message,
             )
         except Exception as exc:
+            log_end("failed", "EXPORT_FAILED", f"{exc}\n{traceback.format_exc(limit=-4)}")
             store.update_job(
                 job_id,
                 state="failed",

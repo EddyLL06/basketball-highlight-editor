@@ -11,6 +11,7 @@ from typing import Any, Dict
 from uuid import uuid4
 
 from .analysis import PipelineCancelled, terminate_process
+from ..diagnostics import log_diagnostic
 from ..media_tools import resolve_media_tool
 
 
@@ -76,9 +77,10 @@ def run_encoded_ffmpeg(command_builder, output_path: Path, codecs: list[str], **
         try:
             run_atomic_ffmpeg(command_builder(codec), output_path, **kwargs)
             return codec
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
             if index == len(codecs) - 1:
                 raise
+            log_diagnostic(f"encoder {codec} failed, trying {codecs[index + 1]}: {exc}")
 
 
 def concat_manifest_entry(path: Path) -> str:
