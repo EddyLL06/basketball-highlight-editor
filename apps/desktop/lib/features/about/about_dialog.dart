@@ -6,7 +6,9 @@ import 'package:bhe_l10n/bhe_l10n.dart';
 
 import '../../core/contact_actions.dart';
 import '../../core/engine_client.dart';
+import '../../core/diagnostics.dart';
 import '../feedback/feedback_dialog.dart';
+import '../update/update_dialog.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
 
@@ -88,6 +90,7 @@ class _CourtsideAboutDialog extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: Spacing.lg),
+              _InfoRow(label: context.bheText('版本'), value: 'v$appVersion'),
               _InfoRow(
                 label: l10n?.processingMethod ?? '处理方式',
                 value: l10n?.text('本地处理，原始视频不会自动上传') ??
@@ -103,8 +106,10 @@ class _CourtsideAboutDialog extends StatelessWidget {
               ),
               _InfoRow(label: context.bheText('运行日志'), value: logDirectory),
               const SizedBox(height: Spacing.lg),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: Spacing.sm,
+                runSpacing: Spacing.xs,
                 children: [
                   TextButton.icon(
                     onPressed: () async {
@@ -114,7 +119,15 @@ class _CourtsideAboutDialog extends StatelessWidget {
                     icon: const Icon(LucideIcons.folderOpen, size: 17),
                     label: Text(context.bheText('打开日志目录')),
                   ),
-                  const SizedBox(width: Spacing.sm),
+                  TextButton.icon(
+                    onPressed: () {
+                      final navigator = Navigator.of(context);
+                      navigator.pop();
+                      showUpdateDialog(navigator.context);
+                    },
+                    icon: const Icon(LucideIcons.circleArrowUp, size: 17),
+                    label: Text(context.bheText('检查更新')),
+                  ),
                   FilledButton.icon(
                     onPressed: () {
                       final navigator = Navigator.of(context);

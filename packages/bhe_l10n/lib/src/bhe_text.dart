@@ -71,6 +71,20 @@ extension BheBuildContextText on BuildContext {
 }
 
 String? _translateDynamic(String source) {
+  final newVersion = RegExp(r'^(发现新版本|新版本) v(.+)$').firstMatch(source);
+  if (newVersion != null) {
+    return '${newVersion.group(1) == '发现新版本' ? 'New version available' : 'New version'}: v${newVersion.group(2)}';
+  }
+  final latest = RegExp(r'^已经是最新版本（v(.+)）$').firstMatch(source);
+  if (latest != null) return 'You are on the latest version (v${latest.group(1)})';
+  final downloaded = RegExp(r'^已下载 (\d+) / (\d+) MB$').firstMatch(source);
+  if (downloaded != null) {
+    return 'Downloaded ${downloaded.group(1)} / ${downloaded.group(2)} MB';
+  }
+  final httpFailure = RegExp(r'^(获取更新信息失败|下载失败)（HTTP (\d+)）$').firstMatch(source);
+  if (httpFailure != null) {
+    return '${httpFailure.group(1) == '下载失败' ? 'Download failed' : 'Could not get update information'} (HTTP ${httpFailure.group(2)})';
+  }
   final segment = RegExp(r'^第 (\d+) 段$').firstMatch(source);
   if (segment != null) return 'Part ${segment.group(1)}';
   final partCount = RegExp(r'^共 (\d+) 段$').firstMatch(source);
@@ -1132,4 +1146,29 @@ const _englishText = <String, String>{
   '点「反馈」可以一键复制诊断信息（版本、系统和运行日志），发到交流群或邮件给我，排查会快很多。':
       'Click Feedback to copy diagnostics (version, system and logs) in one step, then send them to me. It makes problems much faster to fix.',
   '现在反馈': 'Report now',
+  '版本': 'Version',
+  '检查更新': 'Check for updates',
+  '正在检查更新…': 'Checking for updates…',
+  '重新检查': 'Check again',
+  '当前版本': 'Current version',
+  '跳过这个版本': 'Skip this version',
+  '稍后': 'Later',
+  '下载更新': 'Download update',
+  '后台下载': 'Download in background',
+  '继续下载': 'Resume download',
+  '打开安装包': 'Open installer',
+  '打开所在文件夹': 'Show in folder',
+  '下载完成。退出 BHE，把压缩包解压后替换原来的 BHE 文件夹，再重新打开。项目保存在别的位置，不会丢。':
+      'Download complete. Quit BHE, unzip the package, replace the old BHE folder and open it again. Your projects are stored elsewhere and will not be lost.',
+  '下载完成。退出 BHE，打开安装包把 BHE 拖进「应用程序」替换旧版本，再重新打开。项目保存在别的位置，不会丢。':
+      'Download complete. Quit BHE, open the installer, drag BHE into Applications to replace the old version and open it again. Your projects are stored elsewhere and will not be lost.',
+  '现在有分析或导出在进行，等它完成再退出替换。':
+      'An analysis or export is running. Wait for it to finish before quitting to replace the app.',
+  '点「查看」了解更新内容': 'Click View to see what is new',
+  '查看': 'View',
+  '连不上更新服务器，请检查网络': 'Cannot reach the update server. Check your network.',
+  '更新信息签名校验失败': 'The update information failed its signature check.',
+  '更新信息格式无效': 'The update information is invalid.',
+  '下载中断，请检查网络后继续': 'The download was interrupted. Check your network and resume.',
+  '安装包校验失败，请重新下载': 'The package failed its checksum. Download it again.',
 };
