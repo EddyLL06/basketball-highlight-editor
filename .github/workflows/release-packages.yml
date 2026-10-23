@@ -456,6 +456,10 @@ jobs:
             --build-number="${GITHUB_RUN_NUMBER}" \
             --dart-define=BHE_VERSION="$version"
           apk="build/app/outputs/flutter-apk/app-release.apk"
+          # 用固定证书显式签一次，避免依赖 Gradle 在 CI 里选中的调试密钥。
+          apksigner_bin="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          "$apksigner_bin" sign --ks "$HOME/.android/debug.keystore" --ks-key-alias androiddebugkey \
+            --ks-pass pass:android --key-pass pass:android "$apk"
           for library in libbhe_runtime.so libbhe_runtime_jni.so libonnxruntime.so libQnnHtp.so libQnnHtpV81Skel.so; do
             unzip -p "$apk" "lib/arm64-v8a/$library" > "$RUNNER_TEMP/$library"
             test -s "$RUNNER_TEMP/$library"
@@ -468,8 +472,6 @@ jobs:
           # 每个版本必须用同一个证书签名，用户才能覆盖安装升级。
           apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
           certs="$("$apksigner" verify --print-certs "$apk")"
-          echo "keystore: $(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android 2>/dev/null | grep 'SHA256:' || true)"
-          echo "$certs" | grep -i 'digest' || true
           grep -q 'SHA-256 digest: 14f6d1117b858058f730afd96b880dff0fd8ecff2ebc10e387a5d89c10c0084e' <<< "$certs"
           mkdir -p "$GITHUB_WORKSPACE/dist"
           cp "$apk" \
