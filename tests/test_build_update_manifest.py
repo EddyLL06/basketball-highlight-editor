@@ -66,3 +66,25 @@ def test_manifest_requires_release_notes_for_the_version(tmp_path: Path):
     zh, en = _readmes(tmp_path)
     with pytest.raises(SystemExit, match="v0.1.12"):
         manifest_script.build_manifest("v0.1.12", assets, "https://oss.example", zh, en)
+
+
+def test_android_package_uses_the_custom_domain(tmp_path: Path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "BHE-android-arm64-v8a-v0.1.11-debug-signed.apk").write_bytes(b"apk")
+    (assets / "BHE-windows-x64-v0.1.11.zip").write_bytes(b"zip")
+    zh, en = _readmes(tmp_path)
+
+    manifest = manifest_script.build_manifest(
+        "v0.1.11",
+        assets,
+        "https://oss.example/releases",
+        zh,
+        en,
+        android_base_url="https://custom.example/releases",
+    )
+
+    assert manifest["packages"]["android-arm64-v8a"]["url"] == (
+        "https://custom.example/releases/BHE-android-arm64-v8a-v0.1.11-debug-signed.apk"
+    )
+    assert manifest["packages"]["windows-x64"]["url"] == "https://oss.example/releases/BHE-windows-x64-v0.1.11.zip"

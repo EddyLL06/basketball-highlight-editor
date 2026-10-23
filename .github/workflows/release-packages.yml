@@ -698,6 +698,7 @@ jobs:
             --tag "$TAG_NAME" \
             --assets-dir "$RUNNER_TEMP/bhe-release-assets" \
             --base-url "https://shengshengniannian.oss-cn-beijing.aliyuncs.com/$OSS_PREFIX" \
+            --android-base-url "https://oss.shengshengniannian.com/$OSS_PREFIX" \
             --readme-zh source/README.md \
             --readme-en source/README.en.md \
             --out "$manifest_dir/latest.json"

@@ -37,7 +37,7 @@ def release_notes(readme: Path, version: str) -> str:
     raise SystemExit(f"{readme} 的「最近更新」表里没有 v{version} 这一行")
 
 
-def package_entries(assets_dir: Path, version: str, base_url: str) -> dict:
+def package_entries(assets_dir: Path, version: str, base_url: str, android_base_url: str) -> dict:
     packages = {}
     for platform, suffix in PLATFORMS.items():
         matches = sorted(
@@ -53,8 +53,9 @@ def package_entries(assets_dir: Path, version: str, base_url: str) -> dict:
         with path.open("rb") as handle:
             for chunk in iter(lambda: handle.read(1 << 20), b""):
                 digest.update(chunk)
+        url_base = android_base_url if platform.startswith("android") else base_url
         packages[platform] = {
-            "url": f"{base_url.rstrip('/')}/{path.name}",
+            "url": f"{url_base.rstrip('/')}/{path.name}",
             "sha256": digest.hexdigest(),
             "size": path.stat().st_size,
         }
@@ -63,7 +64,14 @@ def package_entries(assets_dir: Path, version: str, base_url: str) -> dict:
     return packages
 
 
-def build_manifest(tag: str, assets_dir: Path, base_url: str, readme_zh: Path, readme_en: Path) -> dict:
+def build_manifest(
+    tag: str,
+    assets_dir: Path,
+    base_url: str,
+    readme_zh: Path,
+    readme_en: Path,
+    android_base_url: str | None = None,
+) -> dict:
     version = tag.removeprefix("v")
     return {
         "version": version,
@@ -72,7 +80,7 @@ def build_manifest(tag: str, assets_dir: Path, base_url: str, readme_zh: Path, r
             "zh": release_notes(readme_zh, version),
             "en": release_notes(readme_en, version),
         },
-        "packages": package_entries(assets_dir, version, base_url),
+        "packages": package_entries(assets_dir, version, base_url, android_base_url or base_url),
     }
 
 
@@ -81,11 +89,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--assets-dir", type=Path, required=True)
     parser.add_argument("--base-url", required=True)
+    # 安卓 APK 只能通过自定义域名下载，OSS 默认域名会被拒绝。
+    parser.add_argument("--android-base-url")
     parser.add_argument("--readme-zh", type=Path, default=ROOT / "README.md")
     parser.add_argument("--readme-en", type=Path, default=ROOT / "README.en.md")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
-    manifest = build_manifest(args.tag, args.assets_dir, args.base_url, args.readme_zh, args.readme_en)
+    manifest = build_manifest(
+        args.tag, args.assets_dir, args.base_url, args.readme_zh, args.readme_en, args.android_base_url
+    )
     args.out.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"{args.out}: v{manifest['version']} {sorted(manifest['packages'])}")
     return 0
