@@ -52,8 +52,7 @@ def test_export_without_h264_encoders_falls_back_for_clips_and_merge(tmp_path, m
 
     monkeypatch.setattr(export, "run_atomic_ffmpeg", fake_ffmpeg)
     result = export.export_goal_clips(
-        tmp_path / "source.mp4",
-        [{"event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
+        [{"source_path": str(tmp_path / "source.mp4"), "event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
         tmp_path / "export", mode,
     )
     expected = ["libx264", "libopenh264", "mpeg4"]
@@ -93,10 +92,9 @@ def test_windows_tries_gpu_encoders_and_keeps_the_one_that_works(tmp_path, monke
 
     monkeypatch.setattr(export, "run_atomic_ffmpeg", fake_ffmpeg)
     export.export_goal_clips(
-        tmp_path / "source.mp4",
         [
-            {"event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000},
-            {"event_time_ms": 2500, "review_start_ms": 2000, "review_end_ms": 3000},
+            {"source_path": str(tmp_path / "source.mp4"), "event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000},
+            {"source_path": str(tmp_path / "source.mp4"), "event_time_ms": 2500, "review_start_ms": 2000, "review_end_ms": 3000},
         ],
         tmp_path / "export", mode,
     )
@@ -116,8 +114,7 @@ def test_export_does_not_retry_cancelled_encoding(tmp_path, monkeypatch):
     monkeypatch.setattr(export, "run_atomic_ffmpeg", cancel)
     with pytest.raises(PipelineCancelled):
         export.export_goal_clips(
-            tmp_path / "source.mp4",
-            [{"event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
+            [{"source_path": str(tmp_path / "source.mp4"), "event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
             tmp_path / "export", "separate",
         )
     assert len(attempts) == 1
@@ -134,8 +131,7 @@ def test_export_surfaces_error_when_all_encoders_fail(tmp_path, monkeypatch):
     monkeypatch.setattr(export, "run_atomic_ffmpeg", fail)
     with pytest.raises(subprocess.CalledProcessError):
         export.export_goal_clips(
-            tmp_path / "source.mp4",
-            [{"event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
+            [{"source_path": str(tmp_path / "source.mp4"), "event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
             tmp_path / "export", "separate",
         )
     assert attempts == ["libx264", "libopenh264", "mpeg4"]
@@ -295,8 +291,7 @@ def test_export_keeps_only_the_first_audio_track(tmp_path: Path):
         check=True,
     )
     result = export.export_goal_clips(
-        source,
-        [{"event_time_ms": 1000, "review_start_ms": 0, "review_end_ms": 1500}],
+        [{"source_path": str(source), "event_time_ms": 1000, "review_start_ms": 0, "review_end_ms": 1500}],
         tmp_path / "out",
         "separate",
     )
@@ -318,3 +313,38 @@ def test_run_atomic_ffmpeg_failure_message_includes_ffmpeg_reason(tmp_path: Path
         )
     assert "missing.mp4" in str(error.value)
     assert "ffmpeg 退出码" in str(error.value)
+
+
+def test_merge_across_sources_scales_to_the_first_clip_and_names_segments(tmp_path: Path):
+    ffmpeg, ffprobe = _ffmpeg_or_skip()
+    sources = []
+    for name, size in (("first.mp4", "320x240"), ("second.mp4", "640x360")):
+        source = tmp_path / name
+        subprocess.run(
+            [
+                ffmpeg, "-v", "error", "-y",
+                "-f", "lavfi", "-i", f"testsrc=size={size}:rate=30",
+                "-f", "lavfi", "-i", "sine=frequency=440",
+                "-t", "2", "-c:v", "mpeg4", "-c:a", "aac", str(source),
+            ],
+            check=True,
+        )
+        sources.append((source, *map(int, size.split("x"))))
+    candidates = [
+        {
+            "source_path": str(source), "width": width, "height": height, "segment": segment,
+            "event_time_ms": 1000, "review_start_ms": 0, "review_end_ms": 1500,
+        }
+        for segment, (source, width, height) in enumerate(sources, 1)
+    ]
+    result = export.export_goal_clips(candidates, tmp_path / "out", "merge")
+    assert [Path(path).name for path in result["clip_files"]] == [
+        "goal_001_s1_1.00s.mp4",
+        "goal_002_s2_1.00s.mp4",
+    ]
+    for path in result["clip_files"] + result["files"]:
+        size = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", path],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        assert size == "320,240"

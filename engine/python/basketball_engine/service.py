@@ -106,6 +106,8 @@ class EngineService:
             "inspect_video": self.inspect_video,
             "link_video": self.link_video,
             "relink_video": self.relink_video,
+            "reorder_videos": self.reorder_videos,
+            "set_analysis_queue": self.set_analysis_queue,
             "extract_preview": self.extract_preview,
             "suggest_roi": self.suggest_roi,
             "save_roi": self.save_roi,
@@ -399,7 +401,7 @@ class EngineService:
             "-v",
             "error",
             "-show_entries",
-            "format=duration,size:stream=index,codec_type,codec_name,width,height,r_frame_rate",
+            "format=duration,size:format_tags=creation_time:stream=index,codec_type,codec_name,width,height,r_frame_rate",
             "-of",
             "json",
             str(path),
@@ -478,6 +480,7 @@ class EngineService:
             "fps": fps,
             "video_codec": video_stream.get("codec_name"),
             "audio_codec": audio_stream.get("codec_name") if audio_stream else None,
+            "recorded_at": (format_data.get("tags") or {}).get("creation_time"),
             "available_disk_bytes": disk.free,
             "estimated_processing_space_bytes": estimated_processing_space,
             "disk_space_sufficient": disk.free >= estimated_processing_space,
@@ -698,6 +701,26 @@ class EngineService:
         metadata = self.inspect_video(payload)
         store = self._require_store(payload)
         return {"video": store.link_video(metadata)}
+
+    def reorder_videos(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        video_ids = payload.get("video_ids")
+        if not isinstance(video_ids, list) or not all(isinstance(item, str) for item in video_ids):
+            raise ProtocolError("INVALID_REQUEST", "video_ids 必须是字符串列表")
+        try:
+            videos = self._require_store(payload).reorder_videos(video_ids)
+        except ValueError as exc:
+            raise ProtocolError("INVALID_REQUEST", "video_ids 必须包含项目里的全部视频") from exc
+        return {"videos": videos}
+
+    def set_analysis_queue(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        video_ids = payload.get("video_ids")
+        if not isinstance(video_ids, list) or not all(isinstance(item, str) for item in video_ids):
+            raise ProtocolError("INVALID_REQUEST", "video_ids 必须是字符串列表")
+        try:
+            queue = self._require_store(payload).set_analysis_queue(video_ids)
+        except (LookupError, ValueError) as exc:
+            raise ProtocolError("INVALID_REQUEST", "排队的视频必须属于当前项目且不重复") from exc
+        return {"analysis_queue": queue}
 
     def relink_video(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         raw_path = payload.get("video_path")
@@ -1106,12 +1129,12 @@ class EngineService:
         # Check what start_export would reject before ending the old job, so a
         # failed retry leaves the interrupted job retryable.
         video_id = retry_payload["video_id"]
-        video = store.video(video_id) if isinstance(video_id, str) else None
-        if not store.project() or not video:
+        if not store.project() or (video_id is not None and not store.video(video_id)):
             raise ProtocolError("VIDEO_NOT_FOUND", "导出任务缺少有效视频")
-        source = self._validated_source(video)
-        self._ensure_disk_space(store.root, source)
-        self._export_candidate_snapshot(store, video_id, retry_payload)
+        self._export_videos(
+            store,
+            self._export_candidate_snapshot(store, video_id, retry_payload)[2],
+        )
         if job.get("state") in {"running", "queued"}:
             store.update_job(
                 job_id,
@@ -1874,15 +1897,18 @@ class EngineService:
         video_id = payload.get("video_id")
         candidates = store.list_candidates(video_id)
         video = store.video(video_id) if isinstance(video_id, str) else None
-        if video:
-            for candidate in candidates:
-                preview_path = self._preview_path(
-                    store,
-                    video,
-                    int(candidate.get("event_time_ms") or 0),
-                )
-                if preview_path.is_file() and preview_path.stat().st_size > 0:
-                    candidate["preview_path"] = str(preview_path)
+        videos = {item["id"]: item for item in store.list_videos()}
+        for candidate in candidates:
+            candidate_video = videos.get(candidate["video_id"])
+            if not candidate_video:
+                continue
+            preview_path = self._preview_path(
+                store,
+                candidate_video,
+                int(candidate.get("event_time_ms") or 0),
+            )
+            if preview_path.is_file() and preview_path.stat().st_size > 0:
+                candidate["preview_path"] = str(preview_path)
         review_video_path = (
             str(Path(video["source_path"]).resolve())
             if context.get("project") and video
@@ -2034,21 +2060,24 @@ class EngineService:
         store = self._require_store(payload)
         project = store.project()
         video_id = payload.get("video_id")
-        video = store.video(video_id) if isinstance(video_id, str) else None
-        if not project or not video:
+        if not project:
             raise ProtocolError("VIDEO_NOT_FOUND", "导出任务缺少有效视频")
-        source = self._validated_source(video)
-        self._ensure_disk_space(store.root, source)
         raw_snapshot = payload.get("candidate_snapshot")
         if not isinstance(raw_snapshot, list):
             raise ProtocolError("EXPORT_SNAPSHOT_MISSING", "导出任务缺少候选快照")
         candidates = [
-            dict(candidate)
+            {"video_id": video_id, **candidate}
             for candidate in raw_snapshot
             if isinstance(candidate, dict)
         ]
         if not candidates:
             raise ProtocolError("NO_EXPORT_CANDIDATES", "没有可导出的候选片段")
+        videos = self._export_videos(store, candidates)
+        for candidate in candidates:
+            video = videos[candidate["video_id"]]
+            candidate["source_path"] = str(video["source"])
+            candidate["width"] = video.get("width")
+            candidate["height"] = video.get("height")
         mode = payload.get("mode", "separate")
         raw_output = payload.get("output_dir")
         output_dir = Path(raw_output).expanduser() if isinstance(raw_output, str) and raw_output.strip() else (
@@ -2064,15 +2093,15 @@ class EngineService:
             if not merged_output.is_absolute():
                 merged_output = store.root / merged_output
             merged_output = merged_output.resolve()
-        if merged_output is not None and merged_output == source.resolve():
-            raise ProtocolError(
-                "EXPORT_SOURCE_CONFLICT",
-                "导出目标不能覆盖原始视频",
-                {"source_path": str(source.resolve())},
-            )
+        for video in videos.values():
+            if merged_output is not None and merged_output == video["source"].resolve():
+                raise ProtocolError(
+                    "EXPORT_SOURCE_CONFLICT",
+                    "导出目标不能覆盖原始视频",
+                    {"source_path": str(video["source"].resolve())},
+                )
         try:
             result = export_goal_clips(
-                source,
                 candidates,
                 output_dir,
                 mode,
@@ -2091,7 +2120,8 @@ class EngineService:
                 Path(path).unlink(missing_ok=True)
             raise PipelineCancelled("JOB_CANCELLED")
         try:
-            self._validated_source(video)
+            for video in videos.values():
+                self._validated_source(video)
         except ProtocolError:
             for path in {
                 *result.get("files", []),
@@ -2126,6 +2156,21 @@ class EngineService:
         })
         return {"export": export, "files": result["files"]}
 
+    def _export_videos(
+        self,
+        store: ProjectStore,
+        candidates: list[Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        videos: Dict[str, Dict[str, Any]] = {}
+        for video_id in dict.fromkeys(candidate.get("video_id") for candidate in candidates):
+            video = store.video(video_id) if isinstance(video_id, str) else None
+            if not video:
+                raise ProtocolError("VIDEO_NOT_FOUND", "导出任务缺少有效视频")
+            source = self._validated_source(video)
+            self._ensure_disk_space(store.root, source)
+            videos[video_id] = {**video, "source": source}
+        return videos
+
     @staticmethod
     def _export_candidate_snapshot(
         store: ProjectStore,
@@ -2140,9 +2185,13 @@ class EngineService:
             raise ProtocolError("INVALID_REQUEST", "player_ids 必须是字符串列表")
         include_unassigned = payload.get("include_unassigned", True) is True
         selected_players = {item for item in requested_player_ids or []}
+        video_ids = [video["id"] for video in store.list_videos()]
+        segments = {item: index for index, item in enumerate(video_ids, 1)} if len(video_ids) > 1 else {}
         candidate_snapshot = [
             {
                 "id": candidate["id"],
+                "video_id": candidate["video_id"],
+                **({"segment": segments[candidate["video_id"]]} if segments else {}),
                 "event_time_ms": int(candidate["event_time_ms"]),
                 "review_start_ms": int(candidate["review_start_ms"]),
                 "review_end_ms": int(candidate["review_end_ms"]),
@@ -2164,11 +2213,8 @@ class EngineService:
         store = self._require_store(payload)
         project = store.project()
         video_id = payload.get("video_id")
-        video = store.video(video_id) if isinstance(video_id, str) else None
-        if not project or not video:
+        if not project or (video_id is not None and not (isinstance(video_id, str) and store.video(video_id))):
             raise ProtocolError("VIDEO_NOT_FOUND", "导出任务缺少有效视频")
-        source = self._validated_source(video)
-        self._ensure_disk_space(store.root, source)
         with self._job_lock:
             self._job_threads = {
                 job_id: thread
@@ -2187,6 +2233,7 @@ class EngineService:
             requested_player_ids, include_unassigned, candidate_snapshot = (
                 self._export_candidate_snapshot(store, video_id, payload)
             )
+            self._export_videos(store, candidate_snapshot)
             selected_players = set(requested_player_ids or [])
             checkpoint = {
                 "mode": payload.get("mode", "separate"),

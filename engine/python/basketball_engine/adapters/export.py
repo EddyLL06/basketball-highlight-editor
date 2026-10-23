@@ -98,7 +98,8 @@ def available_output_path(path: Path) -> Path:
 
 
 def clip_file_name(index: int, candidate: Dict[str, Any]) -> str:
-    name = f"goal_{index:03d}_{candidate['event_time_ms'] / 1000:.2f}s"
+    segment = f"_s{candidate['segment']}" if candidate.get("segment") else ""
+    name = f"goal_{index:03d}{segment}_{candidate['event_time_ms'] / 1000:.2f}s"
     player = re.sub(r'[\x00-\x1f<>:"/\\|?*]+', "_", str(candidate.get("player_name") or ""))
     player = player.strip(" ._")[:40]
     return f"{name}_{player}.mp4" if player else f"{name}.mp4"
@@ -110,6 +111,7 @@ def build_clip_command(
     end_ms: int,
     output_path: Path,
     video_codec: str | None = None,
+    frame_size: tuple[int, int] | None = None,
 ) -> list[str]:
     if start_ms < 0 or end_ms <= start_ms:
         raise ValueError("INVALID_CLIP_RANGE")
@@ -123,6 +125,14 @@ def build_clip_command(
         # Only the first audio track: iPhone spatial audio (APAC) and similar
         # tracks have no decoder here and would abort the whole export.
         "-map", "0:v:0?", "-map", "0:a:0?",
+        *(
+            [
+                "-vf",
+                f"scale={frame_size[0]}:{frame_size[1]}:force_original_aspect_ratio=decrease,"
+                f"pad={frame_size[0]}:{frame_size[1]}:(ow-iw)/2:(oh-ih)/2,setsar=1",
+            ]
+            if frame_size else []
+        ),
         *codec_options, "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart", str(output_path),
     ]
@@ -221,7 +231,6 @@ def run_atomic_ffmpeg(
 
 
 def export_goal_clips(
-    source_video: Path,
     candidates: list[Dict[str, Any]],
     output_dir: Path,
     mode: str,
@@ -237,16 +246,22 @@ def export_goal_clips(
     files: list[Path] = []
     created_files: list[Path] = []
     codecs = video_codecs()
+    # Clips from a source with another resolution are scaled to the first
+    # clip's frame so the merge can stream-copy one consistent format.
+    first = candidates[0] if candidates else {}
+    target_size = (first.get("width"), first.get("height"))
     try:
         for index, candidate in enumerate(candidates, 1):
+            candidate_size = (candidate.get("width"), candidate.get("height"))
             path = available_output_path(output_dir / clip_file_name(index, candidate))
             codec = run_encoded_ffmpeg(
                 lambda codec: build_clip_command(
-                    source_video,
+                    Path(candidate["source_path"]),
                     int(candidate["review_start_ms"]),
                     int(candidate["review_end_ms"]),
                     path,
                     codec,
+                    target_size if None not in target_size and candidate_size != target_size else None,
                 ),
                 path,
                 codecs,
