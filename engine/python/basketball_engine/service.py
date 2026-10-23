@@ -1607,6 +1607,10 @@ class EngineService:
                     device=device,
                 )
             detection_counts = self._detection_counts(coarse_detections)
+            inference_device = self._inference_device(
+                coarse_detections,
+                refined_output,
+            )
             rows = [
                 candidate_to_row(
                     match,
@@ -1663,6 +1667,7 @@ class EngineService:
                 **checkpoint,
                 "candidate_count": len(rows),
                 "detection_counts": detection_counts,
+                "inference_device": inference_device,
                 "preview_counts": preview_counts,
                 "logs": pipeline["logs"],
                 "cache_hits": pipeline.get("cache_hits", 0),
@@ -1682,6 +1687,7 @@ class EngineService:
             )
             log_diagnostic(
                 f"{label} completed elapsed={elapsed()} candidates={len(rows)} "
+                f"inference={inference_device} "
                 f"detections={json.dumps(detection_counts, ensure_ascii=False)} "
                 f"cache_hits={pipeline.get('cache_hits', 0)} "
                 f"proxy_codec={proxy_info.get('codec')} hwaccel={proxy_info.get('hwaccel')} "
@@ -1826,6 +1832,30 @@ class EngineService:
                 name = str(detection.get("name", "unknown")).lower()
                 counts[name] = counts.get(name, 0) + 1
         return counts
+
+    @staticmethod
+    def _inference_device(*paths: Any) -> str | None:
+        """从阶段产物里读实际使用的推理后端。
+
+        推理脚本会把 ``--device auto`` 解析后的真实后端写进输出 JSON 的
+        ``device`` 字段（回落 CPU 时也是 ``cpu``）。引擎据此记录这次分析
+        到底用没用上 GPU，供 UI 展示；读不到就返回 None，不猜。
+        """
+        found: list[str] = []
+        for path in paths:
+            if not path:
+                continue
+            try:
+                data = json.loads(Path(path).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            device = str(data.get("device") or "").strip().lower()
+            if device:
+                found.append(device)
+        if not found:
+            return None
+        # 任何一段回落 CPU 都按 CPU 报，避免把部分加速说成全程加速。
+        return "cpu" if "cpu" in found else found[0]
 
     def cancel_job(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         store = self._require_store(payload)
