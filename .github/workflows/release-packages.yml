@@ -437,6 +437,15 @@ jobs:
         working-directory: apps/mobile
         run: flutter pub get
 
+      - name: Restore Android signing keystore
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.BHE_ANDROID_DEBUG_KEYSTORE }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE"
+          mkdir -p "$HOME/.android"
+          (umask 077; printf '%s' "$ANDROID_KEYSTORE" | base64 --decode > "$HOME/.android/debug.keystore")
+
       - name: Build Android package
         working-directory: apps/mobile
         run: |
@@ -456,6 +465,10 @@ jobs:
           readelf --dynamic --wide "$RUNNER_TEMP/libbhe_runtime_jni.so" \
             | grep -q 'Shared library: \[libbhe_runtime.so\]'
           unzip -l "$apk" assets/models/bball_model_qnn_v81.onnx | grep -q bball_model_qnn_v81.onnx
+          # 每个版本必须用同一个证书签名，用户才能覆盖安装升级。
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          "$apksigner" verify --print-certs "$apk" \
+            | grep -q 'SHA-256 digest: 14f6d1117b858058f730afd96b880dff0fd8ecff2ebc10e387a5d89c10c0084e'
           mkdir -p "$GITHUB_WORKSPACE/dist"
           cp "$apk" \
             "$GITHUB_WORKSPACE/dist/BHE-android-arm64-v8a-v${version}-debug-signed.apk"
