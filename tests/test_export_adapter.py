@@ -1,3 +1,4 @@
+import io
 from pathlib import Path
 import subprocess
 
@@ -12,6 +13,12 @@ def test_libx264_clip_command_contains_one_video_codec():
     command = build_clip_command(Path("source.mp4"), 0, 1000, Path("out.mp4"), "libx264")
     assert command.count("-c:v") == 1
     assert command[command.index("-c:v") + 1] == "libx264"
+
+
+def test_clip_command_maps_only_the_first_audio_stream():
+    command = build_clip_command(Path("source.mov"), 0, 1000, Path("out.mp4"), "libx264")
+    maps = [command[index + 1] for index, item in enumerate(command) if item == "-map"]
+    assert maps == ["0:v:0?", "0:a:0?"]
 
 
 def test_clip_command_rejects_invalid_range():
@@ -174,6 +181,37 @@ def test_run_atomic_ffmpeg_removes_partial_output_on_failure(tmp_path: Path, mon
     )
     with pytest.raises(subprocess.CalledProcessError):
         run_atomic_ffmpeg(["ffmpeg", "-y", str(output)], output)
+    assert not output.exists()
+    assert not list(tmp_path.glob("*.part*"))
+
+
+def test_run_atomic_ffmpeg_keeps_stderr_tail_in_error(tmp_path: Path, monkeypatch):
+    output = tmp_path / "clip.mp4"
+    stderr_text = (
+        "[aist#0:2/none @ 0x1] Decoding requested, but no decoder found for: none\n"
+        "Error opening output files: Invalid argument\n"
+    )
+
+    class FakeProcess:
+        returncode = 234
+
+        def __init__(self, command, **_kwargs):
+            Path(command[-1]).write_bytes(b"partial")
+            self.stderr = io.StringIO(stderr_text)
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(
+        "engine.python.basketball_engine.adapters.export.subprocess.Popen",
+        FakeProcess,
+    )
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        run_atomic_ffmpeg(["ffmpeg", "-y", str(output)], output)
+    message = str(error.value)
+    assert "exit status 234" in message
+    assert "no decoder found for: none" in message
+    assert "Invalid argument" in message
     assert not output.exists()
     assert not list(tmp_path.glob("*.part*"))
 

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import platform
 import subprocess
+import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict
 from uuid import uuid4
@@ -14,6 +16,33 @@ from ..media_tools import resolve_media_tool
 # NVIDIA, Intel, AMD, then the Windows Media Foundation encoder, which works
 # on any GPU and falls back to Microsoft's software encoder.
 WINDOWS_HARDWARE_CODECS = ("h264_nvenc", "h264_qsv", "h264_amf", "h264_mf")
+
+# FFmpeg only prints the useful part of a failure (missing decoder, encoder
+# init error) in the last few lines, so keep a short tail for the job record.
+STDERR_TAIL_LINES = 40
+
+
+class MediaCommandError(subprocess.CalledProcessError):
+    """FFmpeg failure that keeps the stderr tail in its message."""
+
+    def __init__(self, returncode: int, command: list[str], stderr_tail: str = ""):
+        super().__init__(returncode, command, output=None, stderr=stderr_tail or None)
+        self.stderr_tail = stderr_tail
+
+    def __str__(self) -> str:
+        message = super().__str__()
+        tail = (self.stderr_tail or "").strip()
+        return f"{message}\n{tail}" if tail else message
+
+
+def _collect_stderr(stream, tail: deque[str]) -> None:
+    try:
+        for line in stream:
+            text = line.rstrip()
+            if text:
+                tail.append(text)
+    except (OSError, ValueError):
+        pass
 
 
 def video_codecs() -> list[str]:
@@ -82,7 +111,9 @@ def build_clip_command(
         resolve_media_tool("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
         "-ss", f"{start_ms / 1000:.3f}", "-i", str(source_video),
         "-t", f"{duration:.3f}",
-        "-map", "0:v:0?", "-map", "0:a?",
+        # Only the first audio track: iPhone spatial audio (APAC) and similar
+        # tracks have no decoder here and would abort the whole export.
+        "-map", "0:v:0?", "-map", "0:a:0?",
         *codec_options, "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart", str(output_path),
     ]
@@ -125,12 +156,29 @@ def run_atomic_ffmpeg(
     )
     atomic_command = [*command[:-1], str(temporary)]
     try:
-        popen_kwargs = {"stdin": subprocess.DEVNULL}
+        popen_kwargs = {
+            "stdin": subprocess.DEVNULL,
+            "stderr": subprocess.PIPE,
+            "text": True,
+            "errors": "replace",
+        }
         if platform.system() == "Windows":
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             popen_kwargs["start_new_session"] = True
         process = subprocess.Popen(atomic_command, **popen_kwargs)
+        # Drain stderr in a thread so a full pipe can never block FFmpeg.
+        stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
+        stderr_stream = getattr(process, "stderr", None)
+        reader = None
+        if stderr_stream is not None:
+            reader = threading.Thread(
+                target=_collect_stderr,
+                args=(stderr_stream, stderr_tail),
+                name="ffmpeg-stderr",
+                daemon=True,
+            )
+            reader.start()
         if process_callback:
             process_callback(process)
         try:
@@ -142,10 +190,18 @@ def run_atomic_ffmpeg(
             if cancel_check and cancel_check():
                 raise PipelineCancelled("JOB_CANCELLED")
             if process.returncode != 0:
-                raise subprocess.CalledProcessError(process.returncode, atomic_command)
+                if reader is not None:
+                    reader.join(timeout=2)
+                raise MediaCommandError(
+                    process.returncode,
+                    atomic_command,
+                    "\n".join(stderr_tail),
+                )
         finally:
             if process_callback:
                 process_callback(None)
+            if stderr_stream is not None:
+                stderr_stream.close()
         validate_media_file(temporary)
         temporary.replace(output_path)
     finally:
