@@ -1171,4 +1171,9 @@ const _englishText = <String, String>{
   '更新信息格式无效': 'The update information is invalid.',
   '下载中断，请检查网络后继续': 'The download was interrupted. Check your network and resume.',
   '安装包校验失败，请重新下载': 'The package failed its checksum. Download it again.',
+  '安装更新': 'Install update',
+  '现在有分析或导出在进行，等它完成再安装，安装时 BHE 会被关闭。':
+      'An analysis or export is running. Wait for it to finish; installing closes BHE.',
+  '下载完成。安装时 BHE 会被关闭，项目会保留。第一次安装需要允许 BHE「安装未知应用」。':
+      'Download complete. Installing closes BHE and keeps your projects. The first time, allow BHE to install unknown apps.',
 };
