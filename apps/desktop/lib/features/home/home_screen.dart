@@ -134,6 +134,8 @@ class HomeScreen extends ConsumerWidget {
     final source = state.video?['source_path']?.toString() ?? state.videoPath;
     final currentVideoName = source == null || source.isEmpty
         ? null
+        : state.multiVideo
+        ? '${source.split(RegExp(r'[/\\]')).last} · ${context.bheText('共 ${state.videos.length} 段')}'
         : source.split(RegExp(r'[/\\]')).last;
     final hasCurrent = state.video != null;
     final currentStatus = state.analysisRunning
@@ -161,7 +163,8 @@ class HomeScreen extends ConsumerWidget {
         .where(
           (item) =>
               state.video?['id'] != null &&
-              _map(item['video'])['id'] == state.video?['id'],
+              _map(item['video'])['id'] ==
+                  (state.videos.firstOrNull ?? state.video)?['id'],
         )
         .map((item) => item['cover_path']?.toString())
         .firstOrNull;
@@ -787,11 +790,19 @@ class _ProjectCard extends StatelessWidget {
         ? _int(statistics['goal_count'])
         : _int(statistics['included_count']);
     final candidates = _int(statistics['candidate_count']);
-    final duration = _int(video['duration_ms']);
+    final parts = (item['videos'] as List?)?.length ?? 1;
+    final duration = parts > 1
+        ? [
+            for (final part in item['videos'] as List) _int(_map(part)['duration_ms']),
+          ].fold<int>(0, (sum, value) => sum + value)
+        : _int(video['duration_ms']);
     final source = video['source_path']?.toString();
-    final videoName = (source == null || source.isEmpty)
+    final firstName = (source == null || source.isEmpty)
         ? null
         : source.split('/').last;
+    final videoName = firstName == null || parts < 2
+        ? firstName
+        : '$firstName · ${context.bheText('共 $parts 段')}';
 
     final missing = video['source_status']?.toString() == 'missing';
     final status = missing

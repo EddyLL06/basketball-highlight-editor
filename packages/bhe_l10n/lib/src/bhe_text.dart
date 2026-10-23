@@ -73,6 +73,8 @@ extension BheBuildContextText on BuildContext {
 String? _translateDynamic(String source) {
   final segment = RegExp(r'^第 (\d+) 段$').firstMatch(source);
   if (segment != null) return 'Part ${segment.group(1)}';
+  final partCount = RegExp(r'^共 (\d+) 段$').firstMatch(source);
+  if (partCount != null) return '${partCount.group(1)} parts';
   final segmentDone = RegExp(r'^第 (\d+) 段分析完成$').firstMatch(source);
   if (segmentDone != null) return 'Part ${segmentDone.group(1)} analysed';
   final segmentStart = RegExp(r'^正在启动第 (\d+) 段分析…$').firstMatch(source);
@@ -831,6 +833,8 @@ const _englishText = <String, String>{
   '暂停后，正在分析的这段会继续完成，之后不再开始新的一段。':
       'Pausing lets the current part finish and then stops before the next one.',
   '需要设置篮筐': 'Hoop not set',
+  '请确认自动识别的篮筐': 'Confirm detected hoop',
+  '确认篮筐': 'Confirm hoop',
   '沿用上一段的篮筐': 'Hoop from previous part',
   '自动识别篮筐': 'Hoop detected',
   '篮筐已设置': 'Hoop set',

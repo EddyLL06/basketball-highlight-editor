@@ -130,12 +130,41 @@ void main() {
       for (final entry in engine.savedRois.entries)
         engine.videoName(entry.key): (entry.value['calibration'] as Map)['source'],
     };
-    expect(saved, {'part2.mp4': 'reused', 'other.mp4': 'auto'});
+    expect(saved, {
+      'part2.mp4': 'reused',
+      'later.mp4': 'suggested',
+      'other.mp4': 'auto',
+    });
     final auto = engine.savedRois.entries
         .firstWhere((entry) => engine.videoName(entry.key) == 'other.mp4')
         .value;
     expect((auto['calibration'] as Map)['net_roi'], isA<Map>());
     expect(engine.suggested, ['later.mp4', 'other.mp4']);
+  });
+
+  test('confirming a part hands its hoop to the following continuous parts', () async {
+    engine.addVideo('v1', roi: true, recordedAt: '2026-10-17T10:00:00Z', durationMs: 300000);
+    engine.addVideo('v2', recordedAt: '2026-10-17T10:05:00Z', durationMs: 300000, source: 'suggested');
+    engine.addVideo('v3', recordedAt: '2026-10-17T10:10:01Z', durationMs: 300000);
+    engine.addVideo('v4', recordedAt: '2026-10-17T11:00:00Z', durationMs: 300000, source: 'suggested');
+    engine.addVideo('v5', recordedAt: '2026-10-17T11:05:00Z', durationMs: 300000);
+    await notifier().openProject(directory.path);
+    expect(
+      [for (final video in state().videos) needsHoopConfirmation(video)],
+      [false, true, true, true, true],
+    );
+
+    await notifier().propagateHoopToFollowingParts('v1');
+
+    expect(engine.savedRois.keys, ['v2', 'v3']);
+    expect((engine.savedRois['v3']!['calibration'] as Map)['reused_from'], 'v2');
+    expect(
+      [for (final video in state().videos) needsHoopConfirmation(video)],
+      [false, false, false, true, true],
+    );
+    await notifier().startAnalysisQueue(beforeSeconds: 6, afterSeconds: 3);
+    await settle(() => state().analysisQueue.isEmpty && !state().busy);
+    expect(engine.started, ['v1', 'v2', 'v3']);
   });
 
   test('recording time helpers', () {
@@ -201,6 +230,7 @@ class _GameEngine implements EngineTransport {
     bool roi = false,
     String? recordedAt,
     int durationMs = 300000,
+    String? source,
   }) {
     final path = _path('$id.mp4');
     File(path).writeAsStringSync('video');
@@ -214,7 +244,7 @@ class _GameEngine implements EngineTransport {
       'recorded_at': recordedAt,
       'analysis_start_ms': 0,
       'analysis_end_ms': durationMs,
-      'roi': roi ? _roi({'source': 'manual'}) : null,
+      'roi': roi || source != null ? _roi({'source': source ?? 'manual'}) : null,
       'analysis_job': null,
       'candidate_count': 0,
     });

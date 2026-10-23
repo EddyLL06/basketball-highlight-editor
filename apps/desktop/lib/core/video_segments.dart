@@ -26,6 +26,13 @@ bool continuesRecording(JsonMap previous, JsonMap next) {
       previous['height'] == next['height'];
 }
 
+/// 视频段的篮筐还没设置，或只是可信度不够的自动识别结果，需要用户确认。
+bool needsHoopConfirmation(JsonMap video) {
+  final roi = video['roi'];
+  if (roi is! Map) return true;
+  return (roi['calibration'] as Map?)?['source'] == 'suggested';
+}
+
 /// 自动识别结果足够稳定时直接采用，否则让用户确认。
 bool reliableRoiSuggestion(JsonMap calibration) {
   final confidence = (calibration['confidence'] as num?)?.toDouble() ?? 0;

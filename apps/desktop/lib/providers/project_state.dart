@@ -1316,9 +1316,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
     }
     final roi = (suggestion['roi'] as Map?)?.cast<String, dynamic>();
     final calibration = (suggestion['calibration'] as Map?)?.cast<String, dynamic>();
-    if (roi == null || calibration == null || !reliableRoiSuggestion(calibration)) {
-      return;
-    }
+    if (roi == null || calibration == null) return;
     final width = (video['width'] as num?)?.toDouble() ?? 0;
     final height = (video['height'] as num?)?.toDouble() ?? 0;
     final hoop = calibration['hoop_bbox'];
@@ -1332,9 +1330,10 @@ class ProjectNotifier extends Notifier<ProjectState> {
       y1: roi['y1'] as num,
       x2: roi['x2'] as num,
       y2: roi['y2'] as num,
+      // 可信度不够的识别结果也先存下，打开确认时框已画好，但不参与排队。
       calibration: {
         ...calibration,
-        'source': 'auto',
+        'source': reliableRoiSuggestion(calibration) ? 'auto' : 'suggested',
         if (net != null)
           'net_roi': {
             'x1': net.left * width,
@@ -1344,6 +1343,40 @@ class ProjectNotifier extends Notifier<ProjectState> {
           },
       },
     );
+  }
+
+  /// 确认某段的篮筐后，后面连续录制、还没确认过的段沿用这一段的篮筐。
+  Future<void> propagateHoopToFollowingParts(String videoId) async {
+    await refreshVideos();
+    final videos = state.videos;
+    final index = videos.indexWhere((video) => video['id'] == videoId);
+    if (index < 0) return;
+    final session = ref.read(projectSessionProvider);
+    var previous = videos[index];
+    for (final next in videos.skip(index + 1)) {
+      final source = ((next['roi'] as Map?)?['calibration'] as Map?)?['source'];
+      final replaceable =
+          next['roi'] == null || source == 'suggested' || source == 'reused';
+      final roi = (previous['roi'] as Map?)?.cast<String, dynamic>();
+      if (roi == null || !replaceable || !continuesRecording(previous, next)) {
+        break;
+      }
+      final calibration = {
+        ...?(roi['calibration'] as Map?)?.cast<String, dynamic>(),
+        'source': 'reused',
+        'reused_from': previous['id'],
+      };
+      await session.saveRoi(
+        videoId: next['id'].toString(),
+        x1: roi['x1'] as num,
+        y1: roi['y1'] as num,
+        x2: roi['x2'] as num,
+        y2: roi['y2'] as num,
+        calibration: calibration,
+      );
+      previous = {...next, 'roi': {...roi, 'calibration': calibration}};
+    }
+    await refreshVideos();
   }
 
   Future<void> reorderVideos(List<String> videoIds) async {
@@ -1362,7 +1395,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
   }) async {
     final videoIds = [
       for (final video in state.videos)
-        if (video['roi'] != null &&
+        if (!needsHoopConfirmation(video) &&
             (video['analysis_job'] as Map?)?['state'] != 'completed')
           video['id'].toString(),
     ];

@@ -17,6 +17,7 @@ import '../../components/cs_card.dart';
 import '../../components/cs_empty_state.dart';
 import '../../core/engine_session.dart';
 import '../../core/roi_geometry.dart';
+import '../../core/video_segments.dart';
 import '../../providers/notice_provider.dart';
 import '../../providers/pending_import_provider.dart';
 import '../../providers/project_state.dart';
@@ -385,7 +386,8 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
         _backendDraft(step: _step),
       );
       if (!mounted || !applied) return;
-      await notifier.refreshVideos();
+      final videoId = ref.read(projectProvider).video?['id']?.toString();
+      if (videoId != null) await notifier.propagateHoopToFollowingParts(videoId);
       if (mounted) setState(() => _step = 0);
     } finally {
       if (mounted) setState(() => _applying = false);
@@ -704,7 +706,7 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
     final pendingSegments = state.videos
         .where(
           (video) =>
-              video['roi'] != null &&
+              !needsHoopConfirmation(video) &&
               (video['analysis_job'] as Map?)?['state'] != 'completed',
         )
         .length;
@@ -4414,9 +4416,11 @@ class _VideoSegmentRow extends StatelessWidget {
         .last;
     final roi = (video['roi'] as Map?)?.cast<String, dynamic>();
     final roiSource = (roi?['calibration'] as Map?)?['source']?.toString();
+    final needsConfirmation = needsHoopConfirmation(video);
     final (roiLabel, roiColor) = roi == null
         ? ('需要设置篮筐', c.warning)
         : switch (roiSource) {
+            'suggested' => ('请确认自动识别的篮筐', c.warning),
             'reused' => ('沿用上一段的篮筐', c.success),
             'auto' => ('自动识别篮筐', c.success),
             _ => ('篮筐已设置', c.success),
@@ -4570,13 +4574,17 @@ class _VideoSegmentRow extends StatelessWidget {
           const SizedBox(width: Spacing.xs),
           CsButton(
             key: ValueKey('video-segment-edit-$id'),
-            label: Text(context.bheText(roi == null ? '设置篮筐' : '调整')),
-            icon: roi == null ? LucideIcons.target : LucideIcons.pencil,
-            variant: roi == null
+            label: Text(
+              context.bheText(
+                roi == null ? '设置篮筐' : needsConfirmation ? '确认篮筐' : '调整',
+              ),
+            ),
+            icon: needsConfirmation ? LucideIcons.target : LucideIcons.pencil,
+            variant: needsConfirmation
                 ? CsButtonVariant.primary
                 : CsButtonVariant.secondary,
             size: CsButtonSize.sm,
-            onPressed: missing ? null : onEdit,
+            onPressed: onEdit,
           ),
         ],
       ),
