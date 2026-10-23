@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import platform
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -64,6 +65,13 @@ def available_output_path(path: Path) -> Path:
         if not candidate.exists():
             return candidate
     raise OSError(f"无法生成不冲突的导出文件名: {path}")
+
+
+def clip_file_name(index: int, candidate: Dict[str, Any]) -> str:
+    name = f"goal_{index:03d}_{candidate['event_time_ms'] / 1000:.2f}s"
+    player = re.sub(r'[\x00-\x1f<>:"/\\|?*]+', "_", str(candidate.get("player_name") or ""))
+    player = player.strip(" ._")[:40]
+    return f"{name}_{player}.mp4" if player else f"{name}.mp4"
 
 
 def build_clip_command(
@@ -171,9 +179,7 @@ def export_goal_clips(
     codecs = video_codecs()
     try:
         for index, candidate in enumerate(candidates, 1):
-            path = available_output_path(
-                output_dir / f"goal_{index:03d}_{candidate['event_time_ms'] / 1000:.2f}s.mp4"
-            )
+            path = available_output_path(output_dir / clip_file_name(index, candidate))
             codec = run_encoded_ffmpeg(
                 lambda codec: build_clip_command(
                     source_video,

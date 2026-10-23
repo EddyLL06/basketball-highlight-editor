@@ -14,6 +14,14 @@ def test_libx264_clip_command_contains_one_video_codec():
     assert command[command.index("-c:v") + 1] == "libx264"
 
 
+def test_clip_file_name_appends_a_filesystem_safe_player_name():
+    candidate = {"event_time_ms": 12345}
+    assert export.clip_file_name(1, candidate) == "goal_001_12.35s.mp4"
+    assert export.clip_file_name(2, {**candidate, "player_name": "科比"}) == "goal_002_12.35s_科比.mp4"
+    assert export.clip_file_name(3, {**candidate, "player_name": ' A/B:C*? '}) == "goal_003_12.35s_A_B_C.mp4"
+    assert export.clip_file_name(4, {**candidate, "player_name": "..."}) == "goal_004_12.35s.mp4"
+
+
 def test_clip_command_rejects_invalid_range():
     with pytest.raises(ValueError, match="INVALID_CLIP_RANGE"):
         build_clip_command(Path("source.mp4"), 1000, 1000, Path("out.mp4"))
