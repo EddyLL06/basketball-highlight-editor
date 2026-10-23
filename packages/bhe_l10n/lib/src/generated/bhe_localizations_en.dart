@@ -145,7 +145,7 @@ class BheLocalizationsEn extends BheLocalizations {
 
   @override
   String get startFromVideoDescription =>
-      'Choose a fixed-camera recording. BHE first locates the hoop, then creates scoring candidates for review and export.';
+      'Choose fixed-camera recordings; pick several parts of one game together. BHE locates the hoop and creates scoring candidates in order for review and export.';
 
   @override
   String get videoDuration => 'Video duration';
@@ -821,7 +821,7 @@ class BheLocalizationsEn extends BheLocalizations {
   String get reviewUnreviewed => 'Not reviewed';
 
   @override
-  String get homeDropHint => 'Or drop a video here';
+  String get homeDropHint => 'Or drop one or more videos here';
 
   @override
   String get homeDropActive => 'Release to create a project';

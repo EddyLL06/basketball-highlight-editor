@@ -149,12 +149,12 @@ class HomeScreen extends ConsumerWidget {
     final newProjectCard = _NewProjectCard(
       onTap: busy ? null : startNewProject,
       onDropFile: busy ? null : (paths) => unawaited(startFromDroppedVideos(paths)),
-      dropHint: l10n?.homeDropHint ?? '也可以把视频拖到这里',
+      dropHint: l10n?.homeDropHint ?? '也可以把一段或多段视频拖到这里',
       dropActiveLabel: l10n?.homeDropActive ?? '松开即可新建项目',
       title: l10n?.newProject ?? '新建项目',
       description:
           l10n?.startFromVideoDescription ??
-          '选择一段固定机位录像，系统会优先自动定位篮筐，随后生成候选进球片段供你审核与导出。',
+          '选择固定机位录像，同一场比赛的多段视频可以一起选。系统会自动定位篮筐，按顺序生成候选进球片段供你审核与导出。',
       formats:
           l10n?.homeSupportedFormats ??
           'MP4 · MOV · M4V · AVI · MKV · 原始视频不会被修改',

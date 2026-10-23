@@ -139,7 +139,7 @@ class BheLocalizationsZh extends BheLocalizations {
 
   @override
   String get startFromVideoDescription =>
-      '选择一段固定机位录像，系统会优先自动定位篮筐，随后生成候选进球片段供你审核与导出。';
+      '选择固定机位录像，同一场比赛的多段视频可以一起选。系统会自动定位篮筐，按顺序生成候选进球片段供你审核与导出。';
 
   @override
   String get videoDuration => '视频时长';
@@ -792,7 +792,7 @@ class BheLocalizationsZh extends BheLocalizations {
   String get reviewUnreviewed => '未审核';
 
   @override
-  String get homeDropHint => '也可以把视频拖到这里';
+  String get homeDropHint => '也可以把一段或多段视频拖到这里';
 
   @override
   String get homeDropActive => '松开即可新建项目';

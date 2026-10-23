@@ -43,7 +43,7 @@
   "homeHeadline": "Turn the whole game into your highlights.",
   "homeSubtitle": "Import a fixed-camera video, find scoring candidates locally, remove false positives, and export a highlight reel. Processing stays on this device; the source video is not copied or uploaded.",
   "openProject": "Open project",
-  "startFromVideoDescription": "Choose a fixed-camera recording. BHE first locates the hoop, then creates scoring candidates for review and export.",
+  "startFromVideoDescription": "Choose fixed-camera recordings; pick several parts of one game together. BHE locates the hoop and creates scoring candidates in order for review and export.",
   "videoDuration": "Video duration",
   "recentProjects": "Recent projects",
   "refreshRecentProjects": "Refresh recent projects",
@@ -257,7 +257,7 @@
   "reviewProgress": "Reviewed {done} / {total}",
   "@reviewProgress": {"placeholders": {"done": {"type": "int"}, "total": {"type": "int"}}},
   "reviewUnreviewed": "Not reviewed",
-  "homeDropHint": "Or drop a video here",
+  "homeDropHint": "Or drop one or more videos here",
   "homeDropActive": "Release to create a project",
   "homeDropUnsupported": "Unsupported file. Drop an MP4, MOV, M4V, AVI or MKV video."
 }
