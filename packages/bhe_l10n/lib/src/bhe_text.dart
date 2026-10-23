@@ -804,6 +804,8 @@ const _englishText = <String, String>{
   '暂无球员': 'No players yet',
   '新建球员': 'New player',
   '球员分组': 'Player groups',
+  '运行日志': 'Logs',
+  '打开日志目录': 'Open log folder',
   '存为分组': 'Save as group',
   '例如：周六球队': 'e.g. Saturday team',
   '还没有分组。把当前项目的球员存为分组后，其他项目可以一键导入。':

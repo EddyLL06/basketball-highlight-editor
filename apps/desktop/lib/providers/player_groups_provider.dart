@@ -65,6 +65,7 @@ class PlayerGroupsNotifier extends Notifier<List<PlayerGroup>> {
 }
 
 final NotifierProvider<PlayerGroupsNotifier, List<PlayerGroup>>
-playerGroupsProvider = NotifierProvider<PlayerGroupsNotifier, List<PlayerGroup>>(
-  PlayerGroupsNotifier.new,
-);
+playerGroupsProvider =
+    NotifierProvider<PlayerGroupsNotifier, List<PlayerGroup>>(
+      PlayerGroupsNotifier.new,
+    );

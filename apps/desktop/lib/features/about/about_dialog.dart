@@ -1,8 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:bhe_l10n/bhe_l10n.dart';
 
 import '../../core/contact_actions.dart';
+import '../../core/engine_client.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
 
@@ -21,6 +24,7 @@ class _CourtsideAboutDialog extends StatelessWidget {
     final c = AppColors.of(context);
     final theme = Theme.of(context);
     final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
+    final logDirectory = engineLogDirectory(Platform.environment);
     return Dialog(
       backgroundColor: c.surface,
       surfaceTintColor: Colors.transparent,
@@ -96,21 +100,33 @@ class _CourtsideAboutDialog extends StatelessWidget {
                 label: 'GitHub',
                 value: l10n?.githubComingSoon ?? '即将开放',
               ),
+              _InfoRow(label: context.bheText('运行日志'), value: logDirectory),
               const SizedBox(height: Spacing.lg),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton.icon(
-                  onPressed: () async {
-                    await openExternalUri(
-                      feedbackMailto(
-                        english: l10n?.localeName.startsWith('en') == true,
-                      ),
-                    );
-                    if (context.mounted) Navigator.pop(context);
-                  },
-                  icon: const Icon(LucideIcons.mail, size: 17),
-                  label: Text(l10n?.sendFeedback ?? '发送反馈'),
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton.icon(
+                    onPressed: () async {
+                      await Directory(logDirectory).create(recursive: true);
+                      await openExternalUri(logDirectory);
+                    },
+                    icon: const Icon(LucideIcons.folderOpen, size: 17),
+                    label: Text(context.bheText('打开日志目录')),
+                  ),
+                  const SizedBox(width: Spacing.sm),
+                  FilledButton.icon(
+                    onPressed: () async {
+                      await openExternalUri(
+                        feedbackMailto(
+                          english: l10n?.localeName.startsWith('en') == true,
+                        ),
+                      );
+                      if (context.mounted) Navigator.pop(context);
+                    },
+                    icon: const Icon(LucideIcons.mail, size: 17),
+                    label: Text(l10n?.sendFeedback ?? '发送反馈'),
+                  ),
+                ],
               ),
             ],
           ),
