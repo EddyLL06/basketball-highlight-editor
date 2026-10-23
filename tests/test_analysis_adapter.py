@@ -275,6 +275,38 @@ def test_run_pipeline_drains_large_child_output_without_deadlocking(tmp_path: Pa
     assert result["logs"]
 
 
+def test_run_pipeline_keeps_reading_utf8_and_undecodable_child_output(tmp_path: Path):
+    # 中文 Windows 上 ffmpeg 输出的 UTF-8 中文路径曾让读取线程崩掉，
+    # 管道写满后 ffmpeg 卡死，界面停在 1%。
+    import threading
+
+    refined = tmp_path / "refined.json"
+    script = (
+        "import json, sys; "
+        "sys.stderr.buffer.write(\"from 'C:/视频/篮球赛.mp4':\\n\".encode('utf-8') + b'\\xff\\n'); "
+        "sys.stderr.write('x' * 200000); sys.stderr.flush(); "
+        "print('progress=0.5', flush=True); "
+        "open(%r, 'w', encoding='utf-8').write(json.dumps({'results': []}))"
+    ) % str(refined)
+    output = []
+    finished = {}
+
+    def run():
+        finished["result"] = run_pipeline(
+            [[sys.executable, "-c", script]],
+            refined,
+            output_callback=lambda stage, line: output.append(line),
+        )
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(20)
+    assert "result" in finished, "流水线卡住了"
+    assert finished["result"]["refined"] == {"results": []}
+    assert "from 'C:/视频/篮球赛.mp4':" in output
+    assert "progress=0.5" in output
+
+
 def test_run_pipeline_streams_child_output_to_progress_callback(tmp_path: Path):
     refined = tmp_path / "refined.json"
     script = (

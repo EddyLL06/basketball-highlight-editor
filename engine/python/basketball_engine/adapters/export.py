@@ -142,6 +142,8 @@ def validate_media_file(path: Path) -> None:
         capture_output=True,
         stdin=subprocess.DEVNULL,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=15,
     )
     try:
@@ -168,6 +170,7 @@ def run_atomic_ffmpeg(
             "stdin": subprocess.DEVNULL,
             "stderr": subprocess.PIPE,
             "text": True,
+            "encoding": "utf-8",
             "errors": "replace",
         }
         if platform.system() == "Windows":

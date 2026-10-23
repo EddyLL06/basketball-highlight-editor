@@ -411,6 +411,8 @@ class EngineService:
                 capture_output=True,
                 stdin=subprocess.DEVNULL,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=30,
             )
             probe = json.loads(completed.stdout)
@@ -632,6 +634,8 @@ class EngineService:
                 capture_output=True,
                 stdin=subprocess.DEVNULL,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=120,
             )
             result = json.loads(output.read_text(encoding="utf-8"))
@@ -766,6 +770,8 @@ class EngineService:
                 capture_output=True,
                 stdin=subprocess.DEVNULL,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=20,
             )
             temporary_path.replace(output_path)
