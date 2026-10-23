@@ -707,7 +707,9 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
         .clamp(0.0, 1.0)
         .toDouble();
     final originalVideoPath = _resolveOriginalVideoPath(state);
-    final reviewVideoPath = state.reviewVideoPath ?? state.previewPath;
+    final reviewVideoPath = state.multiVideo
+        ? originalVideoPath
+        : state.reviewVideoPath ?? state.previewPath;
     final showingOriginalVideo =
         _showOriginalVideo ||
         reviewVideoPath == null ||

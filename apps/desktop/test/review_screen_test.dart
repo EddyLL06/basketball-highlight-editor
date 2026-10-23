@@ -839,6 +839,7 @@ void main() {
         job: const {'state': 'completed'},
         video: const {'id': 'v1', 'source_path': '/v/part1.mp4', 'duration_ms': 300000},
         videoPath: '/v/part1.mp4',
+        previewPath: '/v/part1_frame.jpg',
         videos: const [
           {'id': 'v1', 'source_path': '/v/part1.mp4', 'duration_ms': 300000},
           {'id': 'v2', 'source_path': '/v/part2.mp4', 'duration_ms': 300000},
@@ -853,6 +854,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('第 1 段 · 03:20'), findsOneWidget);
+    final pane = find.byWidgetPredicate(
+      (widget) => widget.runtimeType.toString() == '_VideoPane',
+    );
+    expect((tester.widget(pane) as dynamic).videoPath, '/v/part1.mp4');
     expect(
       tester.getTopLeft(find.byKey(const ValueKey('player-chip-early'))).dy,
       lessThan(tester.getTopLeft(find.byKey(const ValueKey('player-chip-late'))).dy),
