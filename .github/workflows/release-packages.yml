@@ -468,6 +468,8 @@ jobs:
           # 每个版本必须用同一个证书签名，用户才能覆盖安装升级。
           apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
           certs="$("$apksigner" verify --print-certs "$apk")"
+          echo "keystore: $(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android 2>/dev/null | grep 'SHA256:' || true)"
+          echo "$certs" | grep -i 'digest' || true
           grep -q 'SHA-256 digest: 14f6d1117b858058f730afd96b880dff0fd8ecff2ebc10e387a5d89c10c0084e' <<< "$certs"
           mkdir -p "$GITHUB_WORKSPACE/dist"
           cp "$apk" \
