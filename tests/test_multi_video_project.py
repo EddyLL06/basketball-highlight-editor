@@ -91,10 +91,14 @@ def test_project_context_summarises_each_video(tmp_path: Path):
 def test_analysis_queue_is_persisted_and_validated(tmp_path: Path):
     service, store, project_root, videos = _project_with_videos(tmp_path)
     ids = [video["id"] for video in videos]
-    assert service.handle("set_analysis_queue", {"project_root": str(project_root), "video_ids": ids}) == {
-        "analysis_queue": ids,
-    }
-    assert service.handle("open_project", {"project_root": str(project_root)})["analysis_queue"] == ids
+    queue = {"video_ids": ids, "before_seconds": 5.0, "after_seconds": 2.0}
+    assert service.handle("set_analysis_queue", {
+        "project_root": str(project_root),
+        "video_ids": ids,
+        "before_seconds": 5,
+        "after_seconds": 2,
+    }) == {"analysis_queue": queue}
+    assert service.handle("open_project", {"project_root": str(project_root)})["analysis_queue"] == queue
     for invalid in ([ids[0], ids[0]], ["video_missing"]):
         with pytest.raises(ProtocolError):
             service.handle("set_analysis_queue", {"project_root": str(project_root), "video_ids": invalid})
@@ -105,9 +109,9 @@ def test_candidates_list_across_videos_in_segment_order(tmp_path: Path):
     store.replace_candidates(videos[0]["id"], [_candidate(videos[0]["id"], 40_000)])
     store.replace_candidates(videos[1]["id"], [_candidate(videos[1]["id"], 5_000)])
     candidates = service.handle("list_candidates", {"project_root": str(project_root)})["candidates"]
-    assert [(item["video_id"], item["event_time_ms"]) for item in candidates] == [
-        (videos[0]["id"], 40_000),
-        (videos[1]["id"], 5_000),
+    assert [(item["video_id"], item["segment"], item["event_time_ms"]) for item in candidates] == [
+        (videos[0]["id"], 1, 40_000),
+        (videos[1]["id"], 2, 5_000),
     ]
     only_second = service.handle("list_candidates", {
         "project_root": str(project_root),

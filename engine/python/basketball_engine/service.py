@@ -717,7 +717,14 @@ class EngineService:
         if not isinstance(video_ids, list) or not all(isinstance(item, str) for item in video_ids):
             raise ProtocolError("INVALID_REQUEST", "video_ids 必须是字符串列表")
         try:
-            queue = self._require_store(payload).set_analysis_queue(video_ids)
+            before_seconds = float(payload.get("before_seconds", 6))
+            after_seconds = float(payload.get("after_seconds", 3))
+        except (TypeError, ValueError) as exc:
+            raise ProtocolError("INVALID_REQUEST", "片段前后秒数格式无效") from exc
+        if not (math.isfinite(before_seconds) and before_seconds >= 0 and math.isfinite(after_seconds) and after_seconds > 0):
+            raise ProtocolError("INVALID_REQUEST", "片段前后秒数必须在有效范围内")
+        try:
+            queue = self._require_store(payload).set_analysis_queue(video_ids, before_seconds, after_seconds)
         except (LookupError, ValueError) as exc:
             raise ProtocolError("INVALID_REQUEST", "排队的视频必须属于当前项目且不重复") from exc
         return {"analysis_queue": queue}
@@ -1898,10 +1905,13 @@ class EngineService:
         candidates = store.list_candidates(video_id)
         video = store.video(video_id) if isinstance(video_id, str) else None
         videos = {item["id"]: item for item in store.list_videos()}
+        segments = {video_id: index for index, video_id in enumerate(videos, 1)} if len(videos) > 1 else {}
         for candidate in candidates:
             candidate_video = videos.get(candidate["video_id"])
             if not candidate_video:
                 continue
+            if segments:
+                candidate["segment"] = segments[candidate["video_id"]]
             preview_path = self._preview_path(
                 store,
                 candidate_video,

@@ -203,12 +203,12 @@ JOB_CANCELLED
   "video": {},
   "roi": {},
   "videos": [],
-  "analysis_queue": [],
+  "analysis_queue": {"video_ids": [], "before_seconds": 6, "after_seconds": 3},
   "statistics": {}
 }
 ```
 
-一个项目可以包含多段视频（同一场比赛被相机切成的多个文件）。`videos` 按 `sort_index` 排序，每项是视频记录加上 `source_exists`、`source_status`、`roi`（该段生效的篮筐区域）、`analysis_job`（该段最近一次分析任务的 `id`、`state`、`stage`、`progress`、`error_code`、`error_message`、`finished_at`）和 `candidate_count`。`video` 和 `roi` 是排在第一段的视频，单段项目与旧版含义相同。`analysis_queue` 是 `set_analysis_queue` 保存的待分析视频 id；引擎同一时间只运行一个重型任务，调用方按队列顺序逐段调用 `start_analysis`，完成一段后更新队列。
+一个项目可以包含多段视频（同一场比赛被相机切成的多个文件）。`videos` 按 `sort_index` 排序，每项是视频记录加上 `source_exists`、`source_status`、`roi`（该段生效的篮筐区域）、`analysis_job`（该段最近一次分析任务的 `id`、`state`、`stage`、`progress`、`error_code`、`error_message`、`finished_at`）和 `candidate_count`。`video` 和 `roi` 是排在第一段的视频，单段项目与旧版含义相同。`analysis_queue` 是 `set_analysis_queue` 保存的排队记录 `{ "video_ids": [...], "before_seconds": 6, "after_seconds": 3 }`；引擎同一时间只运行一个重型任务，调用方按队列顺序逐段调用 `start_analysis`，完成一段后更新队列。
 
 `link_video` 把新视频追加到项目末尾；`inspect_video` 和视频记录里的 `recorded_at` 取自容器元数据 `creation_time`，没有时为 `null`。`reorder_videos` 的 payload 为 `{ "project_root": "...", "video_ids": [...] }`，必须包含项目里的全部视频。
 
@@ -249,7 +249,7 @@ JOB_CANCELLED
 
 `review_video_path` 仅用于审核播放；原始视频路径仍由 `videos.source_path` 保存并只用于精确导出。代理不存在时该字段为 `null`，调用方应回退到原始视频或提示重新生成分析。
 
-不传 `video_id` 时，候选先按视频顺序、再按事件时间排列，每条候选的 `video_id` 指明所属视频，`preview_path` 来自各自的视频。
+不传 `video_id` 时，候选先按视频顺序、再按事件时间排列，每条候选的 `video_id` 指明所属视频，项目有多段视频时还带 `segment`（从 1 开始的段号），`preview_path` 来自各自的视频。
 
 整个项目导出（`start_export` 不传 `video_id`）时，导出快照里每条候选带上 `video_id`，项目有多段视频时还带 `segment`（从 1 开始的段号）。每个片段从各自的原始视频剪切；分辨率与第一个片段不同的视频会缩放并加黑边到第一个片段的画面尺寸，保证合并导出可以直接拼接。单独导出的文件名带段号，例如 `goal_001_s2_42.00s_科比.mp4`。导出记录的 `video_id` 为 `null`。
 

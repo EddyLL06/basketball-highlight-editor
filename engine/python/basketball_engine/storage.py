@@ -288,7 +288,7 @@ class ProjectStore:
                 )
         return self.list_videos()
 
-    def analysis_queue(self) -> list[str]:
+    def analysis_queue(self) -> Dict[str, Any]:
         project = self.project()
         if not project:
             raise LookupError("PROJECT_NOT_FOUND")
@@ -297,21 +297,34 @@ class ProjectStore:
                 "SELECT value_json FROM settings WHERE key = ?",
                 (f"project:{project['id']}:analysis_queue",),
             ).fetchone()
+        empty = {"video_ids": [], "before_seconds": 6, "after_seconds": 3}
         if not row:
-            return []
+            return empty
         try:
             value = json.loads(row["value_json"])
         except (TypeError, json.JSONDecodeError):
-            return []
-        return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+            return empty
+        if not isinstance(value, dict) or not isinstance(value.get("video_ids"), list):
+            return empty
+        return {**empty, **value}
 
-    def set_analysis_queue(self, video_ids: list[str]) -> list[str]:
+    def set_analysis_queue(
+        self,
+        video_ids: list[str],
+        before_seconds: float = 6,
+        after_seconds: float = 3,
+    ) -> Dict[str, Any]:
         project = self.project()
         if not project:
             raise LookupError("PROJECT_NOT_FOUND")
         known = {video["id"] for video in self.list_videos()}
         if any(video_id not in known for video_id in video_ids) or len(set(video_ids)) != len(video_ids):
             raise ValueError("ANALYSIS_QUEUE_INVALID")
+        queue = {
+            "video_ids": video_ids,
+            "before_seconds": before_seconds,
+            "after_seconds": after_seconds,
+        }
         with self.connect() as connection:
             connection.execute(
                 """
@@ -319,9 +332,9 @@ class ProjectStore:
                 ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json,
                                                 updated_at = excluded.updated_at
                 """,
-                (f"project:{project['id']}:analysis_queue", json.dumps(video_ids), now_iso()),
+                (f"project:{project['id']}:analysis_queue", json.dumps(queue), now_iso()),
             )
-        return video_ids
+        return queue
 
     def video_source_paths(self) -> list[str]:
         with self.connect() as connection:
