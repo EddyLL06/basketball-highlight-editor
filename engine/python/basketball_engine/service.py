@@ -636,6 +636,8 @@ class EngineService:
             str(max_samples),
             "--conf",
             str(confidence),
+            "--device",
+            str(payload.get("device") or "auto").strip().lower(),
         ]
         try:
             subprocess.run(
@@ -1000,12 +1002,17 @@ class EngineService:
             or not math.isfinite(after_seconds) or after_seconds <= 0
         ):
             raise ProtocolError("INVALID_REQUEST", "分析参数必须在有效范围内")
+        # auto 由各脚本按 cuda > dml > mps > cpu 解析;显式指定时不可用会降级到 cpu。
+        device = str(payload.get("device") or "auto").strip().lower()
+        if device not in {"auto", "cpu", "cuda", "mps", "dml"}:
+            raise ProtocolError("INVALID_REQUEST", "推理设备必须是 auto/cpu/cuda/mps/dml")
         analysis_start_ms = int(video.get("analysis_start_ms") or 0)
         analysis_end_ms = int(video.get("analysis_end_ms") or video.get("duration_ms") or 0)
         if analysis_end_ms <= analysis_start_ms:
             raise ProtocolError("ANALYSIS_RANGE_INVALID", "分析范围无效")
         checkpoint = {
             "mode": mode,
+            "device": device,
             "sample_fps": sample_fps,
             "window_seconds": window_seconds,
             "before_seconds": before_seconds,
@@ -1098,7 +1105,7 @@ class EngineService:
         retry_payload = dict(payload)
         retry_payload.pop("job_id", None)
         for key in (
-            "mode",
+            "mode", "device",
             "sample_fps", "window_seconds", "before_seconds", "after_seconds",
             "proxy_width", "proxy_height", "proxy_fps", "coarse_scale",
             "refine_scale", "conf", "model_path",
@@ -1342,6 +1349,9 @@ class EngineService:
             mode = payload.get("mode", "standard")
             if mode not in {"fast", "standard"}:
                 raise ProtocolError("ANALYSIS_MODE_INVALID", "分析模式必须是 fast 或 standard")
+            # 推理设备只影响速度,不改变产物契约,因此不进 analysis_key
+            # (否则换设备会重建代理、白跑一遍缓存)。实际后端由各脚本回写日志。
+            device = str(payload.get("device") or "auto").strip().lower()
             if mode == "fast":
                 proxy_width = 640
                 proxy_height = 480
@@ -1402,7 +1412,7 @@ class EngineService:
                 json.dumps(analysis_parameters, ensure_ascii=False, sort_keys=True).encode("utf-8")
             ).hexdigest()[:16]
             log_diagnostic(
-                f"{label} start mode={mode} video={video_id} {video_summary(video)} "
+                f"{label} start mode={mode} device={device} video={video_id} {video_summary(video)} "
                 f"range={analysis_parameters['analysis_start_ms']}-{analysis_parameters['analysis_end_ms']}ms "
                 f"roi_source={calibration.get('source', 'manual')} net_roi={net_roi is not None} "
                 f"proxy={proxy_width}x{proxy_height}@{proxy_fps:g}fps"
@@ -1439,6 +1449,7 @@ class EngineService:
                 analysis_end_ms=int(video.get("analysis_end_ms") or video.get("duration_ms") or 0),
                 net_roi=net_roi,
                 include_refinement=mode == "standard",
+                device=device,
             )
 
             checkpoint = {
@@ -1593,6 +1604,7 @@ class EngineService:
                     cancel_event=cancel_event,
                     job_id=job_id,
                     pipeline=pipeline,
+                    device=device,
                 )
             detection_counts = self._detection_counts(coarse_detections)
             rows = [
@@ -1723,6 +1735,7 @@ class EngineService:
         cancel_event: threading.Event | None,
         job_id: str,
         pipeline: Dict[str, Any],
+        device: str = "auto",
     ) -> None:
         """Re-check every final candidate frame by frame around the rim.
 
@@ -1756,6 +1769,7 @@ class EngineService:
                 checked = run_pipeline(
                     [build_rim_check_command(
                         repo_root, source_video, model_path, input_path, output_path,
+                        device=device,
                     )],
                     output_path,
                     on_stage,
