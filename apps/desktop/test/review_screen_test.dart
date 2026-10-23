@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'package:bhe_l10n/bhe_l10n.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:desktop/features/review/review_screen.dart';
 import 'package:desktop/features/review/media_readiness.dart';
@@ -756,6 +757,72 @@ void main() {
     expect(find.text('新建球员'), findsOneWidget);
   });
 
+  testWidgets('player groups save the roster and import it into a project', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'bhe.player_groups': jsonEncode([
+        {
+          'name': '周六队',
+          'players': ['科比', '罗斯'],
+        },
+      ]),
+    });
+    final notifier = _TagReviewNotifier(
+      const ProjectState(
+        job: {'state': 'completed'},
+        players: [
+          {'id': 'player-1', 'name': '科比'},
+        ],
+        candidates: [
+          {
+            'id': 'candidate-1',
+            'event_time_ms': 12000,
+            'default_start_ms': 6000,
+            'default_end_ms': 15000,
+          },
+        ],
+      ),
+    );
+    await _pumpReview(tester, notifier.initialState, notifier: notifier);
+
+    await tester.tap(find.byKey(const ValueKey('player-chip-candidate-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('球员分组'));
+    await tester.pumpAndSettle();
+    expect(find.text('周六队'), findsOneWidget);
+    expect(find.text('科比、罗斯'), findsOneWidget);
+
+    await tester.tap(find.text('把当前球员存为分组'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '新队');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    final saved = jsonDecode(
+      (await SharedPreferences.getInstance()).getString('bhe.player_groups')!,
+    );
+    expect(saved, [
+      {
+        'name': '周六队',
+        'players': ['科比', '罗斯'],
+      },
+      {
+        'name': '新队',
+        'players': ['科比'],
+      },
+    ]);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('player-group-周六队')),
+        matching: find.text('导入'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(notifier.importedNames, ['科比', '罗斯']);
+    expect(find.byType(AlertDialog), findsNothing);
+  });
+
   testWidgets('keeps player chips in a fixed aligned column', (tester) async {
     await _pumpReview(
       tester,
@@ -1457,7 +1524,13 @@ class _TagReviewNotifier extends _ReviewNotifier {
   _TagReviewNotifier(super.initialState);
   List<String>? lastTaggedIds;
   List<String>? rangeIds;
+  List<String>? importedNames;
   ProjectState get current => state;
+
+  @override
+  Future<void> importPlayers(List<String> names) async {
+    importedNames = names;
+  }
   void replaceState(ProjectState value) => state = value;
 
   @override

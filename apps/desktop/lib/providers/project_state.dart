@@ -1843,6 +1843,27 @@ class ProjectNotifier extends Notifier<ProjectState> {
     return playerId;
   }
 
+  Future<void> importPlayers(List<String> names) async {
+    await _runPlayerChange(
+      (generation) async {
+        final session = ref.read(projectSessionProvider);
+        for (final name in names) {
+          if (state.players.any((player) => player['name'] == name)) continue;
+          final created = await session.createPlayer(name);
+          if (_disposed || generation != _projectLoadGeneration) return;
+          state = state.copyWith(
+            players: [
+              ...state.players,
+              Map<String, dynamic>.from(created['player'] as Map),
+            ],
+          );
+        }
+      },
+      successMessage: '球员已导入',
+      busyMessage: '正在导入球员…',
+    );
+  }
+
   Future<bool> deletePlayer(String playerId) async {
     var deleted = false;
     await _runPlayerChange(

@@ -13,6 +13,7 @@ import 'package:bhe_l10n/bhe_l10n.dart';
 import '../../components/cs_button.dart';
 import '../../components/cs_empty_state.dart';
 import '../../components/cs_progress_track.dart';
+import '../../providers/player_groups_provider.dart';
 import '../../providers/project_state.dart';
 import '../../providers/playback_coordinator.dart';
 import '../../theme/app_colors.dart';
@@ -6027,6 +6028,15 @@ class _PlayerChipState extends State<_PlayerChip> {
               _menuController.close();
               widget.onCreate();
             },
+            onManageGroups: () {
+              _menuController.close();
+              unawaited(
+                showDialog<void>(
+                  context: context,
+                  builder: (_) => const _PlayerGroupsDialog(),
+                ),
+              );
+            },
             onDelete: (playerId, playerName) async {
               _menuController.close();
               await widget.onDelete(playerId, playerName);
@@ -6076,12 +6086,14 @@ class _PlayerPickerMenuContent extends StatelessWidget {
     required this.players,
     required this.onSelected,
     required this.onCreate,
+    required this.onManageGroups,
     required this.onDelete,
   });
 
   final List<Map<String, dynamic>> players;
   final ValueChanged<String?> onSelected;
   final VoidCallback onCreate;
+  final VoidCallback onManageGroups;
   final Future<void> Function(String, String)? onDelete;
 
   @override
@@ -6164,10 +6176,116 @@ class _PlayerPickerMenuContent extends StatelessWidget {
                 color: c.orange,
                 onTap: onCreate,
               ),
+              _PlayerPickerOption(
+                label: context.bheText('球员分组'),
+                icon: Icons.groups_outlined,
+                color: c.textSecondary,
+                onTap: onManageGroups,
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _PlayerGroupsDialog extends ConsumerWidget {
+  const _PlayerGroupsDialog();
+
+  Future<void> _saveCurrent(BuildContext context, WidgetRef ref) async {
+    final players = [
+      for (final player in ref.read(projectProvider).players)
+        player['name'].toString(),
+    ];
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => _TextEntryDialog(
+        title: context.bheText('存为分组'),
+        hintText: context.bheText('例如：周六球队'),
+        confirmLabel: context.bheText('保存'),
+      ),
+    );
+    if (name == null || name.trim().isEmpty) return;
+    await ref.read(playerGroupsProvider.notifier).save(name.trim(), players);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = AppColors.of(context);
+    final groups = ref.watch(playerGroupsProvider);
+    final hasPlayers = ref.watch(
+      projectProvider.select((state) => state.players.isNotEmpty),
+    );
+    return AlertDialog(
+      backgroundColor: c.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(CsRadius.md),
+        side: BorderSide(color: c.borderStrong),
+      ),
+      title: Text(context.bheText('球员分组')),
+      content: SizedBox(
+        width: 380,
+        child: groups.isEmpty
+            ? Text(
+                context.bheText('还没有分组。把当前项目的球员存为分组后，其他项目可以一键导入。'),
+                style: TextStyle(color: c.textSecondary, fontSize: 13),
+              )
+            : ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final group in groups)
+                    ListTile(
+                      key: ValueKey('player-group-${group.name}'),
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(group.name),
+                      subtitle: Text(
+                        group.players.join('、'),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: c.textTertiary, fontSize: 12),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                              unawaited(
+                                ref
+                                    .read(projectProvider.notifier)
+                                    .importPlayers(group.players),
+                              );
+                            },
+                            child: Text(context.bheText('导入')),
+                          ),
+                          IconButton(
+                            tooltip: '${context.bheText('删除')}${group.name}',
+                            onPressed: () => unawaited(
+                              ref
+                                  .read(playerGroupsProvider.notifier)
+                                  .delete(group.name),
+                            ),
+                            icon: const Icon(Icons.delete_outline, size: 18),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: hasPlayers ? () => _saveCurrent(context, ref) : null,
+          child: Text(context.bheText('把当前球员存为分组')),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(context.bheText('完成')),
+        ),
+      ],
     );
   }
 }

@@ -4580,6 +4580,7 @@ Future<void> _showPlayerPicker(
     isScrollControlled: true,
     useSafeArea: true,
     builder: (_) => _PlayerTagSheet(
+      state: state,
       players: state.project.players,
       initialPlayer: candidate.player,
       onRemovePlayer: state.removePlayer,
@@ -4597,10 +4598,12 @@ Future<void> _showPlayerPicker(
 
 class _PlayerTagSheet extends StatefulWidget {
   const _PlayerTagSheet({
+    required this.state,
     required this.players,
     required this.onRemovePlayer,
     this.initialPlayer,
   });
+  final MobileAppState state;
   final List<String> players;
   final String? initialPlayer;
   final ValueChanged<String> onRemovePlayer;
@@ -4640,6 +4643,16 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
       if (_selected == player) _selected = null;
     });
     widget.onRemovePlayer(player);
+  }
+
+  Future<void> _openGroups() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _PlayerGroupsSheet(state: widget.state),
+    );
+    if (mounted) setState(() => _players = [...widget.state.project.players]);
   }
 
   @override
@@ -4714,10 +4727,22 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
               onSubmitted: (value) => _close(value.trim()),
             )
           else
-            OutlinedButton.icon(
-              onPressed: () => setState(() => _creating = true),
-              icon: const Icon(LucideIcons.plus, size: 17),
-              label: Text(context.bheText('新建球员标签')),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => setState(() => _creating = true),
+                    icon: const Icon(LucideIcons.plus, size: 17),
+                    label: Text(context.bheText('新建球员标签')),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                OutlinedButton.icon(
+                  onPressed: _openGroups,
+                  icon: const Icon(LucideIcons.users, size: 17),
+                  label: Text(context.bheText('球员分组')),
+                ),
+              ],
             ),
           const SizedBox(height: 16),
           Row(
@@ -4736,6 +4761,97 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _PlayerGroupsSheet extends StatelessWidget {
+  const _PlayerGroupsSheet({required this.state});
+  final MobileAppState state;
+
+  Future<void> _saveCurrent(BuildContext context) async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.bheText('存为分组')),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: context.bheText('例如：周六球队'),
+          ),
+          onSubmitted: (value) => Navigator.pop(dialogContext, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(context.bheText('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: Text(context.bheText('保存')),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || name.trim().isEmpty) return;
+    await state.savePlayerGroup(name.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: state,
+    builder: (context, _) => _SheetFrame(
+      title: context.bheText('球员分组'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (state.playerGroups.isEmpty)
+            Text(
+              context.bheText('还没有分组。把当前项目的球员存为分组后，其他项目可以一键导入。'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          for (final group in state.playerGroups)
+            ListTile(
+              key: ValueKey('player-group-${group.name}'),
+              contentPadding: EdgeInsets.zero,
+              title: Text(group.name),
+              subtitle: Text(
+                group.players.join('、'),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextButton(
+                    onPressed: () {
+                      state.importPlayers(group.players);
+                      Navigator.pop(context);
+                    },
+                    child: Text(context.bheText('导入')),
+                  ),
+                  IconButton(
+                    tooltip: '${context.bheText('删除')}${group.name}',
+                    onPressed: () =>
+                        unawaited(state.deletePlayerGroup(group.name)),
+                    icon: const Icon(LucideIcons.trash2, size: 17),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: state.project.players.isEmpty
+                ? null
+                : () => _saveCurrent(context),
+            icon: const Icon(LucideIcons.save, size: 17),
+            label: Text(context.bheText('把当前球员存为分组')),
           ),
         ],
       ),

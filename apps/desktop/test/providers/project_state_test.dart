@@ -807,6 +807,22 @@ void main() {
       expect(session.resetCalls, 1);
     });
 
+    test('导入分组只新建项目里还没有的球员', () async {
+      final session = _FakeProjectSession();
+      final container = playerContainer(session);
+      final notifier = container.read(projectProvider.notifier);
+      await notifier.createPlayer('科比');
+      await notifier.importPlayers(['科比', '罗斯', '小夏']);
+      expect(
+        [
+          for (final player in container.read(projectProvider).players)
+            player['name'],
+        ],
+        ['科比', '罗斯', '小夏'],
+      );
+      expect(container.read(projectProvider).busy, isFalse);
+    });
+
     test('删除标签只清除关联标签，不重新拉取全部候选', () async {
       final session = _FakeProjectSession()
         ..players = [

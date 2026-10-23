@@ -803,6 +803,14 @@ const _englishText = <String, String>{
       'Check the task status in a moment. The source video will not be modified.',
   '暂无球员': 'No players yet',
   '新建球员': 'New player',
+  '球员分组': 'Player groups',
+  '存为分组': 'Save as group',
+  '例如：周六球队': 'e.g. Saturday team',
+  '还没有分组。把当前项目的球员存为分组后，其他项目可以一键导入。':
+      'No groups yet. Save this project\'s players as a group to import them into other projects in one tap.',
+  '把当前球员存为分组': 'Save current players as a group',
+  '球员已导入': 'Players imported',
+  '正在导入球员…': 'Importing players…',
   '标注': 'Annotations',
   '标注会显示轨迹与判定点 · 按 A 可开关':
       'Annotations show the trajectory and decision points · press A to toggle',
