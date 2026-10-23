@@ -823,6 +823,48 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
   });
 
+  testWidgets('a multi-part project reviews parts in order and follows the part', (
+    tester,
+  ) async {
+    Map<String, dynamic> candidate(String id, String videoId, int segment, int ms) => {
+      'id': id,
+      'video_id': videoId,
+      'segment': segment,
+      'event_time_ms': ms,
+      'default_start_ms': ms - 3000,
+      'default_end_ms': ms + 1000,
+    };
+    final notifier = _TagReviewNotifier(
+      ProjectState(
+        job: const {'state': 'completed'},
+        video: const {'id': 'v1', 'source_path': '/v/part1.mp4', 'duration_ms': 300000},
+        videoPath: '/v/part1.mp4',
+        videos: const [
+          {'id': 'v1', 'source_path': '/v/part1.mp4', 'duration_ms': 300000},
+          {'id': 'v2', 'source_path': '/v/part2.mp4', 'duration_ms': 300000},
+        ],
+        candidates: [
+          candidate('late', 'v2', 2, 5000),
+          candidate('early', 'v1', 1, 200000),
+        ],
+      ),
+    );
+    await _pumpReview(tester, notifier.initialState, notifier: notifier);
+    await tester.pumpAndSettle();
+
+    expect(find.text('第 1 段 · 03:20'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('player-chip-early'))).dy,
+      lessThan(tester.getTopLeft(find.byKey(const ValueKey('player-chip-late'))).dy),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('review-segment-option-v2')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('player-chip-early')), findsNothing);
+    expect(find.text('第 2 段 · 00:05'), findsOneWidget);
+    expect(notifier.activated, ['v2']);
+  });
+
   testWidgets('keeps player chips in a fixed aligned column', (tester) async {
     await _pumpReview(
       tester,
@@ -1525,7 +1567,16 @@ class _TagReviewNotifier extends _ReviewNotifier {
   List<String>? lastTaggedIds;
   List<String>? rangeIds;
   List<String>? importedNames;
+  final activated = <String>[];
   ProjectState get current => state;
+
+  @override
+  void activateVideo(String videoId) {
+    activated.add(videoId);
+    state = state.copyWith(
+      video: state.videos.firstWhere((video) => video['id'] == videoId),
+    );
+  }
 
   @override
   Future<void> importPlayers(List<String> names) async {
