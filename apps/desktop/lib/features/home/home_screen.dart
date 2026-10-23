@@ -67,8 +67,9 @@ class HomeScreen extends ConsumerWidget {
       }
     }
 
-    Future<void> startFromDroppedVideo(String path) async {
-      if (!isImportableVideo(path)) {
+    Future<void> startFromDroppedVideos(List<String> dropped) async {
+      final paths = dropped.where(isImportableVideo).toList();
+      if (paths.isEmpty) {
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(
           SnackBar(
             content: Text(
@@ -80,7 +81,7 @@ class HomeScreen extends ConsumerWidget {
         return;
       }
       if (await notifier.startNewProject() && context.mounted) {
-        ref.read(pendingImportProvider.notifier).set(path);
+        ref.read(pendingImportProvider.notifier).set(paths);
         context.go('/import');
       }
     }
@@ -145,7 +146,7 @@ class HomeScreen extends ConsumerWidget {
 
     final newProjectCard = _NewProjectCard(
       onTap: busy ? null : startNewProject,
-      onDropFile: busy ? null : (path) => unawaited(startFromDroppedVideo(path)),
+      onDropFile: busy ? null : (paths) => unawaited(startFromDroppedVideos(paths)),
       dropHint: l10n?.homeDropHint ?? '也可以把视频拖到这里',
       dropActiveLabel: l10n?.homeDropActive ?? '松开即可新建项目',
       title: l10n?.newProject ?? '新建项目',
@@ -405,7 +406,7 @@ class _NewProjectCard extends StatefulWidget {
   });
 
   final VoidCallback? onTap;
-  final ValueChanged<String>? onDropFile;
+  final ValueChanged<List<String>>? onDropFile;
   final String title;
   final String description;
   final String formats;
@@ -430,7 +431,9 @@ class _NewProjectCardState extends State<_NewProjectCard> {
       onDragExited: (_) => setState(() => _dragging = false),
       onDragDone: (details) {
         setState(() => _dragging = false);
-        if (details.files.isNotEmpty) onDropFile?.call(details.files.first.path);
+        if (details.files.isNotEmpty) {
+          onDropFile?.call([for (final file in details.files) file.path]);
+        }
       },
       child: Semantics(
         button: true,

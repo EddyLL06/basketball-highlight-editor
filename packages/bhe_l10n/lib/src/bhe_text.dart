@@ -71,6 +71,18 @@ extension BheBuildContextText on BuildContext {
 }
 
 String? _translateDynamic(String source) {
+  final segment = RegExp(r'^第 (\d+) 段$').firstMatch(source);
+  if (segment != null) return 'Part ${segment.group(1)}';
+  final segmentDone = RegExp(r'^第 (\d+) 段分析完成$').firstMatch(source);
+  if (segmentDone != null) return 'Part ${segmentDone.group(1)} analysed';
+  final segmentStart = RegExp(r'^正在启动第 (\d+) 段分析…$').firstMatch(source);
+  if (segmentStart != null) return 'Starting part ${segmentStart.group(1)}…';
+  final adding = RegExp(r'^正在添加第 (\d+)/(\d+) 段视频…$').firstMatch(source);
+  if (adding != null) {
+    return 'Adding part ${adding.group(1)} of ${adding.group(2)}…';
+  }
+  final added = RegExp(r'^已添加 (\d+) 段视频$').firstMatch(source);
+  if (added != null) return 'Added ${added.group(1)} videos';
   final allCandidates = RegExp(r'^全部 (\d+) 个候选片段$').firstMatch(source);
   if (allCandidates != null)
     return 'All ${allCandidates.group(1)} candidate clips';
@@ -804,6 +816,49 @@ const _englishText = <String, String>{
   '暂无球员': 'No players yet',
   '新建球员': 'New player',
   '球员分组': 'Player groups',
+  '这场比赛的视频': 'Videos of this game',
+  '每段都设置好篮筐后，点「分析全部」会按顺序逐段分析，分析完的段可以先去审核。':
+      'Once every part has its hoop set, “Analyse all” runs the parts one after another. You can review a part as soon as it finishes.',
+  '添加视频': 'Add videos',
+  '分析设置': 'Analysis settings',
+  '队列已暂停': 'Queue paused',
+  '还有': '',
+  '段待分析': 'parts left',
+  '正在排队分析': 'Analysing in order',
+  '导出排在这段之后': 'Export runs after this part',
+  '继续排队': 'Resume queue',
+  '暂停队列': 'Pause queue',
+  '暂停后，正在分析的这段会继续完成，之后不再开始新的一段。':
+      'Pausing lets the current part finish and then stops before the next one.',
+  '需要设置篮筐': 'Hoop not set',
+  '沿用上一段的篮筐': 'Hoop from previous part',
+  '自动识别篮筐': 'Hoop detected',
+  '篮筐已设置': 'Hoop set',
+  '分析中': 'Analysing',
+  '排队中': 'Queued',
+  '个候选': 'candidates',
+  '已取消': 'Cancelled',
+  '未分析': 'Not analysed',
+  '原视频已移动': 'Source video moved',
+  '移出队列': 'Remove from queue',
+  '上移': 'Move up',
+  '下移': 'Move down',
+  '设置篮筐': 'Set hoop',
+  '调整': 'Adjust',
+  '分析全部': 'Analyse all',
+  '保存这一段的设置': 'Save this part',
+  '支持 MP4、MOV、M4V、AVI、MKV。同一场比赛的多段视频可以一起选，会建成一个项目。原始视频不会被修改或上传。':
+      'MP4, MOV, M4V, AVI and MKV are supported. Pick several parts of one game together to make one project. Source videos are never modified or uploaded.',
+  '添加同一场的其他视频': 'Add more parts of this game',
+  '正在添加视频…': 'Adding videos…',
+  '正在识别第 1 段的篮筐…': 'Detecting the hoop in part 1…',
+  '正在调整视频顺序…': 'Reordering videos…',
+  '没有需要分析的视频段': 'No parts need analysis',
+  '全部视频段分析完成': 'All parts analysed',
+  '导出会在当前这段分析完成后开始，之后继续排队':
+      'The export starts after the current part, then the queue continues',
+  '视频段': 'Parts',
+  '按视频段筛选': 'Filter by part',
   '运行日志': 'Logs',
   '打开日志目录': 'Open log folder',
   '存为分组': 'Save as group',

@@ -132,6 +132,30 @@ class EngineSession {
     });
   }
 
+  Future<JsonMap> reorderVideos({
+    required String projectRoot,
+    required List<String> videoIds,
+  }) {
+    return client.request('reorder_videos', <String, dynamic>{
+      'project_root': projectRoot,
+      'video_ids': videoIds,
+    });
+  }
+
+  Future<JsonMap> setAnalysisQueue({
+    required String projectRoot,
+    required List<String> videoIds,
+    double beforeSeconds = 6,
+    double afterSeconds = 3,
+  }) {
+    return client.request('set_analysis_queue', <String, dynamic>{
+      'project_root': projectRoot,
+      'video_ids': videoIds,
+      'before_seconds': beforeSeconds,
+      'after_seconds': afterSeconds,
+    });
+  }
+
   Future<JsonMap> extractPreview({
     required String projectRoot,
     required String videoId,
@@ -342,11 +366,11 @@ class EngineSession {
 
   Future<JsonMap> listCandidates({
     required String projectRoot,
-    required String videoId,
+    String? videoId,
   }) {
     return client.request('list_candidates', <String, dynamic>{
       'project_root': projectRoot,
-      'video_id': videoId,
+      ...?_optionalEntry('video_id', videoId),
     });
   }
 
@@ -486,7 +510,7 @@ class EngineSession {
 
   Future<JsonMap> startExport({
     required String projectRoot,
-    required String videoId,
+    String? videoId,
     String mode = 'separate',
     String? outputDir,
     String? outputPath,
@@ -495,7 +519,7 @@ class EngineSession {
   }) {
     return client.request('start_export', <String, dynamic>{
       'project_root': projectRoot,
-      'video_id': videoId,
+      ...?_optionalEntry('video_id', videoId),
       'mode': mode,
       ...?_optionalEntry('output_dir', outputDir),
       ...?_optionalEntry('output_path', outputPath),

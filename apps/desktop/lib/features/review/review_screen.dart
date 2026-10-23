@@ -44,6 +44,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   String _candidateFilter = 'all';
   String _playerFilter = 'all';
   String _rimFilter = 'all';
+  String _segmentFilter = 'all';
   final _VideoPaneController _videoController = _VideoPaneController();
   int _videoSourceSwitchToken = 0;
   final FocusNode _shortcutFocusNode = FocusNode(
@@ -65,9 +66,12 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     List<Map<String, dynamic>> candidates,
   ) {
     final ordered = [...candidates];
-    ordered.sort(
-      (left, right) => _candidateTime(left).compareTo(_candidateTime(right)),
-    );
+    ordered.sort((left, right) {
+      final bySegment = _candidateSegment(left).compareTo(_candidateSegment(right));
+      return bySegment != 0
+          ? bySegment
+          : _candidateTime(left).compareTo(_candidateTime(right));
+    });
     return ordered;
   }
 
@@ -136,6 +140,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       _candidateFilter,
       playerFilter: _playerFilter,
       rimFilter: _rimFilter,
+      segmentFilter: _segmentFilter,
     );
     await notifier.setCandidatePlayer(candidate['id'].toString(), playerId);
     _keepSelectionVisibleAfterEdit(candidate['id'].toString(), before);
@@ -164,6 +169,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       _candidateFilter,
       playerFilter: _playerFilter,
       rimFilter: _rimFilter,
+      segmentFilter: _segmentFilter,
     );
     await notifier.createPlayer(
       name,
@@ -172,16 +178,23 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     _keepSelectionVisibleAfterEdit(candidate['id'].toString(), before);
   }
 
-  void _changeFilters({String? status, String? player, String? rim}) {
+  void _changeFilters({
+    String? status,
+    String? player,
+    String? rim,
+    String? segment,
+  }) {
     setState(() {
       _candidateFilter = status ?? _candidateFilter;
       _playerFilter = player ?? _playerFilter;
       _rimFilter = rim ?? _rimFilter;
+      _segmentFilter = segment ?? _segmentFilter;
       final candidates = _filterCandidates(
         _orderedCandidates(ref.read(projectProvider).candidates),
         _candidateFilter,
         playerFilter: _playerFilter,
         rimFilter: _rimFilter,
+        segmentFilter: _segmentFilter,
       );
       _selectedCandidateId = _selectedCandidate(candidates)?['id']?.toString();
     });
@@ -574,6 +587,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       _candidateFilter,
       playerFilter: _playerFilter,
       rimFilter: _rimFilter,
+      segmentFilter: _segmentFilter,
     );
     final future = ref
         .read(projectProvider.notifier)
@@ -595,6 +609,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       _candidateFilter,
       playerFilter: _playerFilter,
       rimFilter: _rimFilter,
+      segmentFilter: _segmentFilter,
     );
     if (mounted &&
         _selectedCandidateId == id &&
@@ -670,9 +685,18 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       'all',
       playerFilter: _playerFilter,
       rimFilter: _rimFilter,
+      segmentFilter: _segmentFilter,
     );
     final selected = _selectedCandidate(candidates);
     final selectedId = selected?['id']?.toString();
+    final selectedVideoId = selected?['video_id']?.toString();
+    if (state.multiVideo &&
+        selectedVideoId != null &&
+        selectedVideoId != state.video?['id']?.toString()) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) notifier.activateVideo(selectedVideoId);
+      });
+    }
     final job = state.job;
     final jobState = job?['state']?.toString() ?? '';
     final recoveryState = job?['recovery_state']?.toString();
@@ -833,6 +857,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     filter: _candidateFilter,
                     playerFilter: _playerFilter,
                     rimFilter: _rimFilter,
+                    segmentFilter: _segmentFilter,
                     statusCandidates: statusCandidates,
                     busy: reviewLocked,
                     busyMessage: state.busyMessage,
@@ -863,10 +888,18 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     onPlayerFilterChanged: (value) =>
                         _changeFilters(player: value),
                     onRimFilterChanged: (value) => _changeFilters(rim: value),
+                    segments: [
+                      if (state.multiVideo)
+                        for (final (index, video) in state.videos.indexed)
+                          (video['id'].toString(), index + 1),
+                    ],
+                    onSegmentFilterChanged: (value) =>
+                        _changeFilters(segment: value),
                     onClearFilters: () => _changeFilters(
                       status: 'all',
                       player: 'all',
                       rim: 'all',
+                      segment: 'all',
                     ),
                     onReanalyze: !analyzing && !state.busy && !state.hydrating
                         ? reanalyze
@@ -982,6 +1015,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       _candidateFilter,
       playerFilter: _playerFilter,
       rimFilter: _rimFilter,
+      segmentFilter: _segmentFilter,
     );
     final index = candidates.indexWhere(
       (candidate) => candidate['id']?.toString() == id,
@@ -1012,7 +1046,11 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   }
 
   void _syncPreviewScope(ProjectState state) {
-    final key = '${state.video?['id'] ?? ''}|${state.videoPath ?? ''}';
+    // 多段项目里选中候选会切换当前段，不能因此清空审核状态。
+    final key = state.multiVideo
+        ? ([for (final video in state.videos) video['id'].toString()]..sort())
+              .join('|')
+        : '${state.video?['id'] ?? ''}|${state.videoPath ?? ''}';
     if (_previewScopeKey == key) return;
     _previewScopeKey = key;
     _previewGeneration++;
@@ -1022,6 +1060,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     _candidateFilter = 'all';
     _playerFilter = 'all';
     _rimFilter = 'all';
+    _segmentFilter = 'all';
     _showOriginalVideo = false;
     _videoSourceSwitchToken++;
   }
@@ -3167,7 +3206,9 @@ class _CandidateInspector extends StatelessWidget {
           children: [
             Flexible(
               child: Text(
-                context.bheText('候选 ${_formatMs(_candidateTime(candidate))}'),
+                _candidateSegment(candidate) > 0
+                    ? '${context.bheText('第 ${_candidateSegment(candidate)} 段')} · ${_formatMs(_candidateTime(candidate))}'
+                    : context.bheText('候选 ${_formatMs(_candidateTime(candidate))}'),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleLarge?.copyWith(
@@ -4633,6 +4674,7 @@ class _CandidatePanel extends StatelessWidget {
     required this.filter,
     required this.playerFilter,
     required this.rimFilter,
+    required this.segmentFilter,
     required this.statusCandidates,
     required this.busy,
     required this.busyMessage,
@@ -4655,6 +4697,8 @@ class _CandidatePanel extends StatelessWidget {
     required this.onFilterChanged,
     required this.onPlayerFilterChanged,
     required this.onRimFilterChanged,
+    required this.segments,
+    required this.onSegmentFilterChanged,
     required this.onClearFilters,
     required this.onReanalyze,
     required this.onRetryHydration,
@@ -4674,6 +4718,7 @@ class _CandidatePanel extends StatelessWidget {
   final String filter;
   final String playerFilter;
   final String rimFilter;
+  final String segmentFilter;
   final List<Map<String, dynamic>> statusCandidates;
   final bool busy;
   final String? busyMessage;
@@ -4696,6 +4741,10 @@ class _CandidatePanel extends StatelessWidget {
   final ValueChanged<String> onFilterChanged;
   final ValueChanged<String> onPlayerFilterChanged;
   final ValueChanged<String> onRimFilterChanged;
+
+  /// 多段项目的 (视频 id, 段号)，单段项目为空。
+  final List<(String, int)> segments;
+  final ValueChanged<String> onSegmentFilterChanged;
   final VoidCallback onClearFilters;
   final VoidCallback? onReanalyze;
   final VoidCallback? onRetryHydration;
@@ -4854,9 +4903,19 @@ class _CandidatePanel extends StatelessWidget {
               onChanged: onRimFilterChanged,
             ),
           ],
+          if (segments.isNotEmpty) ...[
+            const SizedBox(height: Spacing.sm),
+            _SegmentChips(
+              value: segmentFilter,
+              segments: segments,
+              candidates: statusCandidates,
+              onChanged: onSegmentFilterChanged,
+            ),
+          ],
           if (filter != 'all' ||
               playerFilter != 'all' ||
-              rimFilter != 'all') ...[
+              rimFilter != 'all' ||
+              segmentFilter != 'all') ...[
             const SizedBox(height: Spacing.sm),
             Container(
               key: const Key('review-filter-banner'),
@@ -4911,7 +4970,8 @@ class _CandidatePanel extends StatelessWidget {
                     onClearFilter:
                         filter == 'all' &&
                             playerFilter == 'all' &&
-                            rimFilter == 'all'
+                            rimFilter == 'all' &&
+                            segmentFilter == 'all'
                         ? null
                         : onClearFilters,
                     onReanalyze: onReanalyze,
@@ -5151,6 +5211,95 @@ class _RowContextAnchorState extends State<_RowContextAnchor> {
 
   @override
   Widget build(BuildContext context) => widget.child;
+}
+
+class _SegmentChips extends StatelessWidget {
+  const _SegmentChips({
+    required this.value,
+    required this.segments,
+    required this.candidates,
+    required this.onChanged,
+  });
+
+  final String value;
+  final List<(String, int)> segments;
+  final List<Map<String, dynamic>> candidates;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final counts = <String, int>{'all': candidates.length};
+    for (final candidate in candidates) {
+      counts.update(
+        candidate['video_id']?.toString() ?? '',
+        (count) => count + 1,
+        ifAbsent: () => 1,
+      );
+    }
+    final options = <(String, String)>[
+      ('all', context.bheText('全部')),
+      for (final (id, segment) in segments)
+        (id, context.bheText('第 $segment 段')),
+    ];
+    return Semantics(
+      container: true,
+      label: context.bheText('按视频段筛选'),
+      child: SizedBox(
+        key: const Key('review-segment-filter'),
+        height: 30,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              Text(
+                context.bheText('视频段'),
+                style: TextStyle(color: c.textTertiary, fontSize: 12),
+              ),
+              for (final (key, label) in options) ...[
+                const SizedBox(width: 6),
+                Semantics(
+                  button: true,
+                  selected: value == key,
+                  child: Material(
+                    key: ValueKey('review-segment-option-$key'),
+                    color: value == key ? c.surface3 : Colors.transparent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(CsRadius.full),
+                      side: BorderSide(
+                        color: value == key ? c.borderStrong : c.border,
+                      ),
+                    ),
+                    child: InkWell(
+                      onTap: () => onChanged(key),
+                      customBorder: const StadiumBorder(),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        child: Text(
+                          '$label ${counts[key] ?? 0}',
+                          style: TextStyle(
+                            color: value == key
+                                ? c.textPrimary
+                                : c.textSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _RimCheckChips extends StatelessWidget {
@@ -5818,6 +5967,16 @@ class _CandidateRow extends StatelessWidget {
                                                 fontWeight: FontWeight.w500,
                                               ),
                                             ),
+                                            if (_candidateSegment(candidate) > 0)
+                                              TextSpan(
+                                                text:
+                                                    '${context.bheText('第 ${_candidateSegment(candidate)} 段')} ',
+                                                style: TextStyle(
+                                                  color: c.textSecondary,
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
                                             TextSpan(
                                               text: _formatMs(
                                                 _candidateTime(candidate),
@@ -6550,8 +6709,13 @@ List<Map<String, dynamic>> _filterCandidates(
   String filter, {
   String playerFilter = 'all',
   String rimFilter = 'all',
+  String segmentFilter = 'all',
 }) {
   return candidates.where((candidate) {
+    if (segmentFilter != 'all' &&
+        candidate['video_id']?.toString() != segmentFilter) {
+      return false;
+    }
     if (filter == 'included' && _isExcluded(candidate)) return false;
     if (filter == 'excluded' && !_isExcluded(candidate)) return false;
     if (rimFilter != 'all' && _rimCheckStatus(candidate) != rimFilter) {
@@ -6565,6 +6729,11 @@ List<Map<String, dynamic>> _filterCandidates(
       _ => playerFilter == 'player:$id',
     };
   }).toList();
+}
+
+int _candidateSegment(Map<String, dynamic> candidate) {
+  final value = candidate['segment'];
+  return value is num ? value.toInt() : 0;
 }
 
 int _candidateTime(Map<String, dynamic> candidate) {

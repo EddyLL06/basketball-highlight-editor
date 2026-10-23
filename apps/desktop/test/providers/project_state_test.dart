@@ -1103,7 +1103,7 @@ class _FakeProjectSession extends ProjectSession {
   };
 
   @override
-  Future<JsonMap> extractPreview({int timeMs = 1000}) async {
+  Future<JsonMap> extractPreview({int timeMs = 1000, String? videoId}) async {
     await previewGate?.future;
     if (previewDelay > Duration.zero) await Future<void>.delayed(previewDelay);
     return <String, dynamic>{'path': '/tmp/preview.jpg'};
@@ -1111,6 +1111,7 @@ class _FakeProjectSession extends ProjectSession {
 
   @override
   Future<JsonMap> suggestRoi({
+    String? videoId,
     String? modelPath,
     int? startMs,
     double? sampleFps,
@@ -1137,6 +1138,7 @@ class _FakeProjectSession extends ProjectSession {
     required num y2,
     String? name,
     JsonMap? calibration,
+    String? videoId,
   }) async {
     if (throwOnSaveRoi) throw StateError('save_roi failed');
     return <String, dynamic>{};
@@ -1144,6 +1146,7 @@ class _FakeProjectSession extends ProjectSession {
 
   @override
   Future<JsonMap> startAnalysis({
+    String? videoId,
     String? mode,
     double? sampleFps,
     double? windowSeconds,
