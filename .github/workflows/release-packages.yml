@@ -657,3 +657,40 @@ jobs:
           for source in "$RUNNER_TEMP/bhe-release-assets"/BHE-android-arm64-v8a-v*-debug-signed.apk; do
             publish_alias "$source" "BHE-android-arm64-v8a-latest.apk" "$OSS_ANDROID_KEY"
           done
+
+      - name: Check out release notes
+        if: env.RELEASE_PLATFORM == 'all'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG_NAME }}
+          path: source
+
+      - name: Publish signed update manifest
+        if: env.RELEASE_PLATFORM == 'all'
+        shell: bash
+        env:
+          OSSUTIL_CONFIG: ${{ runner.temp }}/ossutilconfig
+          UPDATE_SIGNING_KEY: ${{ secrets.BHE_UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$UPDATE_SIGNING_KEY"
+          manifest_dir="$RUNNER_TEMP/bhe-update-manifest"
+          mkdir -p "$manifest_dir"
+          python3 source/scripts/build_update_manifest.py \
+            --tag "$TAG_NAME" \
+            --assets-dir "$RUNNER_TEMP/bhe-release-assets" \
+            --base-url "https://shengshengniannian.oss-cn-beijing.aliyuncs.com/$OSS_PREFIX" \
+            --readme-zh source/README.md \
+            --readme-en source/README.en.md \
+            --out "$manifest_dir/latest.json"
+          key="$RUNNER_TEMP/update_signing_key.pem"
+          (umask 077; printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key")
+          openssl pkeyutl -sign -rawin -inkey "$key" \
+            -in "$manifest_dir/latest.json" -out "$manifest_dir/latest.json.sig"
+          rm -f "$key"
+          for name in latest.json latest.json.sig; do
+            ossutil \
+              --config-file "$OSSUTIL_CONFIG" \
+              cp -f --meta "Cache-Control:no-cache" \
+              "$manifest_dir/$name" "$OSS_BUCKET/$OSS_PREFIX/$name"
+          done
