@@ -942,6 +942,17 @@ class ProjectNotifier extends Notifier<ProjectState> {
           : _normalizeRoi(storedNetRoi.cast<String, dynamic>(), video);
       final restoredRoiSource = calibration?['source']?.toString() ?? 'manual';
       _applyVideoContext(payload);
+      if (((payload['orientation_corrected'] as List?) ?? const []).isNotEmpty) {
+        ref
+            .read(noticeProvider.notifier)
+            .push(
+              NoticeMessage(
+                id: 'orientation-${DateTime.now().microsecondsSinceEpoch}',
+                severity: NoticeSeverity.warning,
+                title: '视频横竖方向已修正，篮筐和候选需要重新确认并分析',
+              ),
+            );
+      }
       state = state.copyWith(
         knownProjectsRoot: Directory(canonicalProjectPath(root)).parent.path,
         video: video,
