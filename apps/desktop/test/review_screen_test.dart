@@ -968,6 +968,41 @@ void main() {
     expect(find.byTooltip('切换视频来源'), findsOneWidget);
   });
 
+  test('review playback never falls back to the import preview image', () {
+    expect(
+      resolveReviewPlaybackPath(
+        multiVideo: false,
+        originalVideoPath: '/tmp/original.mp4',
+        reviewVideoPath: null,
+      ),
+      '/tmp/original.mp4',
+    );
+    expect(
+      resolveReviewPlaybackPath(
+        multiVideo: false,
+        originalVideoPath: '/tmp/original.mp4',
+        reviewVideoPath: '',
+      ),
+      '/tmp/original.mp4',
+    );
+    expect(
+      resolveReviewPlaybackPath(
+        multiVideo: false,
+        originalVideoPath: '/tmp/original.mp4',
+        reviewVideoPath: '/tmp/review.mp4',
+      ),
+      '/tmp/review.mp4',
+    );
+    expect(
+      resolveReviewPlaybackPath(
+        multiVideo: true,
+        originalVideoPath: '/tmp/segment.mp4',
+        reviewVideoPath: '/tmp/review.mp4',
+      ),
+      '/tmp/segment.mp4',
+    );
+  });
+
   testWidgets(
     'shows candidate evidence below the video without crowding the row',
     (tester) async {

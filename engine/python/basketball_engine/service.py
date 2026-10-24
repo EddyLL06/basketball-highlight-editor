@@ -1954,8 +1954,13 @@ class EngineService:
         store, context = self._existing_store(payload)
         video_id = payload.get("video_id")
         candidates = store.list_candidates(video_id)
-        video = store.video(video_id) if isinstance(video_id, str) else None
         videos = {item["id"]: item for item in store.list_videos()}
+        # 不传 video_id 时按整个项目查询候选。单段项目仍只有一个可播放视频，
+        # 审核端需要它作为候选预览的源；多段项目由调用方按当前段选择源视频。
+        if isinstance(video_id, str):
+            video = store.video(video_id)
+        else:
+            video = next(iter(videos.values())) if len(videos) == 1 else None
         segments = {video_id: index for index, video_id in enumerate(videos, 1)} if len(videos) > 1 else {}
         for candidate in candidates:
             candidate_video = videos.get(candidate["video_id"])
