@@ -238,16 +238,22 @@ JOB_CANCELLED
 
 ### `list_candidates`
 
-成功响应除 `candidates` 外，可返回最近一次完整分析生成且仍存在的审核代理视频：
+成功响应除 `candidates` 外，可返回审核播放使用的视频源：
 
 ```json
 {
   "candidates": [],
-  "review_video_path": "/path/to/project/artifacts/proxies/video_key.mp4"
+  "review_video_path": "/path/to/source/video.mp4"
 }
 ```
 
-`review_video_path` 仅用于审核播放；原始视频路径仍由 `videos.source_path` 保存并只用于精确导出。代理不存在时该字段为 `null`，调用方应回退到原始视频或提示重新生成分析。
+`review_video_path` 仅用于审核播放，当前实现返回所选视频 `videos.source_path` 的绝对路径（尚未生成代理视频）；原始视频路径仍由 `videos.source_path` 保存并只用于精确导出。该字段是可选优化：
+
+- 传 `video_id` 时，返回该视频的审核播放源；
+- 不传 `video_id` 且项目只有一段视频时，返回该唯一视频的审核播放源；
+- 不传 `video_id` 且项目有多段视频时返回 `null`，调用方应按当前段使用对应的 `videos.source_path`。
+
+字段为 `null` 或为空时，调用方必须回退到当前视频的 `source_path`。`preview_path` 是审核封面用的单帧图片，不是视频，任何情况下都不能作为播放源。
 
 不传 `video_id` 时，候选先按视频顺序、再按事件时间排列，每条候选的 `video_id` 指明所属视频，项目有多段视频时还带 `segment`（从 1 开始的段号），`preview_path` 来自各自的视频。
 

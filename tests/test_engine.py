@@ -2268,6 +2268,48 @@ def test_list_candidates_returns_original_video_for_review(tmp_path: Path):
     assert result["review_video_path"] == str(source.resolve())
 
 
+def test_list_candidates_without_video_id_uses_single_project_video(tmp_path: Path):
+    project_root = tmp_path / "project"
+    source = tmp_path / "source.mp4"
+    service = EngineService()
+    service.handle("create_project", {"name": "单段审核源", "root_path": str(project_root)})
+    store = ProjectStore(project_root)
+    store.link_video({
+        "source_path": str(source),
+        "source_size_bytes": 1,
+        "source_mtime_ns": 1,
+        "duration_ms": 20_000,
+        "width": 960,
+        "height": 720,
+    })
+
+    result = service.handle("list_candidates", {"project_root": str(project_root)})
+
+    assert result["review_video_path"] == str(source.resolve())
+
+
+def test_list_candidates_without_video_id_omits_review_source_for_multi_video(
+    tmp_path: Path,
+):
+    project_root = tmp_path / "project"
+    service = EngineService()
+    service.handle("create_project", {"name": "多段审核源", "root_path": str(project_root)})
+    store = ProjectStore(project_root)
+    for index in range(2):
+        store.link_video({
+            "source_path": str(tmp_path / f"source-{index}.mp4"),
+            "source_size_bytes": 1,
+            "source_mtime_ns": 1,
+            "duration_ms": 20_000,
+            "width": 960,
+            "height": 720,
+        })
+
+    result = service.handle("list_candidates", {"project_root": str(project_root)})
+
+    assert result["review_video_path"] is None
+
+
 def test_start_export_uses_only_goal_reviews(tmp_path: Path):
     source = tmp_path / "source.mp4"
     subprocess.run(

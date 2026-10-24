@@ -718,9 +718,11 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
         .clamp(0.0, 1.0)
         .toDouble();
     final originalVideoPath = _resolveOriginalVideoPath(state);
-    final reviewVideoPath = state.multiVideo
-        ? originalVideoPath
-        : state.reviewVideoPath ?? state.previewPath;
+    final reviewVideoPath = resolveReviewPlaybackPath(
+      multiVideo: state.multiVideo,
+      originalVideoPath: originalVideoPath,
+      reviewVideoPath: state.reviewVideoPath,
+    );
     final showingOriginalVideo =
         _showOriginalVideo ||
         reviewVideoPath == null ||
@@ -7033,6 +7035,20 @@ String? _resolveOriginalVideoPath(ProjectState state) {
   final path = state.video?['source_path']?.toString();
   if (path == null || path.isEmpty) return null;
   return path;
+}
+
+/// 审核播放源：多段项目用当前段原视频；单段项目优先用引擎返回的审核视频，
+/// 缺失时回退原视频。`previewPath` 是导入页的静帧截图，绝不能作为播放源。
+String? resolveReviewPlaybackPath({
+  required bool multiVideo,
+  required String? originalVideoPath,
+  required String? reviewVideoPath,
+}) {
+  if (multiVideo) return originalVideoPath;
+  if (reviewVideoPath == null || reviewVideoPath.isEmpty) {
+    return originalVideoPath;
+  }
+  return reviewVideoPath;
 }
 
 /// Returns the seek/playback bounds for the review timeline.
