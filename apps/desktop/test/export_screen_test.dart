@@ -11,6 +11,34 @@ import 'package:desktop/providers/export_output_picker.dart';
 import 'package:desktop/theme/app_theme.dart';
 
 void main() {
+  testWidgets('shows game stats from the current review', (tester) async {
+    final notifier = _FilterExportNotifier(
+      const ProjectState(
+        video: {'id': 'A'},
+        players: [
+          {'id': 'p1', 'name': 'Alice'},
+        ],
+        candidates: [
+          {'id': 'a', 'event_time_ms': 60000, 'player_id': 'p1', 'review_status': 'included'},
+          {'id': 'b', 'event_time_ms': 720000, 'review_status': 'pending'},
+          {
+            'id': 'c',
+            'event_time_ms': 90000,
+            'review_status': 'excluded',
+            'selection_status': 'excluded',
+            'review_reason': 'auto_rim_check',
+          },
+        ],
+      ),
+    );
+    await _pumpFilterExport(tester, notifier);
+
+    expect(find.byKey(const Key('export-game-stats')), findsOneWidget);
+    expect(find.text('67%  ·  2 / 3'), findsOneWidget);
+    expect(find.text('0–10 分钟'), findsOneWidget);
+    expect(find.text('10–20 分钟'), findsOneWidget);
+  });
+
   testWidgets('cached export resets player filters when the video changes', (
     tester,
   ) async {

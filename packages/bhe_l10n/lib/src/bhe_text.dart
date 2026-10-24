@@ -71,6 +71,11 @@ extension BheBuildContextText on BuildContext {
 }
 
 String? _translateDynamic(String source) {
+  final minutes = RegExp(r'^(?:第 (\d+) 段 )?(\d+)–(\d+) 分钟$').firstMatch(source);
+  if (minutes != null) {
+    final range = '${minutes.group(2)}–${minutes.group(3)} min';
+    return minutes.group(1) == null ? range : 'Part ${minutes.group(1)} $range';
+  }
   final missingFile = RegExp(r'^找不到文件或文件夹：(.+)$').firstMatch(source);
   if (missingFile != null) return 'File or folder not found: ${missingFile.group(1)}';
   final accessDenied = RegExp(r'^没有权限访问：(.+)$').firstMatch(source);
@@ -1182,6 +1187,17 @@ const _englishText = <String, String>{
       'Make sure no other program is using the file, or choose a folder you can read and write.',
   '磁盘空间不足': 'Not enough disk space',
   '请清理磁盘空间后再试。': 'Free up some disk space and try again.',
+  '比赛数据': 'Game stats',
+  '按当前审核结果统计': 'Based on the current review',
+  '进球（保留）': 'Made (kept)',
+  '其中未审核': 'Not reviewed yet',
+  '你排除的': 'Excluded by you',
+  '复核判定没进': 'Rim check: missed',
+  '命中率（估算）': 'Hit rate (estimate)',
+  '只算识别到的篮筐附近的出手，没碰到篮筐的投篮不计入，结果会偏高，仅供参考。':
+      'Only counts shots recognised near the rim. Shots that never reach the rim are not counted, so this runs high and is only a guide.',
+  '每人进球': 'Made shots per player',
+  '进球时间分布': 'Made shots over time',
   '源视频找不到，请到导入页重新定位视频': 'The source video cannot be found. Relink it on the import page.',
   '视频横竖方向已修正，篮筐和候选需要重新确认并分析': 'The video orientation was corrected. Re-confirm the hoop and candidates, then analyse again.',
   '现在有分析或导出在进行，等它完成再安装，安装时 BHE 会被关闭。':

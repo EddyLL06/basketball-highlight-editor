@@ -15,6 +15,7 @@ import '../../providers/playback_coordinator.dart';
 import '../../providers/export_output_picker.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
+import 'game_stats.dart';
 
 /// Export 屏:汇总当前保留片段 + 合并/分别导出 CTA + 历史。
 ///
@@ -283,6 +284,12 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
             ),
           ],
         ),
+        if (state.candidates.isNotEmpty) ...[
+          const SizedBox(height: Spacing.xl),
+          _GameStatsSection(
+            stats: computeGameStats(state.candidates, state.players),
+          ),
+        ],
       ],
     );
 
@@ -496,6 +503,169 @@ class _ExportSection extends StatelessWidget {
           child,
         ],
       ),
+    );
+  }
+}
+
+class _GameStatsSection extends StatelessWidget {
+  const _GameStatsSection({required this.stats});
+
+  final GameStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    final hitRate = stats.estimatedHitRate;
+    final playerRows = [
+      for (final item in stats.playerCounts)
+        (label: item.name, count: item.count, color: c.player(item.index)),
+      if (stats.unassignedCount > 0)
+        (
+          label: context.bheText('未标记'),
+          count: stats.unassignedCount,
+          color: c.textTertiary,
+        ),
+    ];
+    final timeRows = [
+      for (final bucket in stats.timeBuckets)
+        (
+          label: context.bheText(
+            bucket.segment == null
+                ? '${bucket.startMinute}–${bucket.endMinute} 分钟'
+                : '第 ${bucket.segment} 段 ${bucket.startMinute}–${bucket.endMinute} 分钟',
+          ),
+          count: bucket.count,
+          color: c.orange,
+        ),
+    ];
+    return _ExportSection(
+      title: context.bheText('比赛数据'),
+      hint: context.bheText('按当前审核结果统计'),
+      child: Column(
+        key: const Key('export-game-stats'),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _ExportStat(
+                  label: context.bheText('候选'),
+                  value: '${stats.candidateCount}',
+                ),
+              ),
+              Expanded(
+                child: _ExportStat(
+                  label: context.bheText('进球（保留）'),
+                  value: '${stats.madeCount}',
+                ),
+              ),
+              Expanded(
+                child: _ExportStat(
+                  label: context.bheText('其中未审核'),
+                  value: '${stats.unreviewedCount}',
+                ),
+              ),
+              Expanded(
+                child: _ExportStat(
+                  label: context.bheText('你排除的'),
+                  value: '${stats.manuallyExcludedCount}',
+                ),
+              ),
+              Expanded(
+                child: _ExportStat(
+                  label: context.bheText('复核判定没进'),
+                  value: '${stats.rimRejectedCount}',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Spacing.md),
+          _ExportStat(
+            label: context.bheText('命中率（估算）'),
+            value: hitRate == null
+                ? '—'
+                : '${(hitRate * 100).round()}%  ·  ${stats.madeCount} / ${stats.madeCount + stats.rimRejectedCount}',
+          ),
+          const SizedBox(height: 4),
+          Text(
+            context.bheText('只算识别到的篮筐附近的出手，没碰到篮筐的投篮不计入，结果会偏高，仅供参考。'),
+            style: theme.textTheme.labelSmall?.copyWith(color: c.textTertiary),
+          ),
+          if (playerRows.isNotEmpty) ...[
+            const SizedBox(height: Spacing.md),
+            Text(context.bheText('每人进球'), style: theme.textTheme.labelMedium),
+            const SizedBox(height: Spacing.xs),
+            _CountBars(rows: playerRows),
+          ],
+          if (timeRows.isNotEmpty) ...[
+            const SizedBox(height: Spacing.md),
+            Text(context.bheText('进球时间分布'), style: theme.textTheme.labelMedium),
+            const SizedBox(height: Spacing.xs),
+            _CountBars(rows: timeRows),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CountBars extends StatelessWidget {
+  const _CountBars({required this.rows});
+
+  final List<({String label, int count, Color color})> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    final most = rows.fold<int>(1, (value, row) => row.count > value ? row.count : value);
+    return Column(
+      children: [
+        for (final row in rows)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 140,
+                  child: Text(
+                    row.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall,
+                  ),
+                ),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: FractionallySizedBox(
+                      widthFactor: row.count / most,
+                      child: Container(
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: row.color.withValues(alpha: 0.75),
+                          borderRadius: BorderRadius.circular(CsRadius.full),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 36,
+                  child: Text(
+                    '${row.count}',
+                    textAlign: TextAlign.right,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: c.textSecondary,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
