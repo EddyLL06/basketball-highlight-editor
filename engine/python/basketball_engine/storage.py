@@ -297,7 +297,7 @@ class ProjectStore:
                 "SELECT value_json FROM settings WHERE key = ?",
                 (f"project:{project['id']}:analysis_queue",),
             ).fetchone()
-        empty = {"video_ids": [], "before_seconds": 6, "after_seconds": 3}
+        empty = {"video_ids": [], "before_seconds": 3, "after_seconds": 1}
         if not row:
             return empty
         try:
@@ -311,8 +311,8 @@ class ProjectStore:
     def set_analysis_queue(
         self,
         video_ids: list[str],
-        before_seconds: float = 6,
-        after_seconds: float = 3,
+        before_seconds: float = 3,
+        after_seconds: float = 1,
     ) -> Dict[str, Any]:
         project = self.project()
         if not project:

@@ -60,8 +60,8 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
   int _analysisStartMs = 0;
   bool _rangeTouched = false;
   int _analysisEndMs = 0;
-  int _beforeSeconds = 6;
-  int _afterSeconds = 3;
+  int _beforeSeconds = 3;
+  int _afterSeconds = 1;
   String _analysisMode = 'standard';
   Timer? _previewPlaybackTimer;
   bool _previewPlaying = false;
@@ -158,8 +158,8 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
       _analysisStartMs = _analysisStart(state);
       _analysisEndMs = _analysisEnd(state);
     }
-    _beforeSeconds = 6;
-    _afterSeconds = 3;
+    _beforeSeconds = 3;
+    _afterSeconds = 1;
     _analysisMode = state.analysisMode;
     if (_step == 0 && !state.multiVideo) _step = 1;
   }

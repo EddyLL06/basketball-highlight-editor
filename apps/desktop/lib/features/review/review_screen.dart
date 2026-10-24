@@ -213,8 +213,8 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     List<Map<String, dynamic>> candidates,
   ) async {
     if (candidates.isEmpty) return;
-    final beforeController = TextEditingController(text: '6');
-    final afterController = TextEditingController(text: '3');
+    final beforeController = TextEditingController(text: '3');
+    final afterController = TextEditingController(text: '1');
     var overwriteManual = false;
     final result =
         await showDialog<({int before, int after, bool overwrite})>(

@@ -327,8 +327,8 @@ class ProjectSession {
 
   Future<JsonMap> setAnalysisQueue(
     List<String> videoIds, {
-    double beforeSeconds = 6,
-    double afterSeconds = 3,
+    double beforeSeconds = 3,
+    double afterSeconds = 1,
   }) {
     return engine.setAnalysisQueue(
       projectRoot: _requireProjectRoot(),

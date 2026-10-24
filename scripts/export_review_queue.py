@@ -14,8 +14,8 @@ def parse_args():
     parser.add_argument("--video", required=True)
     parser.add_argument("--detections", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--before", type=float, default=6.0)
-    parser.add_argument("--after", type=float, default=3.0)
+    parser.add_argument("--before", type=float, default=3.0)
+    parser.add_argument("--after", type=float, default=1.0)
     parser.add_argument("--dedupe-sec", type=float, default=2.0)
     parser.add_argument("--auto-only", action="store_true",
                         help="Export only candidates passing the automatic-goal gate.")

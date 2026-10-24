@@ -786,8 +786,8 @@ class EngineService:
         if not isinstance(video_ids, list) or not all(isinstance(item, str) for item in video_ids):
             raise ProtocolError("INVALID_REQUEST", "video_ids 必须是字符串列表")
         try:
-            before_seconds = float(payload.get("before_seconds", 6))
-            after_seconds = float(payload.get("after_seconds", 3))
+            before_seconds = float(payload.get("before_seconds", 3))
+            after_seconds = float(payload.get("after_seconds", 1))
         except (TypeError, ValueError) as exc:
             raise ProtocolError("INVALID_REQUEST", "片段前后秒数格式无效") from exc
         if not (math.isfinite(before_seconds) and before_seconds >= 0 and math.isfinite(after_seconds) and after_seconds > 0):
@@ -1051,8 +1051,8 @@ class EngineService:
         try:
             sample_fps = float(payload.get("sample_fps", 10))
             window_seconds = float(payload.get("window_seconds", 2.5))
-            before_seconds = float(payload.get("before_seconds", 6))
-            after_seconds = float(payload.get("after_seconds", 3))
+            before_seconds = float(payload.get("before_seconds", 3))
+            after_seconds = float(payload.get("after_seconds", 1))
         except (TypeError, ValueError) as exc:
             raise ProtocolError("INVALID_REQUEST", "分析参数格式无效") from exc
         if (
@@ -1463,8 +1463,8 @@ class EngineService:
                 "sample_fps": float(payload.get("sample_fps", 10)),
                 "refine_scale": int(payload.get("refine_scale", 2)),
                 "conf": float(payload.get("conf", 0.10)),
-                "before_seconds": float(payload.get("before_seconds", 6)),
-                "after_seconds": float(payload.get("after_seconds", 3)),
+                "before_seconds": float(payload.get("before_seconds", 3)),
+                "after_seconds": float(payload.get("after_seconds", 1)),
                 "analysis_start_ms": int(video.get("analysis_start_ms") or 0),
                 "analysis_end_ms": int(video.get("analysis_end_ms") or video.get("duration_ms") or 0),
             }
@@ -1677,8 +1677,8 @@ class EngineService:
                     video_id=video_id,
                     roi_id=roi["id"],
                     duration_ms=int(video.get("duration_ms") or 0),
-                    before_seconds=float(payload.get("before_seconds", 6)),
-                    after_seconds=float(payload.get("after_seconds", 3)),
+                    before_seconds=float(payload.get("before_seconds", 3)),
+                    after_seconds=float(payload.get("after_seconds", 1)),
                     detector_version=f"{ANALYSIS_ALGORITHM_VERSION}:{mode}",
                     analysis_source=(
                         "coarse"

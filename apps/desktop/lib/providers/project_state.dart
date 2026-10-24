@@ -98,8 +98,8 @@ class ProjectState {
     this.analysisMode = 'standard',
     this.videos = const <JsonMap>[],
     this.analysisQueue = const <String>[],
-    this.queueBeforeSeconds = 6,
-    this.queueAfterSeconds = 3,
+    this.queueBeforeSeconds = 3,
+    this.queueAfterSeconds = 1,
     this.queuePaused = false,
     this.exportQueued = false,
   });
@@ -1195,8 +1195,8 @@ class ProjectNotifier extends Notifier<ProjectState> {
         for (final id in (queue?['video_ids'] as List?) ?? const <dynamic>[])
           id.toString(),
       ],
-      queueBeforeSeconds: (queue?['before_seconds'] as num?)?.toDouble() ?? 6,
-      queueAfterSeconds: (queue?['after_seconds'] as num?)?.toDouble() ?? 3,
+      queueBeforeSeconds: (queue?['before_seconds'] as num?)?.toDouble() ?? 3,
+      queueAfterSeconds: (queue?['after_seconds'] as num?)?.toDouble() ?? 1,
     );
   }
 
@@ -1667,8 +1667,8 @@ class ProjectNotifier extends Notifier<ProjectState> {
       final result = await session.startAnalysis(
         mode: requestedMode,
         sampleFps: 10,
-        beforeSeconds: beforeSeconds ?? 6,
-        afterSeconds: afterSeconds ?? 3,
+        beforeSeconds: beforeSeconds ?? 3,
+        afterSeconds: afterSeconds ?? 1,
       );
       state = state.copyWith(
         job: (result['job'] as Map?)?.cast<String, dynamic>(),

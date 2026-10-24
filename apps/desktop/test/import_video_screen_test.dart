@@ -95,7 +95,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('import-analyze-all')));
     await tester.pump();
-    expect(notifier.queued, [(6.0, 3.0)]);
+    expect(notifier.queued, [(3.0, 1.0)]);
 
     await tester.tap(find.byKey(const ValueKey('video-segment-edit-v3')));
     await tester.pump();

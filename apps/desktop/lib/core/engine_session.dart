@@ -145,8 +145,8 @@ class EngineSession {
   Future<JsonMap> setAnalysisQueue({
     required String projectRoot,
     required List<String> videoIds,
-    double beforeSeconds = 6,
-    double afterSeconds = 3,
+    double beforeSeconds = 3,
+    double afterSeconds = 1,
   }) {
     return client.request('set_analysis_queue', <String, dynamic>{
       'project_root': projectRoot,
