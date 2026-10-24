@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import tempfile
 from pathlib import Path
 
 
@@ -37,15 +39,19 @@ def main() -> int:
         raise SystemExit("ultralytics is required: pip install ultralytics") from error
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    model = YOLO(str(args.model))
-    exported = model.export(
-        format="onnx", imgsz=args.imgsz, simplify=False,
-        dynamic=bool(args.dynamic), batch=max(1, int(args.batch)),
-    )
-    exported_path = Path(str(exported))
-    if not exported_path.is_file():
-        raise SystemExit(f"export reported success but output is missing: {exported_path}")
-    if exported_path.resolve() != args.output.resolve():
+    # ultralytics 总是把 .onnx 写在 .pt 旁边；先复制到临时目录再导出，
+    # 免得 --output 指向别处时也覆盖掉 models/ 里原有的移动端模型。
+    with tempfile.TemporaryDirectory() as workdir:
+        staged = Path(workdir) / args.model.name
+        shutil.copy2(args.model, staged)
+        model = YOLO(str(staged))
+        exported = model.export(
+            format="onnx", imgsz=args.imgsz, simplify=False,
+            dynamic=bool(args.dynamic), batch=max(1, int(args.batch)),
+        )
+        exported_path = Path(str(exported))
+        if not exported_path.is_file():
+            raise SystemExit(f"export reported success but output is missing: {exported_path}")
         args.output.write_bytes(exported_path.read_bytes())
     if args.dynamic:
         # 类别名随模型一起走:ORT 侧没有 torch,读不到 names。
