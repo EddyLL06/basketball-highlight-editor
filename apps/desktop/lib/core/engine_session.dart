@@ -516,6 +516,7 @@ class EngineSession {
     String? outputPath,
     List<String>? playerIds,
     bool? includeUnassigned,
+    String effect = 'none',
   }) {
     return client.request('start_export', <String, dynamic>{
       'project_root': projectRoot,
@@ -525,6 +526,7 @@ class EngineSession {
       ...?_optionalEntry('output_path', outputPath),
       ...?_optionalEntry('player_ids', playerIds),
       ...?_optionalEntry('include_unassigned', includeUnassigned),
+      if (effect != 'none') 'effect': effect,
     });
   }
 

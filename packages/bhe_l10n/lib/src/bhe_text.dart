@@ -1194,6 +1194,16 @@ const _englishText = <String, String>{
   '只导出选中的标签，每个标签一个 MP4，文件名就是标签名，放进同一个文件夹。':
       'Exports only the selected tags: one MP4 per tag, named after the tag, in one folder.',
   '按标签导出': 'Per-tag export',
+  '进球效果': 'Goal effect',
+  '可选，导出时作用于每个进球片段': 'Optional. Applied to each goal clip when exporting.',
+  '不加效果': 'No effect',
+  '每个片段原样导出。': 'Clips are exported as they are.',
+  '临门慢动作': 'Slow-motion approach',
+  '进球前 1 秒放慢到一半速度，球进框后正常速度。人和球都在原画面里，像电影里的慢镜头。每个进球多约 1.3 秒。':
+      'Slows down to half speed for the second before the goal, then back to normal once the ball is through. Players and ball stay in the frame, like a film slow-motion shot. Adds about 1.3 s per goal.',
+  '慢放特写回放': 'Slow-motion close-up replay',
+  '片段播完后，重播入框前后约 0.8 秒的画面：放慢一倍，取景框住篮筐和球的飞行路线，方便看清球进没进。每个进球多约 1.6 秒。':
+      'After each clip, replays about 0.8 s around the goal at half speed, framed on the hoop and the ball path so you can see whether it went in. Adds about 1.6 s per goal.',
   '比赛数据': 'Game stats',
   '按当前审核结果统计': 'Based on the current review',
   '进球（保留）': 'Made (kept)',

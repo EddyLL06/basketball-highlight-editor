@@ -2412,6 +2412,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
     String? outputPath,
     List<String>? playerIds,
     bool? includeUnassigned,
+    String effect = 'none',
   }) async {
     if (state.busy || _isActiveJob(state.exportJob)) return;
     if (state.analysisRunning && state.analysisQueue.isNotEmpty) {
@@ -2421,6 +2422,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
         outputPath: outputPath,
         playerIds: playerIds,
         includeUnassigned: includeUnassigned,
+        effect: effect,
       );
       state = state.copyWith(exportQueued: true);
       _pushNotice('导出会在当前这段分析完成后开始，之后继续排队', NoticeSeverity.info);
@@ -2437,6 +2439,7 @@ class ProjectNotifier extends Notifier<ProjectState> {
             outputPath: outputPath,
             playerIds: playerIds,
             includeUnassigned: includeUnassigned,
+            effect: effect,
           );
       if (_disposed) return;
       final job = (result['job'] as Map?)?.cast<String, dynamic>();

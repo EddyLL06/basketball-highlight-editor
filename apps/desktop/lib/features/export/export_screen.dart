@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:bhe_l10n/bhe_l10n.dart';
 
 import '../../components/cs_button.dart';
@@ -36,6 +37,25 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   bool _showFastRisk = true;
   bool _choosingOutput = false;
   String _mode = 'merge';
+  String _effect = 'none';
+
+  static const _effectKey = 'export_goal_effect';
+
+  @override
+  void initState() {
+    super.initState();
+    SharedPreferences.getInstance().then((prefs) {
+      final saved = prefs.getString(_effectKey);
+      if (mounted && saved != null && saved != _effect && _kEffects.contains(saved)) {
+        setState(() => _effect = saved);
+      }
+    });
+  }
+
+  void _setEffect(String value) {
+    setState(() => _effect = value);
+    SharedPreferences.getInstance().then((prefs) => prefs.setString(_effectKey, value));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -52,7 +72,10 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
         : _mode;
     final includedCandidates = _filteredCandidates(state);
     final includedCount = includedCandidates.length;
-    final durationMs = includedCandidates.fold<int>(0, _clipDuration);
+    final durationMs = includedCandidates.fold<int>(
+      0,
+      (total, item) => _effectDuration(total, item, _effect),
+    );
     final exportRunning = state.exportRunning;
     final exportRecoverable =
         state.exportJob?['recoverable'] == true && !exportRunning;
@@ -199,6 +222,24 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
           ],
         ),
         const SizedBox(height: Spacing.md),
+        _ExportSection(
+          title: context.bheText('进球效果'),
+          hint: context.bheText('可选，导出时作用于每个进球片段'),
+          child: Column(
+            key: const Key('export-goal-effect'),
+            children: [
+              for (final option in _effectOptions(context))
+                _EffectOption(
+                  key: Key('export-effect-${option.value}'),
+                  title: option.title,
+                  description: option.description,
+                  selected: _effect == option.value,
+                  onTap: busy ? null : () => _setEffect(option.value),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: Spacing.sm),
         CsCard(
           child: Row(
             children: [
@@ -460,6 +501,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
       }
       await notifier.export(
         mode,
+        effect: _effect,
         outputPath: merge ? path : null,
         outputDir: merge ? null : path,
         playerIds: playerIds,
@@ -1203,6 +1245,119 @@ int _clipDuration(int total, Map<String, dynamic> item) {
       (item['default_end_ms'] as num?)?.toInt() ??
       0;
   return total + (end > start ? end - start : 0);
+}
+
+const _kEffects = ['none', 'approach', 'replay'];
+
+class _EffectChoice {
+  const _EffectChoice(this.value, this.title, this.description);
+
+  final String value;
+  final String title;
+  final String description;
+}
+
+List<_EffectChoice> _effectOptions(BuildContext context) => [
+  _EffectChoice(
+    'none',
+    context.bheText('不加效果'),
+    context.bheText('每个片段原样导出。'),
+  ),
+  _EffectChoice(
+    'approach',
+    context.bheText('临门慢动作'),
+    context.bheText('进球前 1 秒放慢到一半速度，球进框后正常速度。人和球都在原画面里，像电影里的慢镜头。每个进球多约 1.3 秒。'),
+  ),
+  _EffectChoice(
+    'replay',
+    context.bheText('慢放特写回放'),
+    context.bheText('片段播完后，重播入框前后约 0.8 秒的画面：放慢一倍，取景框住篮筐和球的飞行路线，方便看清球进没进。每个进球多约 1.6 秒。'),
+  ),
+];
+
+/// 导出总时长，和引擎一致：手动片段不加效果；取不到的片段按原样计。
+int _effectDuration(int total, Map<String, dynamic> item, String effect) {
+  if (effect == 'none') return _clipDuration(total, item);
+  final base = _clipDuration(total, item);
+  if (item['detector_version']?.toString().startsWith('manual') == true) return base;
+  final event = (item['event_time_ms'] as num?)?.toInt();
+  if (event == null) return base;
+  final start =
+      (item['review_start_ms'] as num?)?.toInt() ??
+      (item['default_start_ms'] as num?)?.toInt() ??
+      0;
+  final end =
+      (item['review_end_ms'] as num?)?.toInt() ??
+      (item['default_end_ms'] as num?)?.toInt() ??
+      0;
+  if (effect == 'approach') {
+    final window =
+        (end < event + 300 ? end : event + 300) -
+        (start > event - 1000 ? start : event - 1000);
+    return window >= 300 ? base + window : base;
+  }
+  final window =
+      (end < event + 300 ? end : event + 300) -
+      (start > event - 500 ? start : event - 500);
+  return window >= 300 ? base + window * 2 : base;
+}
+
+class _EffectOption extends StatelessWidget {
+  const _EffectOption({
+    super.key,
+    required this.title,
+    required this.description,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final String description;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(CsRadius.sm),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: Spacing.xs),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(
+                selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                size: 18,
+                color: selected ? c.orange : c.textTertiary,
+              ),
+            ),
+            const SizedBox(width: Spacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: theme.textTheme.labelLarge),
+                  const SizedBox(height: 2),
+                  Text(
+                    description,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: c.textSecondary,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 String _formatMs(int milliseconds) {

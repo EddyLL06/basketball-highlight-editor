@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:desktop/components/cs_button.dart';
 import 'package:desktop/features/export/export_screen.dart';
@@ -11,6 +12,63 @@ import 'package:desktop/providers/export_output_picker.dart';
 import 'package:desktop/theme/app_theme.dart';
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('the goal effect picks one option and the total follows it', (
+    tester,
+  ) async {
+    final notifier = _FilterExportNotifier(
+      const ProjectState(
+        video: {'id': 'A'},
+        candidates: [
+          {
+            'id': 'goal',
+            'event_time_ms': 3000,
+            'review_start_ms': 0,
+            'review_end_ms': 4000,
+            'detector_version': 'python-v2',
+          },
+          {
+            'id': 'manual',
+            'event_time_ms': 12000,
+            'review_start_ms': 10000,
+            'review_end_ms': 14000,
+            'detector_version': 'manual-v1',
+          },
+        ],
+      ),
+    );
+    final picker = _TestOutputPicker();
+    await _pumpFilterExport(tester, notifier, picker: picker);
+    expect(find.text('00:08'), findsOneWidget);
+
+    // 临门慢动作：进球那个片段多出 1.3 秒，手动片段不加。
+    final approach = find.byKey(const Key('export-effect-approach'));
+    await tester.ensureVisible(approach);
+    await tester.tap(approach);
+    await tester.pumpAndSettle();
+    expect(find.text('00:09'), findsOneWidget);
+
+    // 慢放特写回放：多出 1.6 秒。
+    final replay = find.byKey(const Key('export-effect-replay'));
+    await tester.ensureVisible(replay);
+    await tester.tap(replay);
+    await tester.pumpAndSettle();
+    expect(find.text('00:09'), findsOneWidget);
+
+    final start = find.byKey(const Key('export-start'));
+    await tester.ensureVisible(start);
+    await tester.tap(start);
+    await tester.pump();
+    picker.result.complete('/tmp/game.mp4');
+    await tester.pumpAndSettle();
+    expect(notifier.exportedEffect, 'replay');
+    expect(
+      (await SharedPreferences.getInstance()).getString('export_goal_effect'),
+      'replay',
+    );
+  });
+
   testWidgets('one video per tag asks for a folder and exports per tag', (
     tester,
   ) async {
@@ -415,6 +473,7 @@ class _FilterExportNotifier extends _ExportNotifier {
   List<String>? exportedPlayerIds;
   bool? exportedIncludeUnassigned;
   String? exportedMode;
+  String? exportedEffect;
   String? exportedOutputDir;
   String? exportedOutputPath;
 
@@ -427,8 +486,10 @@ class _FilterExportNotifier extends _ExportNotifier {
     String? outputPath,
     List<String>? playerIds,
     bool? includeUnassigned,
+    String effect = 'none',
   }) async {
     exportedMode = mode;
+    exportedEffect = effect;
     exportedOutputDir = outputDir;
     exportedOutputPath = outputPath;
     exportedPlayerIds = playerIds;
@@ -531,6 +592,7 @@ class _TrackingExportNotifier extends _ExportNotifier {
     String? outputPath,
     List<String>? playerIds,
     bool? includeUnassigned,
+    String effect = 'none',
   }) async {
     exports.add('$mode:${outputPath ?? outputDir}');
   }

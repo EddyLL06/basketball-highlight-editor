@@ -636,6 +636,7 @@ class ProjectSession {
     String? outputPath,
     List<String>? playerIds,
     bool? includeUnassigned,
+    String effect = 'none',
   }) {
     return engine.startExport(
       projectRoot: _requireProjectRoot(),
@@ -644,6 +645,7 @@ class ProjectSession {
       outputPath: outputPath,
       playerIds: playerIds,
       includeUnassigned: includeUnassigned,
+      effect: effect,
     );
   }
 
