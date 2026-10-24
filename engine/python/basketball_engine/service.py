@@ -2500,7 +2500,7 @@ class EngineService:
             snapshot = payload.get("candidate_snapshot") or []
             log_diagnostic(
                 f"{label} start mode={payload.get('mode')} clips={len(snapshot)} "
-                f"sources={len({item.get('source_path') for item in snapshot if isinstance(item, dict)})}"
+                f"videos={len({item.get('video_id') for item in snapshot if isinstance(item, dict)})}"
             )
             store.update_job(job_id, state="running", stage="export_clips", progress=0.01)
             result = self._execute_export(
