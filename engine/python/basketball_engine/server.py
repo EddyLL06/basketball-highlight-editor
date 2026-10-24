@@ -1,6 +1,7 @@
 import json
 import sys
 import threading
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 
 from .diagnostics import environment_summary, log_diagnostic
@@ -34,6 +35,7 @@ def main() -> int:
         except ProtocolError as exc:
             output = error_response(request_id, exc.code, exc.message, exc.details)
         except Exception as exc:
+            log_diagnostic(f"request {request.get('command')} failed: {exc}\n{traceback.format_exc()}")
             output = error_response(request_id, "ENGINE_ERROR", str(exc))
         write_output(output)
 
@@ -53,6 +55,7 @@ def main() -> int:
             except ProtocolError as exc:
                 write_output(error_response(request_id, exc.code, exc.message, exc.details))
             except Exception as exc:
+                log_diagnostic(f"request could not be read: {exc}\n{traceback.format_exc()}")
                 write_output(error_response(request_id, "ENGINE_ERROR", str(exc)))
     finally:
         previews.shutdown(wait=True)
