@@ -33,6 +33,22 @@ def test_letterbox_pads_wide_image_to_square():
     assert int(canvas[offset_y + 1, 1, 0]) == 0
 
 
+def test_letterbox_auto_only_pads_to_the_stride_like_ultralytics():
+    # 1920×1440 这样的画面线上实际送进模型的是 640×480，不是 640×640。
+    image = np.zeros((1440, 1920, 3), dtype=np.uint8)
+    canvas, scale, offset_x, offset_y = letterbox(image, 640, auto=True)
+
+    assert canvas.shape == (480, 640, 3)
+    assert scale == pytest.approx(640 / 1920)
+    assert (offset_x, offset_y) == (0, 0)
+
+    odd = np.zeros((100, 200, 3), dtype=np.uint8)
+    canvas, _, _, offset_y = letterbox(odd, 650, auto=True)
+    # 650×325 → 补到 32 的倍数 672×352，补边居中。
+    assert canvas.shape == (352, 672, 3)
+    assert offset_y == (352 - 325) // 2
+
+
 def test_preprocess_returns_chw_float_tensor_in_rgb():
     image = np.zeros((10, 20, 3), dtype=np.uint8)
     image[:, :, 0] = 255  # BGR 蓝
@@ -126,11 +142,13 @@ def test_result_shim_matches_ultralytics_access_pattern():
 class _FakeSession:
     def __init__(self, batch_outputs: int):
         self.calls: list[int] = []
+        self.shapes: list[tuple[int, ...]] = []
         self.batch_outputs = batch_outputs
 
     def run(self, _outputs, feed):
         batch = list(feed.values())[0].shape[0]
         self.calls.append(batch)
+        self.shapes.append(tuple(list(feed.values())[0].shape))
         # (batch, 4+2, anchors) 的真实形态,anchors 给足才能走转置分支。
         return [np.zeros((batch, 6, 10), dtype=np.float32)]
 
@@ -159,6 +177,21 @@ def test_predict_batches_more_images_on_cpu():
     frames = [np.zeros((64, 64, 3), dtype=np.uint8) for _ in range(3)]
     detector.predict(frames, conf=0.5)
     assert detector.session.calls == [3]
+
+
+def test_predict_uses_rectangular_input_when_a_batch_shares_one_size():
+    detector = _fake_detector(8)
+    detector.predict([np.zeros((1440, 1920, 3), dtype=np.uint8)] * 2, conf=0.5)
+    assert detector.session.shapes == [(2, 3, 480, 640)]
+
+
+def test_predict_pads_mixed_sizes_to_a_square_batch():
+    detector = _fake_detector(8)
+    detector.predict(
+        [np.zeros((1440, 1920, 3), dtype=np.uint8), np.zeros((720, 960, 3), dtype=np.uint8)],
+        conf=0.5,
+    )
+    assert detector.session.shapes == [(2, 3, 640, 640)]
 
 
 def test_predict_accepts_single_image():

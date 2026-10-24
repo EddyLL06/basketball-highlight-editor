@@ -5,8 +5,10 @@
 ``box.xyxy[0].tolist()`` / ``result.names``，因此三个推理脚本不需要改判定逻辑，
 只换模型对象即可。
 
-预处理与后处理和 ``ultralytics(rect=False)`` 对齐：方形 letterbox（pad 114、
-INTER_LINEAR）、BGR→RGB、/255、class-aware NMS（IoU 0.7、max_det 300）。
+预处理与后处理和 ``ultralytics`` 的 ``.pt`` 推理对齐：同一批画面尺寸相同时用矩形
+letterbox（短边补到 32 的倍数），尺寸不同才补成方形；pad 114、INTER_LINEAR、
+BGR→RGB、/255、class-aware NMS（IoU 0.7、max_det 300）。方形补边会让小目标和
+阈值附近的置信度与线上结果不一致，所以不能固定用方形。
 decode 语义与 ``scripts/compare_pt_onnx_frame.py`` 保持一致，那里已与 PT 逐帧对齐过。
 
 注意 DML 的 batch 行为：实测 dynamic batch 下 batch=1 是 2.88 ms/张，batch=2 会塌到
@@ -15,6 +17,7 @@ decode 语义与 ``scripts/compare_pt_onnx_frame.py`` 保持一致，那里已�
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -22,6 +25,7 @@ import numpy as np
 
 DEFAULT_NAMES = {0: "ball", 1: "hoop"}
 PAD_VALUE = 114
+STRIDE = 32
 NMS_IOU = 0.7
 MAX_DET = 300
 
@@ -51,17 +55,25 @@ class Result:
         self.names = names
 
 
-def letterbox(image: np.ndarray, size: int) -> tuple[np.ndarray, float, int, int]:
-    """等比缩放到 size×size 并居中补边，返回 (图, 缩放比, 横向偏移, 纵向偏移)。"""
+def letterbox(
+    image: np.ndarray, size: int, auto: bool = False,
+) -> tuple[np.ndarray, float, int, int]:
+    """等比缩放后居中补边，返回 (图, 缩放比, 横向偏移, 纵向偏移)。
+
+    ``auto=False`` 补成 size×size；``auto=True`` 和 ultralytics ``LetterBox(auto=True)``
+    一样只补到 ``STRIDE`` 的倍数，例如 1920×1440 → 640×480。
+    """
     height, width = image.shape[:2]
     scale = min(size / width, size / height)
     resized_width = max(1, round(width * scale))
     resized_height = max(1, round(height * scale))
     resized = image if (resized_width, resized_height) == (width, height) \
         else _resize(image, resized_width, resized_height)
-    canvas = np.full((size, size, image.shape[2]), PAD_VALUE, dtype=resized.dtype)
-    offset_x = (size - resized_width) // 2
-    offset_y = (size - resized_height) // 2
+    canvas_width = math.ceil(resized_width / STRIDE) * STRIDE if auto else size
+    canvas_height = math.ceil(resized_height / STRIDE) * STRIDE if auto else size
+    canvas = np.full((canvas_height, canvas_width, image.shape[2]), PAD_VALUE, dtype=resized.dtype)
+    offset_x = (canvas_width - resized_width) // 2
+    offset_y = (canvas_height - resized_height) // 2
     canvas[offset_y:offset_y + resized_height, offset_x:offset_x + resized_width] = resized
     return canvas, scale, offset_x, offset_y
 
@@ -72,9 +84,11 @@ def _resize(image: np.ndarray, width: int, height: int) -> np.ndarray:
     return cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
 
 
-def preprocess(image: np.ndarray, size: int) -> tuple[np.ndarray, float, int, int]:
+def preprocess(
+    image: np.ndarray, size: int, auto: bool = False,
+) -> tuple[np.ndarray, float, int, int]:
     """BGR HWC → RGB CHW float32/255，附带 letterbox 参数用于反变换。"""
-    canvas, scale, offset_x, offset_y = letterbox(image, size)
+    canvas, scale, offset_x, offset_y = letterbox(image, size, auto)
     rgb = canvas[:, :, ::-1]
     tensor = np.ascontiguousarray(rgb.transpose(2, 0, 1)[None], dtype=np.float32) / 255.0
     return tensor, scale, offset_x, offset_y
@@ -269,8 +283,10 @@ class OnnxDetector:
     ) -> list[Result]:
         tensors = []
         meta = []
+        # 和 ultralytics 一样：整批尺寸相同才用矩形输入，否则补成方形才能拼成一批。
+        auto = len({frame.shape for frame in frames}) == 1
         for frame in frames:
-            tensor, scale, offset_x, offset_y = preprocess(frame, size)
+            tensor, scale, offset_x, offset_y = preprocess(frame, size, auto)
             tensors.append(tensor)
             meta.append((scale, offset_x, offset_y))
         batch = np.concatenate(tensors, axis=0) if len(tensors) > 1 else tensors[0]
