@@ -44,8 +44,8 @@ void main() {
     expect(stats.rimRejectedCount, 2);
     expect(stats.playerCounts.map((item) => (item.name, item.count)), [('李四', 2), ('张三', 1)]);
     expect(stats.unassignedCount, 1);
-    // 4 进球 / (4 + 2 次复核判定没进)
-    expect(stats.estimatedHitRate, closeTo(4 / 6, 1e-9));
+    // 4 个保留的进球 / 7 个疑似片段
+    expect(stats.estimatedHitRate, closeTo(4 / 7, 1e-9));
   });
 
   test('groups made shots into ten-minute buckets per part', () {

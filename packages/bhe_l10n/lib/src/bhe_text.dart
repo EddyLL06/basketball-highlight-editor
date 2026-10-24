@@ -1200,8 +1200,8 @@ const _englishText = <String, String>{
   '你排除的': 'Excluded by you',
   '复核判定没进': 'Rim check: missed',
   '命中率（估算）': 'Hit rate (estimate)',
-  '只算识别到的篮筐附近的出手，没碰到篮筐的投篮不计入，结果会偏高，仅供参考。':
-      'Only counts shots recognised near the rim. Shots that never reach the rim are not counted, so this runs high and is only a guide.',
+  '保留的进球 ÷ 全部疑似片段。疑似片段里也有不是投篮的，没碰到篮筐的投篮也不在里面，只是粗略估算。':
+      'Kept goals ÷ all suspected clips. Some suspected clips are not shots, and shots that never reach the rim are missing, so this is only a rough estimate.',
   '每人进球': 'Made shots per player',
   '进球时间分布': 'Made shots over time',
   '源视频找不到，请到导入页重新定位视频': 'The source video cannot be found. Relink it on the import page.',

@@ -604,11 +604,11 @@ class _GameStatsSection extends StatelessWidget {
             label: context.bheText('命中率（估算）'),
             value: hitRate == null
                 ? '—'
-                : '${(hitRate * 100).round()}%  ·  ${stats.madeCount} / ${stats.madeCount + stats.rimRejectedCount}',
+                : '${(hitRate * 100).round()}%  ·  ${stats.madeCount} / ${stats.candidateCount}',
           ),
           const SizedBox(height: 4),
           Text(
-            context.bheText('只算识别到的篮筐附近的出手，没碰到篮筐的投篮不计入，结果会偏高，仅供参考。'),
+            context.bheText('保留的进球 ÷ 全部疑似片段。疑似片段里也有不是投篮的，没碰到篮筐的投篮也不在里面，只是粗略估算。'),
             style: theme.textTheme.labelSmall?.copyWith(color: c.textTertiary),
           ),
           if (playerRows.isNotEmpty) ...[

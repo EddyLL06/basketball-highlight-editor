@@ -27,11 +27,10 @@ class GameStats {
   final List<({int? segment, int startMinute, int endMinute, int count})>
   timeBuckets;
 
-  /// 进球 / (进球 + 复核判定没进的出手)。没碰到篮筐附近的投篮识别不到，所以偏高。
-  double? get estimatedHitRate {
-    final attempts = madeCount + rimRejectedCount;
-    return attempts == 0 ? null : madeCount / attempts;
-  }
+  /// 保留的进球 / 全部疑似片段，只是粗略估算：疑似片段里也有不是投篮的，
+  /// 没碰到篮筐的投篮又识别不到。
+  double? get estimatedHitRate =>
+      candidateCount == 0 ? null : madeCount / candidateCount;
 }
 
 const _bucketMinutes = 10;
