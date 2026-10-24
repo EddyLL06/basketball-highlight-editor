@@ -2618,3 +2618,57 @@ def test_replace_candidates_refreshes_untouched_auto_exclusions(tmp_path: Path):
     assert candidate["review_status"] == "pending"
     assert candidate["review_reason"] is None
     assert candidate["note"] == "看过"
+
+
+def test_inference_device_reads_actual_backend_from_stage_outputs(tmp_path: Path):
+    """checkpoint 要记录脚本实际用的后端，而不是请求里的 auto。"""
+    coarse = tmp_path / "coarse.json"
+    coarse.write_text(json.dumps({"device": "DML", "records": []}), encoding="utf-8")
+    refined = tmp_path / "refined.json"
+    refined.write_text(json.dumps({"device": "dml", "results": []}), encoding="utf-8")
+
+    assert EngineService._inference_device(coarse, refined) == "dml"
+
+
+def test_inference_device_reports_cpu_when_any_stage_fell_back(tmp_path: Path):
+    coarse = tmp_path / "coarse.json"
+    coarse.write_text(json.dumps({"device": "dml"}), encoding="utf-8")
+    refined = tmp_path / "refined.json"
+    refined.write_text(json.dumps({"device": "cpu"}), encoding="utf-8")
+
+    assert EngineService._inference_device(coarse, refined) == "cpu"
+
+
+def test_inference_device_ignores_missing_or_unreadable_outputs(tmp_path: Path):
+    malformed = tmp_path / "bad.json"
+    malformed.write_text("{not json", encoding="utf-8")
+
+    # fast 模式没有 refined.json，坏文件也不能让分析收尾失败。
+    assert EngineService._inference_device(tmp_path / "missing.json", malformed, None) is None
+
+
+def test_inference_device_reads_actual_backend_from_stage_outputs(tmp_path: Path):
+    """checkpoint 要记录脚本实际用的后端，而不是请求里的 auto。"""
+    coarse = tmp_path / "coarse.json"
+    coarse.write_text(json.dumps({"device": "DML", "records": []}), encoding="utf-8")
+    refined = tmp_path / "refined.json"
+    refined.write_text(json.dumps({"device": "dml", "results": []}), encoding="utf-8")
+
+    assert EngineService._inference_device(coarse, refined) == "dml"
+
+
+def test_inference_device_reports_cpu_when_any_stage_fell_back(tmp_path: Path):
+    coarse = tmp_path / "coarse.json"
+    coarse.write_text(json.dumps({"device": "dml"}), encoding="utf-8")
+    refined = tmp_path / "refined.json"
+    refined.write_text(json.dumps({"device": "cpu"}), encoding="utf-8")
+
+    assert EngineService._inference_device(coarse, refined) == "cpu"
+
+
+def test_inference_device_ignores_missing_or_unreadable_outputs(tmp_path: Path):
+    malformed = tmp_path / "bad.json"
+    malformed.write_text("{not json", encoding="utf-8")
+
+    # fast 模式没有 refined.json，坏文件也不能让分析收尾失败。
+    assert EngineService._inference_device(tmp_path / "missing.json", malformed, None) is None

@@ -455,3 +455,35 @@ def test_run_pipeline_ignores_manifest_from_another_algorithm_version(tmp_path: 
 
     assert result["cache_hits"] == 0
     assert result["refined"] == {"results": []}
+
+
+def test_pipeline_commands_forward_inference_device(tmp_path: Path):
+    """DirectML 只是换推理后端,引擎需要把 device 透传给三个阶段。"""
+    commands = build_pipeline_commands(
+        repo_root=tmp_path,
+        source_video=Path("source.mp4"),
+        proxy_video=Path("proxy.mp4"),
+        model_path=Path("model.pt"),
+        coarse_detections=Path("coarse.json"),
+        coarse_candidates=Path("candidates.json"),
+        refined_output=Path("refined.json"),
+        proxy_roi=[10, 20, 100, 200],
+        source_roi=[20, 40, 200, 400],
+        cache_dir=Path("cache"),
+        device="dml",
+    )
+    for index in (1, 3):
+        assert commands[index][commands[index].index("--device") + 1] == "dml"
+    # 代理生成与候选生成不吃 device。
+    assert "--device" not in commands[0]
+    assert "--device" not in commands[2]
+
+
+def test_rim_check_command_forwards_inference_device(tmp_path: Path):
+    from engine.python.basketball_engine.adapters.analysis import build_rim_check_command
+
+    command = build_rim_check_command(
+        tmp_path, Path("source.mp4"), Path("model.pt"),
+        Path("in.json"), Path("out.json"), device="dml",
+    )
+    assert command[command.index("--device") + 1] == "dml"

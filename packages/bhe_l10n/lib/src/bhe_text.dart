@@ -376,6 +376,7 @@ const _englishText = <String, String>{
   '我在用 BHE 整理篮球比赛集锦，推荐你看看：':
       'I use BHE to put together basketball highlights. Take a look:',
   '分析完成': 'Analysis complete',
+  '推理': 'Inference',
   '退出 BHE？': 'Exit BHE?',
   '分析失败': 'Analysis failed',
   '添加球员': 'Add player',

@@ -1314,6 +1314,11 @@ class _CompletedLine extends StatelessWidget {
     final duration = _formatCompletedDuration(startedAt, finishedAt);
     final modeLabel = mode == 'fast' ? '快速分析 · 可能漏检' : '标准分析';
     final detail = _analysisDetailLabel(checkpoint, l10n);
+    final status = context.bheText(
+      '$modeLabel · $candidateCount 个候选${duration.isEmpty ? '' : ' · 用时 $duration'}',
+    );
+    // GPU 标记拼在 bheText 外面：整串翻译依赖固定文案，后缀不能进正则。
+    final badge = _inferenceAccelerated(checkpoint) ? ' · GPU' : '';
     return Container(
       width: double.infinity,
       height: 34,
@@ -1328,9 +1333,7 @@ class _CompletedLine extends StatelessWidget {
           const SizedBox(width: Spacing.xs),
           Flexible(
             child: Text(
-              context.bheText(
-                '$modeLabel · $candidateCount 个候选${duration.isEmpty ? '' : ' · 用时 $duration'}',
-              ),
+              '$status$badge',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(
@@ -7092,6 +7095,25 @@ Map<String, dynamic> _decodeJobCheckpoint(Map<String, dynamic>? job) {
   }
 }
 
+/// checkpoint 里的推理后端 → 展示名；旧任务没有该字段时返回 null。
+String? _inferenceDeviceName(Map<String, dynamic> checkpoint) {
+  final raw = checkpoint['inference_device']?.toString().trim().toLowerCase();
+  if (raw == null || raw.isEmpty) return null;
+  return switch (raw) {
+    'dml' => 'DirectML',
+    'cuda' => 'CUDA',
+    'mps' => 'Metal',
+    'cpu' => 'CPU',
+    _ => raw.toUpperCase(),
+  };
+}
+
+/// 这次分析是否真的跑在 GPU 上；后端未知或回落 CPU 都不算。
+bool _inferenceAccelerated(Map<String, dynamic> checkpoint) {
+  final raw = checkpoint['inference_device']?.toString().trim().toLowerCase();
+  return raw == 'dml' || raw == 'cuda' || raw == 'mps';
+}
+
 String _analysisDetailLabel(
   Map<String, dynamic> checkpoint,
   BheLocalizations? l10n,
@@ -7116,6 +7138,10 @@ String _analysisDetailLabel(
         '${l10n?.text(entry.value) ?? entry.value} ${l10n?.text(_formatSeconds(value / 1000)) ?? _formatSeconds(value / 1000)}',
       );
     }
+  }
+  final deviceName = _inferenceDeviceName(checkpoint);
+  if (deviceName != null) {
+    parts.add('${l10n?.text('推理') ?? '推理'} $deviceName');
   }
   final cacheHits = checkpoint['cache_hits'];
   if (cacheHits is num) {
