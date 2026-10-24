@@ -840,7 +840,7 @@ class ProjectStore:
             raise ValueError("PROJECT_NOT_INITIALIZED")
         with self.connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM players WHERE project_id = ? ORDER BY name COLLATE NOCASE, created_at",
+                "SELECT * FROM players WHERE project_id = ? ORDER BY created_at, rowid",
                 (project["id"],),
             ).fetchall()
         return [dict(row) for row in rows]
