@@ -99,11 +99,15 @@ def available_output_path(path: Path) -> Path:
     raise OSError(f"无法生成不冲突的导出文件名: {path}")
 
 
+def safe_file_stem(name: object) -> str:
+    """去掉不能出现在文件名里的字符，最长 40 个字。"""
+    return re.sub(r'[\x00-\x1f<>:"/\\|?*]+', "_", str(name or "")).strip(" ._")[:40]
+
+
 def clip_file_name(index: int, candidate: Dict[str, Any]) -> str:
     segment = f"_s{candidate['segment']}" if candidate.get("segment") else ""
     name = f"goal_{index:03d}{segment}_{candidate['event_time_ms'] / 1000:.2f}s"
-    player = re.sub(r'[\x00-\x1f<>:"/\\|?*]+', "_", str(candidate.get("player_name") or ""))
-    player = player.strip(" ._")[:40]
+    player = safe_file_stem(candidate.get("player_name"))
     return f"{name}_{player}.mp4" if player else f"{name}.mp4"
 
 

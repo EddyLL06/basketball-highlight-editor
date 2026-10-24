@@ -11,6 +11,45 @@ import 'package:desktop/providers/export_output_picker.dart';
 import 'package:desktop/theme/app_theme.dart';
 
 void main() {
+  testWidgets('one video per tag asks for a folder and exports per tag', (
+    tester,
+  ) async {
+    final notifier = _FilterExportNotifier(_filterState());
+    final picker = _TestOutputPicker();
+    await _pumpFilterExport(tester, notifier, picker: picker);
+
+    final byTag = find.byKey(const Key('export-mode-by-player'));
+    await tester.ensureVisible(byTag);
+    await tester.tap(byTag);
+    await tester.pumpAndSettle();
+    final start = find.byKey(const Key('export-start'));
+    await tester.ensureVisible(start);
+    await tester.tap(start);
+    await tester.pump();
+    picker.result.complete('/tmp/by-tag');
+    await tester.pumpAndSettle();
+
+    expect(notifier.exportedMode, 'merge_by_player');
+    expect(notifier.exportedOutputDir, '/tmp/by-tag');
+    expect(notifier.exportedOutputPath, isNull);
+  });
+
+  testWidgets('the per-tag option only appears when the project has tags', (
+    tester,
+  ) async {
+    final notifier = _FilterExportNotifier(
+      const ProjectState(
+        video: {'id': 'A'},
+        candidates: [
+          {'id': 'a', 'default_start_ms': 0, 'default_end_ms': 4000},
+        ],
+      ),
+    );
+    await _pumpFilterExport(tester, notifier);
+
+    expect(find.byKey(const Key('export-mode-by-player')), findsNothing);
+  });
+
   testWidgets('shows game stats from the current review', (tester) async {
     final notifier = _FilterExportNotifier(
       const ProjectState(
@@ -375,6 +414,9 @@ class _FilterExportNotifier extends _ExportNotifier {
 
   List<String>? exportedPlayerIds;
   bool? exportedIncludeUnassigned;
+  String? exportedMode;
+  String? exportedOutputDir;
+  String? exportedOutputPath;
 
   void replace(ProjectState value) => state = value;
 
@@ -386,6 +428,9 @@ class _FilterExportNotifier extends _ExportNotifier {
     List<String>? playerIds,
     bool? includeUnassigned,
   }) async {
+    exportedMode = mode;
+    exportedOutputDir = outputDir;
+    exportedOutputPath = outputPath;
     exportedPlayerIds = playerIds;
     exportedIncludeUnassigned = includeUnassigned;
   }

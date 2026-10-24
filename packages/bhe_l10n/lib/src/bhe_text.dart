@@ -219,12 +219,14 @@ String? _translateDynamic(String source) {
     return 'Analysis runs locally. Time depends mainly on video length, resolution, and bitrate.';
   }
   final exportSummary = RegExp(
-    r'^(合并导出|分别导出) · (\d+) 个片段$',
+    r'^(合并导出|分别导出|按标签导出) · (\d+) 个片段$',
   ).firstMatch(source);
   if (exportSummary != null) {
-    final mode = exportSummary.group(1) == '合并导出'
-        ? 'Merged export'
-        : 'Separate exports';
+    final mode = switch (exportSummary.group(1)) {
+      '合并导出' => 'Merged export',
+      '按标签导出' => 'Per-tag export',
+      _ => 'Separate exports',
+    };
     return '$mode · ${exportSummary.group(2)} clips';
   }
   final exportProcessing = RegExp(r'^(?:(.+) · )?处理 (.+)$').firstMatch(source);
@@ -1187,6 +1189,10 @@ const _englishText = <String, String>{
       'Make sure no other program is using the file, or choose a folder you can read and write.',
   '磁盘空间不足': 'Not enough disk space',
   '请清理磁盘空间后再试。': 'Free up some disk space and try again.',
+  '每个标签各合成一个视频': 'One video per tag',
+  '只导出选中的标签，每个标签一个 MP4，文件名就是标签名，放进同一个文件夹。':
+      'Exports only the selected tags: one MP4 per tag, named after the tag, in one folder.',
+  '按标签导出': 'Per-tag export',
   '比赛数据': 'Game stats',
   '按当前审核结果统计': 'Based on the current review',
   '进球（保留）': 'Made (kept)',

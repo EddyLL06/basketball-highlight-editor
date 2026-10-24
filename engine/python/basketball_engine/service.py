@@ -30,7 +30,7 @@ from .adapters.analysis import (
     scale_roi_to_proxy,
     terminate_process,
 )
-from .adapters.export import export_goal_clips
+from .adapters.export import available_output_path, export_goal_clips, safe_file_stem
 from .protocol import ProtocolError
 from .storage import ProjectStore, new_id
 from .media_tools import resolve_media_tool
@@ -2222,15 +2222,26 @@ class EngineService:
                     {"source_path": str(video["source"].resolve())},
                 )
         try:
-            result = export_goal_clips(
-                candidates,
-                output_dir,
-                mode,
-                merged_output,
-                progress_callback=progress_callback,
-                cancel_check=cancel_check,
-                process_callback=process_callback,
-            )
+            if mode == "merge_by_player":
+                result = self._export_merged_per_player(
+                    store,
+                    candidates,
+                    output_dir,
+                    {video["source"].resolve() for video in videos.values()},
+                    progress_callback=progress_callback,
+                    cancel_check=cancel_check,
+                    process_callback=process_callback,
+                )
+            else:
+                result = export_goal_clips(
+                    candidates,
+                    output_dir,
+                    mode,
+                    merged_output,
+                    progress_callback=progress_callback,
+                    cancel_check=cancel_check,
+                    process_callback=process_callback,
+                )
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
             raise ProtocolError("EXPORT_FAILED", f"导出失败: {exc}") from exc
         if cancel_check and cancel_check():
@@ -2276,6 +2287,66 @@ class EngineService:
             "metadata": {"files": result["files"], "clip_files": result["clip_files"]},
         })
         return {"export": export, "files": result["files"]}
+
+    def _export_merged_per_player(
+        self,
+        store: ProjectStore,
+        candidates: list[Dict[str, Any]],
+        output_dir: Path,
+        sources: set[Path],
+        progress_callback=None,
+        cancel_check=None,
+        process_callback=None,
+    ) -> Dict[str, Any]:
+        """每个标签各合成一个视频，文件名用标签名；中间片段放在项目缓存里。"""
+        groups: Dict[str, list[Dict[str, Any]]] = {}
+        for candidate in candidates:
+            groups.setdefault(str(candidate.get("player_name") or ""), []).append(candidate)
+        work_root = store.root / "artifacts" / "exports" / f"by_player_{int(time.time() * 1000)}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        files: list[str] = []
+        clip_files: list[str] = []
+        duration_ms = 0
+        processing_ms = 0
+        done = 0
+        try:
+            for index, (name, group) in enumerate(groups.items()):
+                merged = available_output_path(output_dir / f"{safe_file_stem(name) or '未标记'}.mp4")
+                if merged.resolve() in sources:
+                    raise ProtocolError(
+                        "EXPORT_SOURCE_CONFLICT",
+                        "导出目标不能覆盖原始视频",
+                        {"source_path": str(merged.resolve())},
+                    )
+
+                def on_progress(stage: str, fraction: float, offset: int = done, size: int = len(group)) -> None:
+                    if progress_callback:
+                        progress_callback(stage, (offset + fraction * size) / len(candidates))
+
+                result = export_goal_clips(
+                    group,
+                    work_root / str(index),
+                    "merge",
+                    merged,
+                    progress_callback=on_progress,
+                    cancel_check=cancel_check,
+                    process_callback=process_callback,
+                )
+                files.extend(result["files"])
+                clip_files.extend(result["clip_files"])
+                duration_ms += result["duration_ms"]
+                processing_ms += result["processing_ms"]
+                done += len(group)
+        except Exception:
+            for path in files:
+                Path(path).unlink(missing_ok=True)
+            raise
+        return {
+            "files": files,
+            "clip_files": clip_files,
+            "duration_ms": duration_ms,
+            "processing_ms": processing_ms,
+        }
 
     def _export_videos(
         self,

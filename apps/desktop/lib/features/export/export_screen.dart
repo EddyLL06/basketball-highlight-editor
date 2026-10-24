@@ -35,7 +35,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   (String?, String?)? _playerFilterScope;
   bool _showFastRisk = true;
   bool _choosingOutput = false;
-  bool _mergeMode = true;
+  String _mode = 'merge';
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +46,10 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     final c = AppColors.of(context);
     final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
 
+    // 标签全删了以后，「按标签导出」的卡片不再显示，回到合并导出。
+    final mode = state.players.isEmpty && _mode == 'merge_by_player'
+        ? 'merge'
+        : _mode;
     final includedCandidates = _filteredCandidates(state);
     final includedCount = includedCandidates.length;
     final durationMs = includedCandidates.fold<int>(0, _clipDuration);
@@ -162,8 +166,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                 title: l10n?.exportMergeTitle ?? '合并成一个视频',
                 description:
                     l10n?.exportMergeDescription ?? '按时间顺序拼接为一个 MP4，适合直接分享。',
-                selected: _mergeMode,
-                onTap: () => setState(() => _mergeMode = true),
+                selected: mode == 'merge',
+                onTap: () => setState(() => _mode = 'merge'),
               ),
             ),
             const SizedBox(width: Spacing.sm),
@@ -174,10 +178,24 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                 description:
                     l10n?.exportSeparateDescription ??
                     '每段一个文件，放进同一个文件夹，适合二次剪辑。',
-                selected: !_mergeMode,
-                onTap: () => setState(() => _mergeMode = false),
+                selected: mode == 'separate',
+                onTap: () => setState(() => _mode = 'separate'),
               ),
             ),
+            if (state.players.isNotEmpty) ...[
+              const SizedBox(width: Spacing.sm),
+              Expanded(
+                child: _ModeCard(
+                  key: const Key('export-mode-by-player'),
+                  title: context.bheText('每个标签各合成一个视频'),
+                  description: context.bheText(
+                    '只导出选中的标签，每个标签一个 MP4，文件名就是标签名，放进同一个文件夹。',
+                  ),
+                  selected: mode == 'merge_by_player',
+                  onTap: () => setState(() => _mode = 'merge_by_player'),
+                ),
+              ),
+            ],
           ],
         ),
         const SizedBox(height: Spacing.md),
@@ -265,7 +283,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
               size: CsButtonSize.lg,
               isLoading: busy,
               onPressed: includedCount > 0 && !busy
-                  ? () => _chooseOutput(notifier, merge: _mergeMode)
+                  ? () => _chooseOutput(notifier, mode: mode)
                   : null,
             ),
             ConstrainedBox(
@@ -414,8 +432,9 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
 
   Future<void> _chooseOutput(
     ProjectNotifier notifier, {
-    required bool merge,
+    required String mode,
   }) async {
+    final merge = mode == 'merge';
     if (_choosingOutput) return;
     setState(() => _choosingOutput = true);
     final videoId = ref.read(projectProvider).video?['id'];
@@ -440,7 +459,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
         return;
       }
       await notifier.export(
-        merge ? 'merge' : 'separate',
+        mode,
         outputPath: merge ? path : null,
         outputDir: merge ? null : path,
         playerIds: playerIds,
@@ -982,7 +1001,11 @@ class _ExportHistoryCard extends StatelessWidget {
     final theme = Theme.of(context);
     final c = AppColors.of(context);
     final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
-    final mode = item['mode'] == 'merge' ? '合并导出' : '分别导出';
+    final mode = switch (item['mode']) {
+      'merge' => '合并导出',
+      'merge_by_player' => '按标签导出',
+      _ => '分别导出',
+    };
     final count = (item['candidate_count'] as num?)?.toInt() ?? 0;
     final duration = (item['duration_ms'] as num?)?.toInt() ?? 0;
     final processing = (item['processing_ms'] as num?)?.toInt() ?? 0;
