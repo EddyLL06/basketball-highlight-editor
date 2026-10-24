@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import platform
 import re
 import subprocess
@@ -111,6 +112,203 @@ def clip_file_name(index: int, candidate: Dict[str, Any]) -> str:
     return f"{name}_{player}.mp4" if player else f"{name}.mp4"
 
 
+# 进球效果，effect 取值：
+#   "none"      不加效果；
+#   "approach"  临门慢动作：进球前 1 秒到进框后 0.3 秒放慢到 0.5 倍，人和球都在原画面里；
+#   "replay"    慢放特写：片段播完后，重播入框前后 0.8 秒，放慢一倍，取景框住篮筐和球路。
+EFFECTS = ("none", "approach", "replay")
+APPROACH_BEFORE_MS = 1000
+APPROACH_AFTER_MS = 300
+APPROACH_SPEED = 0.5
+REPLAY_BEFORE_MS = 500
+REPLAY_AFTER_MS = 300
+REPLAY_SPEED = 0.5
+REPLAY_MIN_ZOOM = 1.3
+REPLAY_MAX_ZOOM = 2.0
+MIN_SEGMENT_MS = 300
+AUDIO_FORMAT = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
+
+
+def _window(candidate: Dict[str, Any], before_ms: int, after_ms: int) -> tuple[int, int] | None:
+    """进球时刻前后一段时间，限制在片段范围内；手动片段没有进球时刻，不加效果。"""
+    event = candidate.get("event_time_ms")
+    if event is None or candidate.get("manual"):
+        return None
+    start = max(int(candidate["review_start_ms"]), int(event) - before_ms)
+    end = min(int(candidate["review_end_ms"]), int(event) + after_ms)
+    return (start, end) if end - start >= MIN_SEGMENT_MS else None
+
+
+def approach_window(candidate: Dict[str, Any]) -> tuple[int, int] | None:
+    return _window(candidate, APPROACH_BEFORE_MS, APPROACH_AFTER_MS)
+
+
+def replay_window(candidate: Dict[str, Any]) -> tuple[int, int] | None:
+    return _window(candidate, REPLAY_BEFORE_MS, REPLAY_AFTER_MS)
+
+
+def trajectory_points(evidence_json: str | None, event_ms: int) -> list[list[float]]:
+    """进球前后球的飞行位置（源视频像素），用来决定特写取景。"""
+    try:
+        overlay = json.loads(evidence_json or "{}").get("overlay") or {}
+    except (TypeError, ValueError, AttributeError):
+        return []
+    start, end = event_ms - REPLAY_BEFORE_MS, event_ms + REPLAY_AFTER_MS
+    points = []
+    for point in overlay.get("trajectory") or []:
+        if not isinstance(point, dict) or point.get("time") is None:
+            continue
+        if point.get("x") is None or point.get("y") is None:
+            continue
+        if start <= float(point["time"]) * 1000 <= end:
+            points.append([float(point["x"]), float(point["y"])])
+    return points
+
+
+def replay_crop(
+    points: list[list[float]], width: int, height: int, aspect: float,
+) -> tuple[int, int, int, int] | None:
+    """特写裁剪框 (宽, 高, x, y)，宽高比和输出画面一致，框住所有球路点，不出画面。"""
+    if not points:
+        return None
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    span = max(max(xs) - min(xs), (max(ys) - min(ys)) * aspect) * 1.25 or 1.0
+    zoom = min(REPLAY_MAX_ZOOM, max(REPLAY_MIN_ZOOM, width / span))
+    crop_width = width / zoom
+    crop_height = crop_width / aspect
+    if crop_height > height:
+        crop_height = height
+        crop_width = height * aspect
+    crop_width, crop_height = int(crop_width) // 2 * 2, int(crop_height) // 2 * 2
+    center_x, center_y = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+    x = int(min(max(center_x - crop_width / 2, 0), width - crop_width)) // 2 * 2
+    y = int(min(max(center_y - crop_height / 2, 0), height - crop_height)) // 2 * 2
+    return crop_width, crop_height, x, y
+
+
+def effect_spec(candidate: Dict[str, Any], effect: str) -> Dict[str, Any] | None:
+    """这个片段要加的效果；取不到所需数据（没有进球时刻、尺寸，或没有球路）时返回 None，按原样导出。"""
+    if effect not in EFFECTS:
+        raise ValueError("INVALID_EXPORT_EFFECT")
+    if effect == "none":
+        return None
+    width, height = candidate.get("width"), candidate.get("height")
+    if not width or not height:
+        return None
+    size = (int(width), int(height))
+    base = {
+        "size": size,
+        "fps": float(candidate.get("fps") or 30.0),
+        "has_audio": bool(candidate.get("has_audio", True)),
+        "slow": None,
+        "replay": None,
+    }
+    if effect == "approach":
+        window = approach_window(candidate)
+        return {**base, "slow": window} if window else None
+    window = replay_window(candidate)
+    if not window:
+        return None
+    points = list(candidate.get("trail") or [])
+    rim = candidate.get("rim") or {}
+    if rim.get("width") and rim.get("x") is not None and rim.get("y") is not None:
+        half = float(rim["width"]) / 2
+        points += [[rim["x"] - half, rim["y"]], [rim["x"] + half, rim["y"]], [rim["x"], rim["y"] - half], [rim["x"], rim["y"] + half]]
+    crop = replay_crop(points, size[0], size[1], size[0] / size[1])
+    if not crop:
+        return None
+    return {**base, "replay": {"start_ms": window[0], "end_ms": window[1], "crop": crop}}
+
+
+def output_duration_ms(candidate: Dict[str, Any], spec: Dict[str, Any] | None) -> int:
+    total = int(candidate["review_end_ms"]) - int(candidate["review_start_ms"])
+    if spec and spec["slow"]:
+        slow_start, slow_end = spec["slow"]
+        total += round((slow_end - slow_start) * (1 / APPROACH_SPEED - 1))
+    if spec and spec["replay"]:
+        replay = spec["replay"]
+        total += round((replay["end_ms"] - replay["start_ms"]) / REPLAY_SPEED)
+    return total
+
+
+def _effect_command(
+    source_video: Path,
+    start_ms: int,
+    end_ms: int,
+    output_path: Path,
+    codec_options: list[str],
+    frame_size: tuple[int, int] | None,
+    spec: Dict[str, Any],
+) -> list[str]:
+    """一条 ffmpeg 命令完成：切段、慢放、拼接、回放。所有段统一到同一个尺寸和音频格式再拼。"""
+    width, height = frame_size or spec["size"]
+    fit = (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+    )
+    audio = spec["has_audio"]
+    duration_ms = end_ms - start_ms
+    cuts: list[tuple[float, float, float]] = []
+    if spec["slow"]:
+        slow_start, slow_end = spec["slow"]
+        cuts = [
+            (0, slow_start - start_ms, 1.0),
+            (slow_start - start_ms, slow_end - start_ms, APPROACH_SPEED),
+            (slow_end - start_ms, duration_ms, 1.0),
+        ]
+    else:
+        cuts = [(0, duration_ms, 1.0)]
+    graph: list[str] = []
+    pairs: list[str] = []
+    for index, (t0, t1, speed) in enumerate(cuts):
+        if t1 - t0 <= 0:
+            continue
+        pace = "setpts=PTS-STARTPTS" if speed == 1.0 else f"setpts=(PTS-STARTPTS)/{speed}"
+        graph.append(
+            f"[0:v:0]setpts=PTS-STARTPTS,trim=start={t0 / 1000:.3f}:end={t1 / 1000:.3f},{pace},{fit}[v{index}]"
+        )
+        if audio:
+            tempo = "" if speed == 1.0 else f",atempo={speed}"
+            graph.append(
+                f"[0:a:0]asetpts=PTS-STARTPTS,atrim=start={t0 / 1000:.3f}:end={t1 / 1000:.3f},"
+                f"asetpts=PTS-STARTPTS{tempo},{AUDIO_FORMAT}[a{index}]"
+            )
+        pairs.append(f"[v{index}]" + (f"[a{index}]" if audio else ""))
+    command_inputs = [
+        "-ss", f"{start_ms / 1000:.3f}", "-t", f"{duration_ms / 1000:.3f}", "-i", str(source_video),
+    ]
+    if spec["replay"]:
+        replay = spec["replay"]
+        crop_width, crop_height, crop_x, crop_y = replay["crop"]
+        window_s = (replay["end_ms"] - replay["start_ms"]) / 1000
+        index = len(pairs)
+        command_inputs += [
+            "-ss", f"{replay['start_ms'] / 1000:.3f}", "-t", f"{window_s:.3f}", "-i", str(source_video),
+        ]
+        graph.append(
+            f"[1:v:0]setpts=(PTS-STARTPTS)/{REPLAY_SPEED},crop={crop_width}:{crop_height}:{crop_x}:{crop_y},"
+            f"fps={spec['fps']:.6f},{fit}[v{index}]"
+        )
+        if audio:
+            # 回放不带声音，和慢放的环境声分开；长度和画面一致。
+            graph.append(
+                f"anullsrc=r=48000:cl=stereo,atrim=duration={window_s / REPLAY_SPEED:.3f},{AUDIO_FORMAT}[a{index}]"
+            )
+        pairs.append(f"[v{index}]" + (f"[a{index}]" if audio else ""))
+    concat_audio = 1 if audio else 0
+    outputs = "[vout]" + ("[aout]" if audio else "")
+    graph.append(f"{''.join(pairs)}concat=n={len(pairs)}:v=1:a={concat_audio}{outputs}")
+    return [
+        resolve_media_tool("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
+        *command_inputs,
+        "-filter_complex", ";".join(graph),
+        "-map", "[vout]", *(["-map", "[aout]"] if audio else []),
+        *codec_options, *(["-c:a", "aac", "-b:a", "128k"] if audio else []),
+        "-movflags", "+faststart", str(output_path),
+    ]
+
+
 def build_clip_command(
     source_video: Path,
     start_ms: int,
@@ -118,12 +316,16 @@ def build_clip_command(
     output_path: Path,
     video_codec: str | None = None,
     frame_size: tuple[int, int] | None = None,
+    effect: Dict[str, Any] | None = None,
+    uniform_audio: bool = False,
 ) -> list[str]:
     if start_ms < 0 or end_ms <= start_ms:
         raise ValueError("INVALID_CLIP_RANGE")
     duration = (end_ms - start_ms) / 1000
     codec = video_codec or video_codecs()[0]
     codec_options = video_codec_options(codec)
+    if effect:
+        return _effect_command(source_video, start_ms, end_ms, output_path, codec_options, frame_size, effect)
     command = [
         resolve_media_tool("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
         "-ss", f"{start_ms / 1000:.3f}", "-i", str(source_video),
@@ -140,6 +342,8 @@ def build_clip_command(
             if frame_size else []
         ),
         *codec_options, "-c:a", "aac", "-b:a", "128k",
+        # 开了慢放时，带回放的片段音频是 48kHz 立体声；没有回放的片段也统一成这样才能直接拼接。
+        *(["-ar", "48000", "-ac", "2"] if uniform_audio else []),
         "-movflags", "+faststart", str(output_path),
     ]
     return command
@@ -244,6 +448,7 @@ def export_goal_clips(
     progress_callback=None,
     cancel_check=None,
     process_callback=None,
+    effect: str = "none",
 ) -> Dict[str, Any]:
     if mode not in {"separate", "merge"}:
         raise ValueError("INVALID_EXPORT_MODE")
@@ -251,6 +456,7 @@ def export_goal_clips(
     output_dir.mkdir(parents=True, exist_ok=True)
     files: list[Path] = []
     created_files: list[Path] = []
+    total_ms = 0
     codecs = video_codecs()
     # Clips from a source with another resolution are scaled to the first
     # clip's frame so the merge can stream-copy one consistent format.
@@ -260,6 +466,8 @@ def export_goal_clips(
         for index, candidate in enumerate(candidates, 1):
             candidate_size = (candidate.get("width"), candidate.get("height"))
             path = available_output_path(output_dir / clip_file_name(index, candidate))
+            spec = effect_spec(candidate, effect)
+            total_ms += output_duration_ms(candidate, spec)
             codec = run_encoded_ffmpeg(
                 lambda codec: build_clip_command(
                     Path(candidate["source_path"]),
@@ -268,6 +476,8 @@ def export_goal_clips(
                     path,
                     codec,
                     target_size if None not in target_size and candidate_size != target_size else None,
+                    spec,
+                    uniform_audio=effect != "none",
                 ),
                 path,
                 codecs,
@@ -333,6 +543,6 @@ def export_goal_clips(
     return {
         "files": [str(path) for path in export_files],
         "clip_files": [str(path) for path in files],
-        "duration_ms": sum(int(candidate["review_end_ms"]) - int(candidate["review_start_ms"]) for candidate in candidates),
+        "duration_ms": total_ms,
         "processing_ms": round((time.perf_counter() - started) * 1000),
     }

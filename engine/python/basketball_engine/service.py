@@ -30,7 +30,7 @@ from .adapters.analysis import (
     scale_roi_to_proxy,
     terminate_process,
 )
-from .adapters.export import available_output_path, export_goal_clips, safe_file_stem
+from .adapters.export import EFFECTS, available_output_path, export_goal_clips, safe_file_stem, trajectory_points
 from .protocol import ProtocolError
 from .storage import ProjectStore, new_id
 from .media_tools import resolve_media_tool
@@ -1204,7 +1204,7 @@ class EngineService:
             retry_payload["output_dir"] = checkpoint["output_dir"]
         if checkpoint.get("output_path") is not None:
             retry_payload["output_path"] = checkpoint["output_path"]
-        for key in ("player_ids", "include_unassigned"):
+        for key in ("player_ids", "include_unassigned", "effect"):
             if key in checkpoint:
                 retry_payload[key] = checkpoint[key]
         # Check what start_export would reject before ending the old job, so a
@@ -2248,7 +2248,12 @@ class EngineService:
             candidate["source_path"] = str(video["source"])
             candidate["width"] = video.get("width")
             candidate["height"] = video.get("height")
+            candidate["fps"] = video.get("fps")
+            candidate["has_audio"] = bool(video.get("audio_codec"))
         mode = payload.get("mode", "separate")
+        effect = payload.get("effect", "none")
+        if effect not in EFFECTS:
+            raise ProtocolError("INVALID_REQUEST", "effect 必须是 none、approach 或 replay")
         raw_output = payload.get("output_dir")
         output_dir = Path(raw_output).expanduser() if isinstance(raw_output, str) and raw_output.strip() else (
             store.root / "artifacts" / "exports" / f"export_{int(time.time())}"
@@ -2280,6 +2285,7 @@ class EngineService:
                     progress_callback=progress_callback,
                     cancel_check=cancel_check,
                     process_callback=process_callback,
+                    effect=effect,
                 )
             else:
                 result = export_goal_clips(
@@ -2290,6 +2296,7 @@ class EngineService:
                     progress_callback=progress_callback,
                     cancel_check=cancel_check,
                     process_callback=process_callback,
+                    effect=effect,
                 )
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
             raise ProtocolError("EXPORT_FAILED", f"导出失败: {exc}") from exc
@@ -2346,6 +2353,7 @@ class EngineService:
         progress_callback=None,
         cancel_check=None,
         process_callback=None,
+        effect: str = "none",
     ) -> Dict[str, Any]:
         """每个标签各合成一个视频，文件名用标签名；中间片段放在项目缓存里。"""
         groups: Dict[str, list[Dict[str, Any]]] = {}
@@ -2380,6 +2388,7 @@ class EngineService:
                     progress_callback=on_progress,
                     cancel_check=cancel_check,
                     process_callback=process_callback,
+                    effect=effect,
                 )
                 files.extend(result["files"])
                 clip_files.extend(result["clip_files"])
@@ -2413,6 +2422,34 @@ class EngineService:
         return videos
 
     @staticmethod
+    def _candidate_trail(candidate: Dict[str, Any]) -> list[list[float]]:
+        if str(candidate.get("detector_version") or "").startswith("manual"):
+            return []
+        return trajectory_points(candidate.get("evidence_json"), int(candidate["event_time_ms"]))
+
+    @staticmethod
+    def _candidate_rim(store: ProjectStore, candidate: Dict[str, Any]) -> Dict[str, float] | None:
+        """慢放特写的篮筐位置：优先用这个进球当时跟踪到的篮筐，没有就用项目里设的篮筐框。"""
+        if str(candidate.get("detector_version") or "").startswith("manual"):
+            return None
+        try:
+            overlay_rim = (json.loads(candidate.get("evidence_json") or "{}").get("overlay") or {}).get("rim")
+        except (TypeError, ValueError):
+            overlay_rim = None
+        if isinstance(overlay_rim, dict) and overlay_rim.get("width"):
+            return {
+                "x": float(overlay_rim["center_x"]),
+                "y": float(overlay_rim["rim_y"]),
+                "width": float(overlay_rim["width"]),
+            }
+        roi = store.active_roi(candidate["video_id"])
+        hoop = ((roi or {}).get("calibration") or {}).get("hoop_bbox")
+        if isinstance(hoop, list) and len(hoop) == 4:
+            x1, y1, x2, _ = (float(value) for value in hoop)
+            return {"x": (x1 + x2) / 2, "y": y1, "width": x2 - x1}
+        return None
+
+    @staticmethod
     def _export_candidate_snapshot(
         store: ProjectStore,
         video_id: str,
@@ -2437,6 +2474,9 @@ class EngineService:
                 "review_start_ms": int(candidate["review_start_ms"]),
                 "review_end_ms": int(candidate["review_end_ms"]),
                 "player_name": candidate.get("player_name"),
+                "rim": EngineService._candidate_rim(store, candidate),
+                "manual": str(candidate.get("detector_version") or "").startswith("manual"),
+                "trail": EngineService._candidate_trail(candidate),
             }
             for candidate in store.list_candidates(video_id)
             if candidate.get("selection_status") != "excluded"
@@ -2451,6 +2491,8 @@ class EngineService:
         return requested_player_ids, include_unassigned, candidate_snapshot
 
     def start_export(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if payload.get("effect", "none") not in EFFECTS:
+            raise ProtocolError("INVALID_REQUEST", "effect 必须是 none、approach 或 replay")
         store = self._require_store(payload)
         project = store.project()
         video_id = payload.get("video_id")
@@ -2482,6 +2524,7 @@ class EngineService:
                 "output_path": payload.get("output_path"),
                 "player_ids": sorted(selected_players) if requested_player_ids is not None else None,
                 "include_unassigned": include_unassigned,
+                "effect": payload.get("effect", "none"),
                 "candidate_snapshot": candidate_snapshot,
                 "candidate_count": len(candidate_snapshot),
             }
