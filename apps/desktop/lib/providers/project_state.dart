@@ -33,6 +33,23 @@ const _recentProjectRootsKey = 'basketball_recent_project_roots';
   if (raw.contains('ENGINE_TIMEOUT')) {
     return (title: '处理时间较长', description: '请稍候查看任务状态，原始视频不会被修改。');
   }
+  final missing = RegExp(r'FILE_NOT_FOUND: (.+)$').firstMatch(raw);
+  if (missing != null) {
+    return (
+      title: '找不到文件或文件夹：${missing.group(1)}',
+      description: '视频或项目文件夹可能被移动、改名或删除。请确认它还在原来的位置，必要时到导入页重新定位视频。',
+    );
+  }
+  final denied = RegExp(r'FILE_ACCESS_DENIED: (.+)$').firstMatch(raw);
+  if (denied != null) {
+    return (
+      title: '没有权限访问：${denied.group(1)}',
+      description: '请确认文件没有被其它程序占用，或者换一个有读写权限的文件夹。',
+    );
+  }
+  if (raw.contains('DISK_FULL')) {
+    return (title: '磁盘空间不足', description: '请清理磁盘空间后再试。');
+  }
   return (title: raw, description: null);
 }
 

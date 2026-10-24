@@ -27,6 +27,31 @@ void main() {
     );
   });
 
+  test('文件找不到、没有权限、磁盘满时给出明确说明', () {
+    final missing = userFacingNotice(
+      const EngineException(
+        'FILE_NOT_FOUND',
+        r'D:\Videos\BasketballProjects',
+      ),
+    );
+    expect(missing.title, r'找不到文件或文件夹：D:\Videos\BasketballProjects');
+    expect(missing.description, contains('重新定位视频'));
+
+    final wrapped = userFacingNotice(
+      Exception('视频预览加载失败：FILE_NOT_FOUND: /movies/game.mp4'),
+    );
+    expect(wrapped.title, '找不到文件或文件夹：/movies/game.mp4');
+
+    expect(
+      userFacingNotice(const EngineException('FILE_ACCESS_DENIED', '/data/project.db')).title,
+      '没有权限访问：/data/project.db',
+    );
+    expect(
+      userFacingNotice(const EngineException('DISK_FULL', '[Errno 28] No space left on device')),
+      (title: '磁盘空间不足', description: '请清理磁盘空间后再试。'),
+    );
+  });
+
   group('ProjectNotifier.selectVideo', () {
     test(
       '更新 videoPath/previewPath,自动 ROI 失败时记录 roiSuggestionError,push 成功 notice',

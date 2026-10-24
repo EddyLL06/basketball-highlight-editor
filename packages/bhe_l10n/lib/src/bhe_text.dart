@@ -71,6 +71,10 @@ extension BheBuildContextText on BuildContext {
 }
 
 String? _translateDynamic(String source) {
+  final missingFile = RegExp(r'^找不到文件或文件夹：(.+)$').firstMatch(source);
+  if (missingFile != null) return 'File or folder not found: ${missingFile.group(1)}';
+  final accessDenied = RegExp(r'^没有权限访问：(.+)$').firstMatch(source);
+  if (accessDenied != null) return 'Access denied: ${accessDenied.group(1)}';
   final newVersion = RegExp(r'^(发现新版本|新版本) v(.+)$').firstMatch(source);
   if (newVersion != null) {
     return '${newVersion.group(1) == '发现新版本' ? 'New version available' : 'New version'}: v${newVersion.group(2)}';
@@ -1172,6 +1176,12 @@ const _englishText = <String, String>{
   '下载中断，请检查网络后继续': 'The download was interrupted. Check your network and resume.',
   '安装包校验失败，请重新下载': 'The package failed its checksum. Download it again.',
   '安装更新': 'Install update',
+  '视频或项目文件夹可能被移动、改名或删除。请确认它还在原来的位置，必要时到导入页重新定位视频。':
+      'The video or project folder may have been moved, renamed or deleted. Check that it is still there, and relink the video on the import page if needed.',
+  '请确认文件没有被其它程序占用，或者换一个有读写权限的文件夹。':
+      'Make sure no other program is using the file, or choose a folder you can read and write.',
+  '磁盘空间不足': 'Not enough disk space',
+  '请清理磁盘空间后再试。': 'Free up some disk space and try again.',
   '源视频找不到，请到导入页重新定位视频': 'The source video cannot be found. Relink it on the import page.',
   '视频横竖方向已修正，篮筐和候选需要重新确认并分析': 'The video orientation was corrected. Re-confirm the hoop and candidates, then analyse again.',
   '现在有分析或导出在进行，等它完成再安装，安装时 BHE 会被关闭。':
