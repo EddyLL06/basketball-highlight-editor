@@ -1321,6 +1321,32 @@ void main() {
     expect(find.text('#2 00:15'), findsOneWidget);
   });
 
+  testWidgets('says so when the source video file is missing', (tester) async {
+    await _pumpReview(
+      tester,
+      const ProjectState(
+        video: {
+          'id': 'v1',
+          'source_path': '/tmp/bhe-widget-source-gone.mp4',
+          'duration_ms': 60000,
+        },
+        videoPath: '/tmp/bhe-widget-source-gone.mp4',
+        job: {'state': 'completed'},
+        candidates: [
+          {
+            'id': 'candidate-1',
+            'event_time_ms': 12000,
+            'default_start_ms': 6000,
+            'default_end_ms': 15000,
+          },
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('源视频找不到，请到导入页重新定位视频'), findsOneWidget);
+  });
+
   testWidgets('exposes direct candidate editing actions below the video', (
     tester,
   ) async {

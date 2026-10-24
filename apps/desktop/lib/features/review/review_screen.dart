@@ -1710,6 +1710,14 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
     _playbackToken++;
     return _enqueueMediaAction(() async {
       if (!_isCurrent(generation)) return;
+      if (path != null && path.isNotEmpty && !File(path).existsSync()) {
+        setState(() {
+          _ready = false;
+          _loading = false;
+          _error = '源视频找不到，请到导入页重新定位视频';
+        });
+        return;
+      }
       // 复用 Player/VideoController:视频纹理渲染期间调用 player.dispose
       // 会触发原生 ~VideoOutput 析构,在 Windows 上与光栅线程死锁,
       // 整个应用无响应。切换片源只 stop + open,不销毁。

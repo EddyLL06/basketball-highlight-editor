@@ -1172,6 +1172,7 @@ const _englishText = <String, String>{
   '下载中断，请检查网络后继续': 'The download was interrupted. Check your network and resume.',
   '安装包校验失败，请重新下载': 'The package failed its checksum. Download it again.',
   '安装更新': 'Install update',
+  '源视频找不到，请到导入页重新定位视频': 'The source video cannot be found. Relink it on the import page.',
   '视频横竖方向已修正，篮筐和候选需要重新确认并分析': 'The video orientation was corrected. Re-confirm the hoop and candidates, then analyse again.',
   '现在有分析或导出在进行，等它完成再安装，安装时 BHE 会被关闭。':
       'An analysis or export is running. Wait for it to finish; installing closes BHE.',
