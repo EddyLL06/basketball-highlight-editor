@@ -393,20 +393,19 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     } else if (key == LogicalKeyboardKey.arrowDown) {
       _moveCandidate(candidates, 1);
     } else if (key == LogicalKeyboardKey.arrowLeft) {
-      _seekBySeconds(-2);
+      _seekBySeconds(keyboard.isShiftPressed ? -0.1 : -2);
     } else if (key == LogicalKeyboardKey.arrowRight) {
-      _seekBySeconds(2);
+      _seekBySeconds(keyboard.isShiftPressed ? 0.1 : 2);
     } else if (key == LogicalKeyboardKey.space) {
       _togglePlayback();
     } else if (key == LogicalKeyboardKey.keyA) {
       _videoController.toggleAnnotations();
-    } else if (key == LogicalKeyboardKey.keyR) {
-      _requestReplay();
     } else if (key == LogicalKeyboardKey.keyL) {
       _toggleCandidateLoop();
     } else if (key == LogicalKeyboardKey.keyZ && commandPressed) {
       if (!reviewLocked) unawaited(notifier.undoReview());
     } else if (key == LogicalKeyboardKey.keyX ||
+        key == LogicalKeyboardKey.backquote ||
         key == LogicalKeyboardKey.backspace) {
       final id = selected?['id']?.toString();
       if (!reviewLocked && id != null) {
@@ -419,7 +418,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
         unawaited(_setCandidateStatus(id, 'included'));
       }
     } else if (_playerShortcutIndex(key) case final int index) {
-      // 0 clears the tag; 1-9 follow the player order shown in the tag menu.
+      // 0 clears the tag; the other keys follow the player order shown in the tag menu.
       final players = ref.read(projectProvider).players;
       if (index > players.length) return KeyEventResult.ignored;
       if (!reviewLocked && selected != null) {
@@ -445,6 +444,17 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     (LogicalKeyboardKey.digit7, LogicalKeyboardKey.numpad7),
     (LogicalKeyboardKey.digit8, LogicalKeyboardKey.numpad8),
     (LogicalKeyboardKey.digit9, LogicalKeyboardKey.numpad9),
+    // 第 10 个以后用 Q 到 P 这一排字母。
+    (LogicalKeyboardKey.keyQ, LogicalKeyboardKey.keyQ),
+    (LogicalKeyboardKey.keyW, LogicalKeyboardKey.keyW),
+    (LogicalKeyboardKey.keyE, LogicalKeyboardKey.keyE),
+    (LogicalKeyboardKey.keyR, LogicalKeyboardKey.keyR),
+    (LogicalKeyboardKey.keyT, LogicalKeyboardKey.keyT),
+    (LogicalKeyboardKey.keyY, LogicalKeyboardKey.keyY),
+    (LogicalKeyboardKey.keyU, LogicalKeyboardKey.keyU),
+    (LogicalKeyboardKey.keyI, LogicalKeyboardKey.keyI),
+    (LogicalKeyboardKey.keyO, LogicalKeyboardKey.keyO),
+    (LogicalKeyboardKey.keyP, LogicalKeyboardKey.keyP),
   ];
 
   int? _playerShortcutIndex(LogicalKeyboardKey key) {
@@ -1978,7 +1988,11 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
     await _queuePlayerAction(
       generation: _mediaGeneration,
       playbackToken: _playbackToken,
-      action: (player) => player.setRate(rate),
+      action: (player) async {
+        await player.setRate(rate);
+        // 从高倍速切回来时画面会落后于声音，原地 seek 一次让音画重新对齐。
+        await player.seek(player.state.position);
+      },
     );
   }
 
@@ -2982,7 +2996,7 @@ class _VideoControlsState extends State<_VideoControls> {
           final extras = <Widget>[
             if (event != null) ...[
               IconButton(
-                tooltip: '${context.bheText('重播当前片段')} (R)',
+                tooltip: context.bheText('重播当前片段'),
                 onPressed: widget.enabled
                     ? () => unawaited(widget.onReplayCandidate())
                     : null,
@@ -3031,7 +3045,7 @@ class _VideoControlsState extends State<_VideoControls> {
                   onSelected: (next) =>
                       unawaited(widget.onSetPlaybackRate(next)),
                   itemBuilder: (context) => [
-                    for (final option in const [1.0, 1.25, 1.5, 2.0])
+                    for (final option in const [0.5, 0.75, 1.0, 1.25, 1.5, 2.0])
                       PopupMenuItem<double>(
                         value: option,
                         child: Row(
@@ -4831,7 +4845,7 @@ class _CandidatePanel extends StatelessWidget {
                 ),
                 Tooltip(
                   message: context.bheText(
-                    '快捷键\nSpace  播放/暂停\nR  重播当前\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒\nC / Enter  保留\nX / Backspace  排除\n1–9  设置球员标签 · 0  清除\nCmd/Ctrl+Z  撤销',
+                    '快捷键\nSpace  播放/暂停\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒 · 加 Shift 每次 0.1 秒\nC / Enter  保留\nX / ` / Backspace  排除\n1–9、Q–P  设置球员标签 · 0  清除\nCmd/Ctrl+Z  撤销',
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(8),
@@ -6095,7 +6109,7 @@ class _CandidateRow extends StatelessWidget {
                     ),
                     const SizedBox(width: 3),
                     _DecisionButton(
-                      tooltip: context.bheText('排除片段 (X / Backspace)'),
+                      tooltip: context.bheText('排除片段 (X / ` / Backspace)'),
                       icon: Icons.close_rounded,
                       active: excluded,
                       color: c.error,
@@ -6276,12 +6290,16 @@ class _PlayerPickerMenuContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
+    // 标题、未标记、新建和分组这几行约 156，每个球员一行 34；人多时撑高到窗口的 80%。
+    final fitted = 156 + 34.0 * (players.isEmpty ? 1 : players.length);
+    final maxHeight = MediaQuery.sizeOf(context).height * 0.8;
+    final height = fitted.clamp(330.0, maxHeight < 330 ? 330.0 : maxHeight);
     return Material(
       color: c.surface,
       borderRadius: BorderRadius.circular(CsRadius.sm),
       child: SizedBox(
         width: 276,
-        height: 330,
+        height: height,
         child: Padding(
           padding: const EdgeInsets.all(10),
           child: Column(
@@ -6316,7 +6334,7 @@ class _PlayerPickerMenuContent extends StatelessWidget {
                           return _PlayerPickerOption(
                             label: name,
                             color: _playerColor(c, id, index),
-                            shortcut: index < 9 ? '${index + 1}' : null,
+                            shortcut: playerShortcutLabel(index),
                             onTap: id == null ? null : () => onSelected(id),
                             trailing: onDelete == null || id == null
                                 ? null
@@ -6994,6 +7012,14 @@ String _formatDuration(Duration duration) {
   }
   return '${minutes.toString().padLeft(2, '0')}:'
       '${seconds.toString().padLeft(2, '0')}';
+}
+
+/// 标签菜单里第 [index] 个球员的快捷键：1–9，然后 Q W E R T Y U I O P。
+String? playerShortcutLabel(int index) {
+  const letters = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'];
+  if (index < 9) return '${index + 1}';
+  if (index < 9 + letters.length) return letters[index - 9];
+  return null;
 }
 
 String _playbackRateLabel(double rate) {

@@ -443,7 +443,7 @@ const _englishText = <String, String>{
   '重新配置': 'Reconfigure',
   '去导入视频': 'Import a video',
   '保留片段 (C / Enter)': 'Include clip (C / Enter)',
-  '排除片段 (X / Backspace)': 'Exclude clip (X / Backspace)',
+  '排除片段 (X / ` / Backspace)': 'Exclude clip (X / ` / Backspace)',
   '设置球员标签': 'Set player tag',
   '未标记': 'Untagged',
   '上次分析没有完成': 'The previous analysis did not finish',
@@ -686,8 +686,8 @@ const _englishText = <String, String>{
       'Orange: ball trajectory, current position, or estimated crossing point',
   '最终是否保留由你审核决定，算法结果只是候选建议。':
       'You decide whether to keep the clip; algorithm results are only suggestions.',
-  '快捷键\nSpace  播放/暂停\nR  重播当前\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒\nC / Enter  保留\nX / Backspace  排除\n1–9  设置球员标签 · 0  清除\nCmd/Ctrl+Z  撤销':
-      'Shortcuts\nSpace  Play/pause\nR  Replay current\nL  Loop current\nA  Show/hide annotations\n↑ / ↓  Switch candidates\n← / →  Rewind/forward 2 sec\nC / Enter  Include\nX / Backspace  Exclude\n1–9  Set player tag · 0  Clear\nCmd/Ctrl+Z  Undo',
+  '快捷键\nSpace  播放/暂停\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒 · 加 Shift 每次 0.1 秒\nC / Enter  保留\nX / ` / Backspace  排除\n1–9、Q–P  设置球员标签 · 0  清除\nCmd/Ctrl+Z  撤销':
+      'Shortcuts\nSpace  Play/pause\nL  Loop current\nA  Show/hide annotations\n↑ / ↓  Switch candidates\n← / →  Rewind/forward 2 sec · with Shift 0.1 sec\nC / Enter  Include\nX / ` / Backspace  Exclude\n1–9, Q–P  Set player tag · 0  Clear\nCmd/Ctrl+Z  Undo',
   '未命名项目': 'Untitled project',
   '新建项目': 'New project',
   '原始视频不可用，无法预览片段范围':

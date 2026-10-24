@@ -181,6 +181,70 @@ void main() {
     expect(find.byKey(const ValueKey('unreviewed-seen')), findsNothing);
   });
 
+  test('players after the ninth get the Q to P letter row', () {
+    expect(playerShortcutLabel(0), '1');
+    expect(playerShortcutLabel(8), '9');
+    expect(playerShortcutLabel(9), 'Q');
+    expect(playerShortcutLabel(12), 'R');
+    expect(playerShortcutLabel(18), 'P');
+    expect(playerShortcutLabel(19), isNull);
+  });
+
+  testWidgets('letter keys tag players beyond the ninth', (tester) async {
+    final notifier = _TagReviewNotifier(
+      _tagReviewState().copyWith(
+        players: [
+          for (var i = 1; i <= 10; i++) {'id': 'p$i', 'name': '球员$i'},
+        ],
+      ),
+    );
+    await _pumpReview(tester, notifier.initialState, notifier: notifier);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyQ);
+    await tester.pumpAndSettle();
+
+    final tagged = notifier.lastTaggedIds;
+    expect(tagged, isNotNull);
+    expect(
+      notifier.current.candidates.firstWhere((c) => c['id'] == tagged!.single)['player_id'],
+      'p10',
+    );
+  });
+
+  testWidgets('R tags a player instead of replaying', (tester) async {
+    final notifier = _TagReviewNotifier(
+      _tagReviewState().copyWith(
+        players: [
+          for (var i = 1; i <= 13; i++) {'id': 'p$i', 'name': '球员$i'},
+        ],
+      ),
+    );
+    await _pumpReview(tester, notifier.initialState, notifier: notifier);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyR);
+    await tester.pumpAndSettle();
+
+    final tagged = notifier.lastTaggedIds;
+    expect(tagged, isNotNull);
+    expect(
+      notifier.current.candidates.firstWhere((c) => c['id'] == tagged!.single)['player_id'],
+      'p13',
+    );
+  });
+
+  testWidgets('the key left of 1 excludes the selected clip', (tester) async {
+    final notifier = _TagReviewNotifier(_tagReviewState());
+    await _pumpReview(tester, notifier.initialState, notifier: notifier);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.backquote);
+    await tester.pumpAndSettle();
+
+    expect(
+      notifier.current.candidates.where((c) => c['selection_status'] == 'excluded'),
+      hasLength(1),
+    );
+  });
+
   testWidgets('number keys tag the selected clip in player menu order', (
     tester,
   ) async {
@@ -723,7 +787,7 @@ void main() {
     expect(find.text('会导出'), findsOneWidget);
     expect(find.text('9 秒'), findsOneWidget);
     expect(find.byTooltip('保留片段 (C / Enter)'), findsOneWidget);
-    expect(find.byTooltip('排除片段 (X / Backspace)'), findsOneWidget);
+    expect(find.byTooltip('排除片段 (X / ` / Backspace)'), findsOneWidget);
   });
 
   testWidgets('opens the player picker next to the candidate row', (
@@ -1229,7 +1293,7 @@ void main() {
 
     expect(
       find.byTooltip(
-        '快捷键\nSpace  播放/暂停\nR  重播当前\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒\nC / Enter  保留\nX / Backspace  排除\n1–9  设置球员标签 · 0  清除\nCmd/Ctrl+Z  撤销',
+        '快捷键\nSpace  播放/暂停\nL  循环当前\nA  显示/关闭标注\n↑ / ↓  切换候选\n← / →  快退/快进 2 秒 · 加 Shift 每次 0.1 秒\nC / Enter  保留\nX / ` / Backspace  排除\n1–9、Q–P  设置球员标签 · 0  清除\nCmd/Ctrl+Z  撤销',
       ),
       findsOneWidget,
     );
@@ -1466,7 +1530,7 @@ void main() {
     );
 
     expect(find.text('候选 00:03'), findsOneWidget);
-    await tester.tap(find.byTooltip('排除片段 (X / Backspace)').first);
+    await tester.tap(find.byTooltip('排除片段 (X / ` / Backspace)').first);
     await tester.pump();
 
     expect(find.text('候选 00:03'), findsOneWidget);
