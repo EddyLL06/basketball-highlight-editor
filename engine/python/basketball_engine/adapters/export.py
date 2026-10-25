@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import re
 import subprocess
+import tempfile
 import threading
 import time
 from collections import deque
@@ -24,6 +26,23 @@ WINDOWS_HARDWARE_CODECS = ("h264_nvenc", "h264_qsv", "h264_amf", "h264_mf")
 # init error) in the last few lines, so keep a short tail for the job record.
 STDERR_TAIL_LINES = 40
 
+# 导出只会写 MP4；这张表既用来补齐漏写的扩展名，也用来显式告诉 FFmpeg 封装格式。
+CONTAINER_BY_SUFFIX = {".mp4": "mp4", ".m4v": "mp4", ".mov": "mp4", ".mkv": "matroska"}
+DEFAULT_CONTAINER_SUFFIX = ".mp4"
+
+# 这些错误和编码器无关（封装格式、路径、磁盘、权限），换编码器只会重复同一个
+# 失败，还会把真正的原因埋进最后一次尝试里。见 issue #8：
+# 临时文件名以 .part 结尾，6 个编码器各报一次 "Unable to choose an output format"。
+NON_RETRYABLE_STDERR = (
+    "Unable to choose an output format",
+    "Error initializing the muxer",
+    "Error opening output file",
+    "No such file or directory",
+    "Permission denied",
+    "Read-only file system",
+    "No space left on device",
+)
+
 
 class MediaCommandError(subprocess.CalledProcessError):
     """FFmpeg failure that keeps the stderr tail in its message."""
@@ -35,8 +54,53 @@ class MediaCommandError(subprocess.CalledProcessError):
     def __str__(self) -> str:
         # 界面只显示一行，原因放最前面；完整命令太长，会把原因挤掉。
         tail = (self.stderr_tail or "").strip()
-        message = f"ffmpeg 退出码 {self.returncode}"
+        code = self.returncode
+        if code >= 2 ** 31:
+            # Windows 把 -22 这类退出码按 DWORD 回传，界面要显示 -22 而不是 4294967274。
+            code -= 2 ** 32
+        message = f"ffmpeg 退出码 {code}"
         return f"{message}: {tail}" if tail else message
+
+
+def is_retryable_failure(exc: subprocess.CalledProcessError) -> bool:
+    """这个失败值得换编码器重试吗？环境类错误换哪个编码器都一样。"""
+    tail = getattr(exc, "stderr_tail", "") or ""
+    return not any(marker in tail for marker in NON_RETRYABLE_STDERR)
+
+
+def normalize_output_path(path: Path) -> Path:
+    """导出统一写 MP4；用户漏写扩展名时补上。
+
+    不能用 with_suffix：名字里的点会被当成扩展名，把 "BHE.highlights-261003"
+    变成 "BHE.mp4"。
+    """
+    if path.suffix.lower() in CONTAINER_BY_SUFFIX:
+        return path
+    return path.with_name(f"{path.name}{DEFAULT_CONTAINER_SUFFIX}")
+
+
+def ensure_writable_directory(directory: Path) -> None:
+    """导出前自检：目录能建、能写。失败时给一句人话，而不是等编码跑完再猜 muxer 报错。"""
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        handle, probe = tempfile.mkstemp(prefix=".bhe-export-probe-", dir=str(directory))
+        os.close(handle)
+    except OSError as exc:
+        raise OSError(f"导出位置不可用：{directory}（{exc.strerror or exc}）") from exc
+    try:
+        Path(probe).unlink(missing_ok=True)
+    except OSError:
+        # 探针删不掉不影响导出，别把它当成"位置不可用"。
+        pass
+
+
+def validate_output_file(path: Path) -> Path:
+    """校验并归一化导出文件路径，返回真正要写的路径。"""
+    if path.is_dir():
+        raise OSError(f"导出目标是文件夹，需要写文件名：{path}")
+    target = normalize_output_path(path)
+    ensure_writable_directory(target.parent)
+    return target
 
 
 def _collect_stderr(stream, tail: deque[str]) -> None:
@@ -79,7 +143,7 @@ def run_encoded_ffmpeg(command_builder, output_path: Path, codecs: list[str], **
             run_atomic_ffmpeg(command_builder(codec), output_path, **kwargs)
             return codec
         except subprocess.CalledProcessError as exc:
-            if index == len(codecs) - 1:
+            if index == len(codecs) - 1 or not is_retryable_failure(exc):
                 raise
             log_diagnostic(f"encoder {codec} failed, trying {codecs[index + 1]}: {exc}")
 
@@ -385,10 +449,16 @@ def run_atomic_ffmpeg(
     process_callback=None,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # 后缀不可信：漏写扩展名、"BHE.highlights-261003" 这类带点的名字都会让临时
+    # 文件以 ".part" 收尾，FFmpeg 直接 "Unable to choose an output format" 退出。
+    suffix = output_path.suffix.lower()
+    if suffix not in CONTAINER_BY_SUFFIX:
+        suffix = DEFAULT_CONTAINER_SUFFIX
     temporary = output_path.with_name(
-        f".{output_path.stem}.{uuid4().hex}.part{output_path.suffix}"
+        f".{output_path.stem}.{uuid4().hex}.part{suffix}"
     )
-    atomic_command = [*command[:-1], str(temporary)]
+    # 临时文件名之外再显式指定封装格式，双保险。
+    atomic_command = [*command[:-1], "-f", CONTAINER_BY_SUFFIX[suffix], str(temporary)]
     try:
         popen_kwargs = {
             "stdin": subprocess.DEVNULL,
@@ -496,7 +566,10 @@ def export_goal_clips(
                 progress_callback("export_clips", index / max(1, len(candidates)))
         merged_path = None
         if mode == "merge" and files:
-            merged_path = output_path or available_output_path(output_dir / "highlights.mp4")
+            merged_path = (
+                validate_output_file(output_path) if output_path
+                else available_output_path(output_dir / "highlights.mp4")
+            )
             merged_existed = merged_path.exists()
             concat_file = output_dir / "concat.txt"
             concat_file.write_text(
