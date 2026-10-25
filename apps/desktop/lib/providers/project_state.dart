@@ -19,6 +19,9 @@ import 'sidebar_provider.dart';
 
 const _recentProjectRootsKey = 'basketball_recent_project_roots';
 
+/// 项目显示名的长度上限。只约束数据库里的 name，不影响磁盘目录名。
+const projectNameMaxLength = 60;
+
 ({String title, String? description}) userFacingNotice(Object error) {
   final raw = error.toString();
   if (raw.contains('ROI_COORDINATES_INVALID')) {
@@ -1976,6 +1979,73 @@ class ProjectNotifier extends Notifier<ProjectState> {
       );
     } catch (_) {
       // 统计是辅助展示，旧版 Engine 不支持时不阻塞审核流程。
+    }
+  }
+
+  /// 改项目显示名。只改数据库里的 name，不动磁盘目录：
+  /// 目录名被最近项目列表和导出路径引用，重命名会让已保存的路径失效。
+  /// 返回 false 表示名字不合法或保存失败，未改动任何数据。
+  ///
+  /// [projectRoot] 为空时改当前打开的项目；首页最近项目卡片传入各自的 root。
+  Future<bool> renameProject(String name, {String? projectRoot}) async {
+    if (_disposed) return false;
+    final trimmed = name.trim();
+    if (trimmed.isEmpty || trimmed.length > projectNameMaxLength) return false;
+    final target = projectRoot?.trim() ?? '';
+    final isCurrent =
+        target.isEmpty ||
+        target == ref.read(projectSessionProvider).projectRoot;
+    if (isCurrent) {
+      final current =
+          (state.statistics?['project'] as Map?)?['name']?.toString();
+      if (current == trimmed) return true;
+    }
+    try {
+      final engine = ref.read(projectSessionProvider).engine;
+      await engine.updateProjectSettings(
+        projectRoot: isCurrent
+            ? ref.read(projectSessionProvider).projectRoot!
+            : target,
+        name: trimmed,
+      );
+      if (_disposed) return false;
+      if (!isCurrent) {
+        // 改的不是当前项目：同步最近项目列表里的名字，不必重开项目。
+        state = state.copyWith(
+          recentProjects: [
+            for (final item in state.recentProjects)
+              if (item['project_root']?.toString() == target)
+                {
+                  ...item,
+                  'project': {
+                    ...?((item['project'] as Map?)?.cast<String, dynamic>()),
+                    'name': trimmed,
+                  },
+                }
+              else
+                item,
+          ],
+        );
+        return true;
+      }
+      final statistics = state.statistics;
+      if (statistics != null) {
+        final project = statistics['project'];
+        state = state.copyWith(
+          statistics: {
+            ...statistics,
+            if (project is Map)
+              'project': {...project, 'name': trimmed}
+            else
+              'project': {'name': trimmed},
+          },
+        );
+      }
+      unawaited(refreshStatistics());
+      return true;
+    } catch (error) {
+      if (!_disposed) _pushNotice('项目名称保存失败：$error', NoticeSeverity.error);
+      return false;
     }
   }
 

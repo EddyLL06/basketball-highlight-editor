@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'bhe_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -40,6 +41,61 @@ class BheLocalizationsEn extends BheLocalizations {
 
   @override
   String get deleteProject => 'Delete current project';
+
+  @override
+  String get renameProject => 'Rename project';
+
+  @override
+  String get projectName => 'Project name';
+
+  @override
+  String get projectNameHint => 'e.g. Oct 24 practice game';
+
+  @override
+  String get projectNameEmpty => 'Project name cannot be empty';
+
+  @override
+  String projectNameTooLong(int max) {
+    return 'Project name is limited to $max characters';
+  }
+
+  @override
+  String get projectNameSaveFailed =>
+      'Could not save the project name. Try again.';
+
+  @override
+  String get projectNameScopeHint =>
+      'Only the display name changes. The project folder and exported videos are untouched.';
+
+  @override
+  String get save => 'Save';
+
+  @override
+  String get cancel => 'Cancel';
+
+  @override
+  String get close => 'Close';
+
+  @override
+  String get openFolder => 'Open folder';
+
+  @override
+  String get projectInfo => 'Project info';
+
+  @override
+  String get projectCreatedAt => 'Created';
+
+  @override
+  String get projectVideoCount => 'Video segments';
+
+  @override
+  String get projectSegmentsUnit => 'segments';
+
+  @override
+  String get projectGoalsConfirmed => 'Confirmed goals';
+
+  @override
+  String get projectStorageLocation => 'Storage location';
 
   @override
   String get more => 'More';
@@ -545,12 +601,6 @@ class BheLocalizationsEn extends BheLocalizations {
 
   @override
   String get confirm => 'Confirm';
-
-  @override
-  String get cancel => 'Cancel';
-
-  @override
-  String get close => 'Close';
 
   @override
   String get rangeEditorHint =>

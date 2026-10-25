@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'bhe_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -39,6 +40,59 @@ class BheLocalizationsZh extends BheLocalizations {
 
   @override
   String get deleteProject => '删除当前项目';
+
+  @override
+  String get renameProject => '重命名项目';
+
+  @override
+  String get projectName => '项目名称';
+
+  @override
+  String get projectNameHint => '例如：10 月 24 日 训练赛';
+
+  @override
+  String get projectNameEmpty => '项目名称不能为空';
+
+  @override
+  String projectNameTooLong(int max) {
+    return '项目名称最多 $max 个字符';
+  }
+
+  @override
+  String get projectNameSaveFailed => '项目名称保存失败，请重试';
+
+  @override
+  String get projectNameScopeHint => '只修改显示名称，项目文件夹和已导出的视频不受影响。';
+
+  @override
+  String get save => '保存';
+
+  @override
+  String get cancel => '取消';
+
+  @override
+  String get close => '关闭';
+
+  @override
+  String get openFolder => '打开文件夹';
+
+  @override
+  String get projectInfo => '项目信息';
+
+  @override
+  String get projectCreatedAt => '创建时间';
+
+  @override
+  String get projectVideoCount => '视频段数';
+
+  @override
+  String get projectSegmentsUnit => '段';
+
+  @override
+  String get projectGoalsConfirmed => '已确认进球';
+
+  @override
+  String get projectStorageLocation => '存储位置';
 
   @override
   String get more => '更多';
@@ -524,12 +578,6 @@ class BheLocalizationsZh extends BheLocalizations {
 
   @override
   String get confirm => '确认';
-
-  @override
-  String get cancel => '取消';
-
-  @override
-  String get close => '关闭';
 
   @override
   String get rangeEditorHint =>

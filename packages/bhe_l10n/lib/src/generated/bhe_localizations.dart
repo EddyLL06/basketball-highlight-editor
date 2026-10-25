@@ -158,6 +158,108 @@ abstract class BheLocalizations {
   /// **'删除当前项目'**
   String get deleteProject;
 
+  /// No description provided for @renameProject.
+  ///
+  /// In zh, this message translates to:
+  /// **'重命名项目'**
+  String get renameProject;
+
+  /// No description provided for @projectName.
+  ///
+  /// In zh, this message translates to:
+  /// **'项目名称'**
+  String get projectName;
+
+  /// No description provided for @projectNameHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'例如：10 月 24 日 训练赛'**
+  String get projectNameHint;
+
+  /// No description provided for @projectNameEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'项目名称不能为空'**
+  String get projectNameEmpty;
+
+  /// No description provided for @projectNameTooLong.
+  ///
+  /// In zh, this message translates to:
+  /// **'项目名称最多 {max} 个字符'**
+  String projectNameTooLong(int max);
+
+  /// No description provided for @projectNameSaveFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'项目名称保存失败，请重试'**
+  String get projectNameSaveFailed;
+
+  /// No description provided for @projectNameScopeHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'只修改显示名称，项目文件夹和已导出的视频不受影响。'**
+  String get projectNameScopeHint;
+
+  /// No description provided for @save.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存'**
+  String get save;
+
+  /// No description provided for @cancel.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消'**
+  String get cancel;
+
+  /// No description provided for @close.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭'**
+  String get close;
+
+  /// No description provided for @openFolder.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开文件夹'**
+  String get openFolder;
+
+  /// No description provided for @projectInfo.
+  ///
+  /// In zh, this message translates to:
+  /// **'项目信息'**
+  String get projectInfo;
+
+  /// No description provided for @projectCreatedAt.
+  ///
+  /// In zh, this message translates to:
+  /// **'创建时间'**
+  String get projectCreatedAt;
+
+  /// No description provided for @projectVideoCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'视频段数'**
+  String get projectVideoCount;
+
+  /// No description provided for @projectSegmentsUnit.
+  ///
+  /// In zh, this message translates to:
+  /// **'段'**
+  String get projectSegmentsUnit;
+
+  /// No description provided for @projectGoalsConfirmed.
+  ///
+  /// In zh, this message translates to:
+  /// **'已确认进球'**
+  String get projectGoalsConfirmed;
+
+  /// No description provided for @projectStorageLocation.
+  ///
+  /// In zh, this message translates to:
+  /// **'存储位置'**
+  String get projectStorageLocation;
+
   /// No description provided for @more.
   ///
   /// In zh, this message translates to:
@@ -1045,18 +1147,6 @@ abstract class BheLocalizations {
   /// In zh, this message translates to:
   /// **'确认'**
   String get confirm;
-
-  /// No description provided for @cancel.
-  ///
-  /// In zh, this message translates to:
-  /// **'取消'**
-  String get cancel;
-
-  /// No description provided for @close.
-  ///
-  /// In zh, this message translates to:
-  /// **'关闭'**
-  String get close;
 
   /// No description provided for @rangeEditorHint.
   ///

@@ -16,6 +16,8 @@ import '../../providers/pending_import_provider.dart';
 import '../../providers/project_state.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
+import 'project_name_dialog.dart';
+import 'project_info_dialog.dart';
 
 /// Home 屏:Hero slogan + 主 CTA / 当前项目 metrics / 最近项目网格 / 工作流指示。
 ///
@@ -192,13 +194,38 @@ class HomeScreen extends ConsumerWidget {
                     ],
                   ),
                   const SizedBox(height: Spacing.sm),
-                  Text(
-                    currentName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          currentName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: Spacing.xs),
+                      IconButton(
+                        icon: const Icon(LucideIcons.info, size: 16),
+                        tooltip: l10n?.projectInfo ?? '项目信息',
+                        visualDensity: VisualDensity.compact,
+                        color: c.textTertiary,
+                        onPressed: () => ProjectInfoDialog.show(
+                          context,
+                          name: currentName,
+                          statistics: statistics,
+                          videos: state.videos,
+                          candidates: state.candidates,
+                          onRename: (name) => notifier.renameProject(name),
+                        ),
+                      ),
+                      _RenameProjectButton(
+                        name: currentName,
+                        onRename: (name) => notifier.renameProject(name),
+                      ),
+                    ],
                   ),
                   if (currentVideoName != null) ...[
                     const SizedBox(height: 2),
@@ -387,6 +414,8 @@ class HomeScreen extends ConsumerWidget {
                 onOpen: openRecentProject,
                 onDelete: deleteRecentProject,
                 onCreate: busy ? () {} : startNewProject,
+                onRename: (root, name) =>
+                    notifier.renameProject(name, projectRoot: root),
               ),
               const SizedBox(height: Spacing.xl),
             ],
@@ -625,6 +654,30 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
+/// 项目名旁的小铅笔按钮：点开重命名对话框。
+class _RenameProjectButton extends StatelessWidget {
+  const _RenameProjectButton({required this.name, required this.onRename});
+
+  final String name;
+  final Future<bool> Function(String name) onRename;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    return IconButton(
+      icon: const Icon(LucideIcons.pencil, size: 16),
+      tooltip: '重命名项目',
+      visualDensity: VisualDensity.compact,
+      color: c.textTertiary,
+      onPressed: () => showProjectNameDialog(
+        context,
+        initialName: name,
+        onSubmit: onRename,
+      ),
+    );
+  }
+}
+
 class _HomeStat extends StatelessWidget {
   const _HomeStat({required this.label, required this.value, this.color});
 
@@ -665,6 +718,7 @@ class _RecentProjects extends StatelessWidget {
     required this.onOpen,
     required this.onDelete,
     required this.onCreate,
+    this.onRename,
   });
 
   final ProjectState state;
@@ -672,6 +726,7 @@ class _RecentProjects extends StatelessWidget {
   final Future<void> Function(String root) onOpen;
   final Future<void> Function(Map<String, dynamic> item) onDelete;
   final VoidCallback onCreate;
+  final Future<bool> Function(String root, String name)? onRename;
 
   @override
   Widget build(BuildContext context) {
@@ -698,6 +753,7 @@ class _RecentProjects extends StatelessWidget {
       projects: state.recentProjects,
       onOpen: busy ? null : onOpen,
       onDelete: busy ? null : onDelete,
+      onRename: busy ? null : onRename,
     );
   }
 }
@@ -707,11 +763,13 @@ class _RecentGrid extends StatelessWidget {
     required this.projects,
     required this.onOpen,
     required this.onDelete,
+    this.onRename,
   });
 
   final List<Map<String, dynamic>> projects;
   final Future<void> Function(String root)? onOpen;
   final Future<void> Function(Map<String, dynamic> item)? onDelete;
+  final Future<bool> Function(String root, String name)? onRename;
 
   @override
   Widget build(BuildContext context) {
@@ -737,6 +795,7 @@ class _RecentGrid extends StatelessWidget {
                     item: projects[index],
                     onOpen: onOpen,
                     onDelete: onDelete,
+                    onRename: onRename,
                   ),
                 ),
               );
@@ -770,11 +829,13 @@ class _ProjectCard extends StatelessWidget {
     required this.item,
     required this.onOpen,
     required this.onDelete,
+    this.onRename,
   });
 
   final Map<String, dynamic> item;
   final Future<void> Function(String root)? onOpen;
   final Future<void> Function(Map<String, dynamic> item)? onDelete;
+  final Future<bool> Function(String root, String name)? onRename;
 
   @override
   Widget build(BuildContext context) {
@@ -894,8 +955,26 @@ class _ProjectCard extends StatelessWidget {
                             size: 18,
                             color: c.textSecondary,
                           ),
-                          onSelected: (_) => onDelete!(item),
+                          onSelected: (value) {
+                            if (value == 'rename') {
+                              showProjectNameDialog(
+                                context,
+                                initialName: name,
+                                onSubmit: (next) => onRename == null
+                                    ? Future<bool>.value(false)
+                                    : onRename!(root, next),
+                              );
+                            } else {
+                              onDelete!(item);
+                            }
+                          },
                           itemBuilder: (context) => [
+                            PopupMenuItem(
+                              value: 'rename',
+                              child: Text(
+                                l10n?.renameProject ?? '重命名项目',
+                              ),
+                            ),
                             PopupMenuItem(
                               value: 'delete',
                               child: Text(l10n?.deleteProject ?? '删除项目'),
