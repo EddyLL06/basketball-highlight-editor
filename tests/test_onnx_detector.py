@@ -266,6 +266,9 @@ def test_auto_on_macos_does_not_probe_torch_when_coreml_wins(tmp_path, monkeypat
     def explode():
         raise AssertionError("coreml 已经可用时,auto 不应该再 import torch")
 
+    # 这条用例模拟的是 macOS:那里 _cuda_possible() 本来就是 False(没有 CUDA 版 torch),
+    # 所以 auto 不会去探 CUDA。必须显式钉住,否则在 Linux 上跑会真的去探 CUDA。
+    monkeypatch.setattr(inference, "_cuda_possible", lambda: False)
     monkeypatch.setattr(inference, "_torch_cuda_available", explode)
     monkeypatch.setattr(inference, "_torch_mps_available", explode)
     monkeypatch.setattr(inference, "_dml_provider_available", lambda: False)
