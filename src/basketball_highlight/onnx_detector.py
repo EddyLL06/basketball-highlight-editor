@@ -221,7 +221,7 @@ class OnnxDetector:
         self.imgsz = imgsz
         self.names = names if names is not None else load_names(self.onnx_path)
 
-        providers = self._providers(ort)
+        providers = self._providers(self.device)
         options = session_options if session_options is not None else ort.SessionOptions()
         options.log_severity_level = 3
         try:
@@ -243,8 +243,11 @@ class OnnxDetector:
         self.max_batch = max(1, int(self.max_batch))
 
     @staticmethod
-    def _providers(ort) -> list[str]:
-        return ["DmlExecutionProvider", "CPUExecutionProvider"]
+    def _providers(device: str) -> list[str]:
+        """按请求的设备给出 provider 顺序：``dml`` 才启用 DirectML，其余走 CPU。"""
+        if device == "dml":
+            return ["DmlExecutionProvider", "CPUExecutionProvider"]
+        return ["CPUExecutionProvider"]
 
     @property
     def batch_size(self) -> int:
@@ -294,8 +297,10 @@ class OnnxDetector:
         raw = outputs[0]
 
         results: list[Result] = []
+        # 只有真的喂了多张、且输出带 batch 维度时才按下标取；否则整份输出就是这一张的。
+        batched = raw.ndim >= 3 and raw.shape[0] == len(meta) and len(meta) > 1
         for index, (scale, offset_x, offset_y) in enumerate(meta):
-            single = raw[index:index + 1] if raw.ndim >= 3 and raw.shape[0] > 1 else raw
+            single = raw[index:index + 1] if batched else raw
             detections = decode(
                 single, size, scale, offset_x, offset_y,
                 conf=conf, iou=iou, max_det=max_det, agnostic_nms=agnostic_nms,
