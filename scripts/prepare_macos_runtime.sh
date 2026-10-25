@@ -58,6 +58,15 @@ cp -R "$ROOT/scripts"/. "$OUT/scripts/"
 cp -R "$ROOT/src"/. "$OUT/src/"
 cp "$ROOT/docs/architecture/SQLITE_SCHEMA_V1.sql" "$OUT/docs/architecture/"
 cp "$MODEL" "$OUT/models/bball_model.pt"
+# CoreML 用的静态 batch=1 模型是可选的:构建时导出过就一起打包,
+# 没有就只保留 Metal/CPU 路径(引擎会在缺文件时自动降级,不会报错)。
+STATIC_ONNX="${BHE_STATIC_ONNX:-${MODEL%.*}.static.onnx}"
+if [[ -f "$STATIC_ONNX" ]]; then
+  cp "$STATIC_ONNX" "$OUT/models/"
+  echo "Packaged static ONNX for CoreML: $(basename "$STATIC_ONNX")"
+else
+  echo "No static ONNX found; CoreML backend disabled, macOS will use Metal/CPU"
+fi
 cp "$FFMPEG" "$OUT/bin/ffmpeg"
 cp "$FFPROBE" "$OUT/bin/ffprobe"
 

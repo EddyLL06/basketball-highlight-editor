@@ -609,6 +609,27 @@ void main() {
     );
   });
 
+  testWidgets('names the CoreML backend as GPU acceleration', (tester) async {
+    await _pumpReview(
+      tester,
+      const ProjectState(
+        job: {
+          'state': 'completed',
+          'started_at': '2026-08-11T10:00:00.000+00:00',
+          'finished_at': '2026-08-11T10:12:30.000+00:00',
+          'checkpoint_json':
+              '{"stage_timings_ms":{"prepare_proxy":1250},"inference_device":"coreml"}',
+        },
+      ),
+    );
+
+    expect(find.text('标准分析 · 0 个候选 · 用时 12:30 · GPU'), findsOneWidget);
+    expect(
+      find.byTooltip('分析详情：代理 1.3 秒 · 推理 CoreML'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('reports a CPU fallback without the GPU badge', (tester) async {
     await _pumpReview(
       tester,

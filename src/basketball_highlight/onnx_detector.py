@@ -1,4 +1,4 @@
-"""ONNX Runtime 检测器：为桌面端提供 DirectML / CPU 推理路径。
+"""ONNX Runtime 检测器：为桌面端提供 CoreML / DirectML / CPU 推理路径。
 
 这个模块刻意做成 ``ultralytics.YOLO.predict`` 的形状兼容层：
 调用方仍然拿 ``result.boxes`` / ``box.cls[0]`` / ``box.conf[0]`` /
@@ -8,11 +8,14 @@
 预处理与后处理和 ``ultralytics`` 的 ``.pt`` 推理对齐：同一批画面尺寸相同时用矩形
 letterbox（短边补到 32 的倍数），尺寸不同才补成方形；pad 114、INTER_LINEAR、
 BGR→RGB、/255、class-aware NMS（IoU 0.7、max_det 300）。方形补边会让小目标和
-阈值附近的置信度与线上结果不一致，所以不能固定用方形。
+阈值附近的置信度与线上结果不一致，所以不能固定用方形——**唯一例外是 CoreML**：
+它用的静态 ``1×3×640×640`` 模型不接受 rect 输入，必须显式传 ``letterbox_mode="square"``
+（见 ``docs/benchmarks/COREML_BACKEND_BENCHMARK_20261025.md``）。
 decode 语义与 ``scripts/compare_pt_onnx_frame.py`` 保持一致，那里已与 PT 逐帧对齐过。
 
 注意 DML 的 batch 行为：实测 dynamic batch 下 batch=1 是 2.88 ms/张，batch=2 会塌到
 13.9 ms/张。所以本模块默认 ``max_batch=1``，由后端能力决定，不听调用方的 batch 参数。
+CoreML 的静态模型喂第二张会直接报错，同样只能单张。
 """
 from __future__ import annotations
 
@@ -30,8 +33,16 @@ NMS_IOU = 0.7
 MAX_DET = 300
 
 # 后端默认批大小。DML 的 dynamic shape 路径在小 batch 上会严重退化，
-# 只能单张喂；CPU 上批量反而有吞吐收益。
-BACKEND_MAX_BATCH = {"dml": 1, "cpu": 8}
+# 只能单张喂；CPU 上批量反而有吞吐收益；CoreML 的静态模型只接受 batch=1。
+BACKEND_MAX_BATCH = {"dml": 1, "cpu": 8, "coreml": 1}
+
+# ORT 1.31 的 Python CoreML EP 只认 CPUOnly / CPUAndGPU / CPUAndNeuralEngine，
+# 且**区分大小写**：写成 "All" 会被 coreml_options.cc 拒掉、静默回落到纯 CPU
+# （实测 51.93 vs 8.26 ms/帧）。神经引擎在这台机器上反而更慢（21.4 vs 8.3 ms），
+# 收益来自 Metal，所以固定 CPUAndGPU。
+COREML_UNITS = "CPUAndGPU"
+
+LETTERBOX_MODES = ("auto", "square", "rect")
 
 
 class Box:
@@ -211,7 +222,16 @@ class OnnxDetector:
         max_batch: int | None = None,
         names: dict[int, str] | None = None,
         session_options: Any | None = None,
+        letterbox_mode: str = "auto",
     ):
+        # 参数校验放在 import onnxruntime 之前:调用方写错参数时不应该因为
+        # 机器上没装 ORT 而看到 ImportError。
+        if letterbox_mode not in LETTERBOX_MODES:
+            raise ValueError(
+                f"unsupported letterbox_mode: {letterbox_mode} "
+                f"(expected one of {', '.join(LETTERBOX_MODES)})"
+            )
+
         import onnxruntime as ort
 
         self.onnx_path = Path(onnx_path)
@@ -219,6 +239,7 @@ class OnnxDetector:
             raise FileNotFoundError(f"ONNX model not found: {self.onnx_path}")
         self.device = device if device != "auto" else "dml"
         self.imgsz = imgsz
+        self.letterbox_mode = letterbox_mode
         self.names = names if names is not None else load_names(self.onnx_path)
 
         providers = self._providers(self.device)
@@ -236,17 +257,36 @@ class OnnxDetector:
             )
             self.device = "cpu"
         self.provider = (self.session.get_providers() or ["CPUExecutionProvider"])[0]
-        if self.device == "dml" and self.provider != "DmlExecutionProvider":
+        # 加速 EP 可能被静默摘掉（选项非法、模型不支持、机器没有该单元），
+        # 这时不能假装还在加速：降级到 cpu，让调用方的日志能看出真相。
+        expected = {
+            "dml": "DmlExecutionProvider",
+            "coreml": "CoreMLExecutionProvider",
+        }.get(self.device)
+        if expected is not None and self.provider != expected:
             self.device = "cpu"
         self.input_name = self.session.get_inputs()[0].name
+        self.input_shape = tuple(self.session.get_inputs()[0].shape or ())
         self.max_batch = max_batch or BACKEND_MAX_BATCH.get(self.device, 1)
         self.max_batch = max(1, int(self.max_batch))
 
     @staticmethod
-    def _providers(device: str) -> list[str]:
-        """按请求的设备给出 provider 顺序：``dml`` 才启用 DirectML，其余走 CPU。"""
+    def _providers(device: str) -> list[Any]:
+        """按请求的设备给出 provider 顺序：只有 dml/coreml 会启用加速 EP。"""
         if device == "dml":
             return ["DmlExecutionProvider", "CPUExecutionProvider"]
+        if device == "coreml":
+            return [
+                (
+                    "CoreMLExecutionProvider",
+                    {
+                        "ModelFormat": "MLProgram",
+                        "MLComputeUnits": COREML_UNITS,
+                        "SpecializationStrategy": "FastPrediction",
+                    },
+                ),
+                "CPUExecutionProvider",
+            ]
         return ["CPUExecutionProvider"]
 
     @property
@@ -287,12 +327,19 @@ class OnnxDetector:
         tensors = []
         meta = []
         # 和 ultralytics 一样：整批尺寸相同才用矩形输入，否则补成方形才能拼成一批。
-        auto = len({frame.shape for frame in frames}) == 1
+        # CoreML 的静态模型只接受 size×size，靠 letterbox_mode="square" 显式压住。
+        if self.letterbox_mode == "square":
+            auto = False
+        elif self.letterbox_mode == "rect":
+            auto = True
+        else:
+            auto = len({frame.shape for frame in frames}) == 1
         for frame in frames:
             tensor, scale, offset_x, offset_y = preprocess(frame, size, auto)
             tensors.append(tensor)
             meta.append((scale, offset_x, offset_y))
         batch = np.concatenate(tensors, axis=0) if len(tensors) > 1 else tensors[0]
+        self._check_input_shape(batch)
         outputs = self.session.run(None, {self.input_name: batch})
         raw = outputs[0]
 
@@ -308,6 +355,25 @@ class OnnxDetector:
             boxes = [Box(class_id, score, xyxy) for class_id, score, xyxy in detections]
             results.append(Result(boxes, self.names))
         return results
+
+    def _check_input_shape(self, batch: np.ndarray) -> None:
+        """静态模型收到不匹配的输入时给出人话错误，而不是把 ORT 的报错原样丢上去。
+
+        典型触发场景：拿静态 ``1×3×640×640`` 的模型喂 rect（640×480）或多张图。
+        """
+        model_shape = getattr(self, "input_shape", ())
+        for axis, expected in enumerate(model_shape):
+            # 动态维度在 ORT 里是字符串或 0/None，只校验静态的那几维。
+            if not isinstance(expected, int) or expected <= 0:
+                continue
+            if axis >= batch.ndim or batch.shape[axis] == expected:
+                continue
+            raise ValueError(
+                f"{self.onnx_path.name} 只接受固定输入 {model_shape}，"
+                f"本次送入 {batch.shape}："
+                "CoreML 路径要用 640×640 方形 letterbox（letterbox_mode='square'），"
+                "并且一次只送一张。"
+            )
 
     @staticmethod
     def _as_list(images: Any) -> list[np.ndarray]:

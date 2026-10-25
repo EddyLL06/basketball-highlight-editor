@@ -1062,10 +1062,12 @@ class EngineService:
             or not math.isfinite(after_seconds) or after_seconds <= 0
         ):
             raise ProtocolError("INVALID_REQUEST", "分析参数必须在有效范围内")
-        # auto 由各脚本按 cuda > dml > mps > cpu 解析;显式指定时不可用会降级到 cpu。
+        # auto 由各脚本按 cuda > dml > coreml > mps > cpu 解析;显式指定时不可用会降级到 cpu。
+        # coreml 是 macOS Apple Silicon 上的 ONNX Runtime Metal 后端,只在装了 onnxruntime
+        # 且存在静态模型时生效,否则自动回落到 mps/cpu。
         device = str(payload.get("device") or "auto").strip().lower()
-        if device not in {"auto", "cpu", "cuda", "mps", "dml"}:
-            raise ProtocolError("INVALID_REQUEST", "推理设备必须是 auto/cpu/cuda/mps/dml")
+        if device not in {"auto", "cpu", "cuda", "mps", "dml", "coreml"}:
+            raise ProtocolError("INVALID_REQUEST", "推理设备必须是 auto/cpu/cuda/mps/dml/coreml")
         analysis_start_ms = int(video.get("analysis_start_ms") or 0)
         analysis_end_ms = int(video.get("analysis_end_ms") or video.get("duration_ms") or 0)
         if analysis_end_ms <= analysis_start_ms:

@@ -1,21 +1,24 @@
 """推理后端解析：决定用哪条推理路径，并把"模型对象"统一成一个工厂。
 
 调用方只关心两件事：
-1. ``select_device()`` 返回 ``cpu | cuda | mps | dml``；
+1. ``select_device()`` 返回 ``cpu | cuda | mps | dml | coreml``；
 2. ``load_detector()`` 返回一个拥有 ``predict()`` 的对象。
 
-优先级（``auto``）：cuda > dml > mps > cpu。CUDA 比 DML 快（1.95 vs 2.88 ms/张），
+优先级（``auto``）：cuda > dml > coreml > mps > cpu。CUDA 比 DML 快（1.95 vs 2.88 ms/张），
 所以装了 CUDA 版 torch 的机器应该走 CUDA；DML 只负责"有显卡但 torch 是 CPU 版"这个
-Windows 上最常见的情况。
+Windows 上最常见的情况。``coreml`` 排在 mps 前面：Apple Silicon 上端到端比 mps 快约 30%
+（粗扫/精筛/复核三段合计 99.2s → 69.2s），基准见
+``docs/benchmarks/COREML_BACKEND_BENCHMARK_20261025.md``。
 """
 from __future__ import annotations
 
+import platform
 import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-SUPPORTED_DEVICES = ("auto", "cpu", "cuda", "mps", "dml")
+SUPPORTED_DEVICES = ("auto", "cpu", "cuda", "mps", "dml", "coreml")
 
 # 进程内选定的后端。脚本先 select_device() 再 load_detector(),
 # 后者可能因为 onnx 缺失或建会话失败而回落,届时这里会被改写成实际后端。
@@ -38,6 +41,30 @@ def onnx_path_for(model_path: str | Path) -> Path:
     if path.suffix.lower() == ".onnx":
         return path
     return path.with_suffix(".onnx")
+
+
+def static_onnx_path_for(model_path: str | Path) -> Path:
+    """macOS CoreML 用的静态 batch=1 模型（与 Windows 动态模型分开）。
+
+    CoreML 上动态 batch 只有 35 ms/帧，静态 640² 是 9.1 ms，所以两条产物必须并存：
+    Windows 继续用 ``bball_model.onnx``，macOS 只认 ``bball_model.static.onnx``。
+    分开命名还能保证误把动态模型塞给 CoreML 时 ``coreml_available()`` 直接返回 False。
+    """
+    path = Path(model_path)
+    if path.suffix.lower() == ".onnx":
+        return path
+    return path.with_name(path.stem + ".static.onnx")
+
+
+@lru_cache(maxsize=1)
+def _cuda_possible() -> bool:
+    """这台机器有没有可能跑 CUDA。
+
+    macOS 从 CUDA 10.2 起就没有支持，torch 也不带 CUDA 后端；先判平台能省掉一次
+    ``import torch``（3 s 级），否则 auto 在 Apple Silicon 上为了确认"没有 cuda"
+    就会先付掉这次启动成本，把 CoreML 省下的时间又还回去。
+    """
+    return sys.platform != "darwin"
 
 
 @lru_cache(maxsize=1)
@@ -85,6 +112,43 @@ def dml_available(model_path: str | Path | None = None) -> bool:
     return onnx_path_for(model_path).is_file()
 
 
+@lru_cache(maxsize=1)
+def _coreml_provider_available() -> bool:
+    """只探测 provider 是否注册，不建会话（CoreML 建会话要 0.23–0.6 s）。"""
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        return False
+    try:
+        return "CoreMLExecutionProvider" in ort.get_available_providers()
+    except Exception:
+        return False
+
+
+@lru_cache(maxsize=1)
+def _coreml_experiment_scope() -> bool:
+    """CoreML 只在本轮实测过的范围内放行：Apple Silicon。
+
+    基准数据全部来自 arm64（M2）。Intel Mac 上 CoreML 走另一条 Metal 路径，
+    wheel 里同样有 ``CoreMLExecutionProvider``，但没有任何实测数字，先不让它生效，
+    免得老机型在不知情的情况下变慢。非 macOS 平台本来就拿不到该 provider，
+    这里返回 True 只是不额外拦截。
+    """
+    if sys.platform != "darwin":
+        return True
+    return platform.machine() == "arm64"
+
+
+def coreml_available(model_path: str | Path | None = None) -> bool:
+    if not _coreml_experiment_scope():
+        return False
+    if not _coreml_provider_available():
+        return False
+    if model_path is None:
+        return True
+    return static_onnx_path_for(model_path).is_file()
+
+
 def resolve_device(requested: str = "auto", model_path: str | Path | None = None) -> str:
     """把 ``auto`` 解析成具体设备；显式请求不可用时降级到 cpu。
 
@@ -93,13 +157,22 @@ def resolve_device(requested: str = "auto", model_path: str | Path | None = None
     requested = (requested or "auto").strip().lower()
     if requested not in SUPPORTED_DEVICES:
         raise ValueError(f"unsupported device: {requested}")
+    if requested == "coreml":
+        # 这条分支刻意放在 import torch 之前：显式请求 coreml 时不应该再付
+        # 3 s 的 torch/ultralytics 启动成本（ORT 只要 0.1–0.2 s）。
+        if coreml_available(model_path):
+            return "coreml"
+        # 不可用时按 auto 重新解析，和 dml「不可用就降级」的既有约定一致。
+        requested = "auto"
     if requested != "auto":
         return requested
 
-    if _torch_cuda_available():
+    if _cuda_possible() and _torch_cuda_available():
         return "cuda"
     if dml_available(model_path):
         return "dml"
+    if coreml_available(model_path):
+        return "coreml"
     if _torch_mps_available():
         return "mps"
     return "cpu"
@@ -113,6 +186,8 @@ def select_device(requested: str = "auto", model_path: str | Path | None = None)
     device = resolve_device(requested, model_path)
     if device == "dml" and not dml_available(model_path):
         device = "cpu"
+    if device == "coreml" and not coreml_available(model_path):
+        device = "cpu"
     if device == "cuda" and not _torch_cuda_available():
         device = "cpu"
     if device == "mps" and not _torch_mps_available():
@@ -121,8 +196,12 @@ def select_device(requested: str = "auto", model_path: str | Path | None = None)
 
 
 def max_batch_for(device: str) -> int:
-    """各后端的推荐批大小；DML 的 dynamic shape 小批量会退化，只能单张。"""
-    return {"dml": 1, "cpu": 8, "cuda": 16, "mps": 8}.get(device, 8)
+    """各后端的推荐批大小。
+
+    DML 的 dynamic shape 小批量会退化；CoreML 用的静态模型只接受 ``1×3×640×640``，
+    喂第二张会直接 ``INVALID_ARGUMENT``，所以两者都只能单张。
+    """
+    return {"dml": 1, "coreml": 1, "cpu": 8, "cuda": 16, "mps": 8}.get(device, 8)
 
 
 def load_detector(
@@ -130,10 +209,11 @@ def load_detector(
     device: str | None = None,
     **kwargs: Any,
 ) -> Any:
-    """按设备返回检测器：``dml`` 走 ORT，其余走 ultralytics/torch。
+    """按设备返回检测器：``dml``/``coreml`` 走 ORT，其余走 ultralytics/torch。
 
     ``device=None`` 时沿用 ``select_device()`` 选定的后端。DirectML 需要的
-    ``.onnx`` 缺失、或 ORT 建会话失败时，自动退回 torch，并把实际后端写回状态。
+    ``.onnx``、CoreML 需要的静态 ``.static.onnx`` 缺失，或 ORT 建会话失败时，
+    自动退回 torch，并把实际后端写回状态。
     """
     path = Path(model_path)
     target = (device or _STATE["device"] or "cpu").lower()
@@ -153,6 +233,30 @@ def load_detector(
         )
         target = "cpu"
 
+    if target == "coreml":
+        from .onnx_detector import OnnxDetector
+
+        onnx_path = static_onnx_path_for(path)
+        if onnx_path.is_file():
+            # 方形 letterbox 是硬要求：静态模型只吃 1×3×640×640，rect 输入直接报错。
+            kwargs.setdefault("max_batch", 1)
+            kwargs.setdefault("letterbox_mode", "square")
+            detector = OnnxDetector(onnx_path, device="coreml", **kwargs)
+            _remember(detector.device)
+            if detector.device != "coreml":
+                print(
+                    "device=coreml unavailable at session level "
+                    f"(providers={detector.provider}); falling back",
+                    file=sys.stderr,
+                )
+            return detector
+        print(
+            f"device=coreml skipped: {onnx_path.name} not found "
+            f"(run scripts/export_mobile_model.py --imgsz 640 --batch 1); falling back",
+            file=sys.stderr,
+        )
+        target = "mps"
+
     from ultralytics import YOLO
 
     _remember(target if target in {"cuda", "mps"} else "cpu")
@@ -165,7 +269,9 @@ def backend_report(model_path: str | Path | None = None) -> dict[str, Any]:
         "torch_cuda": _torch_cuda_available(),
         "torch_mps": _torch_mps_available(),
         "ort_dml": _dml_provider_available(),
+        "ort_coreml": _coreml_provider_available(),
         "onnx_model": None,
+        "static_onnx": None,
     }
     try:
         import onnxruntime as ort
@@ -176,4 +282,6 @@ def backend_report(model_path: str | Path | None = None) -> dict[str, Any]:
     if model_path is not None:
         onnx_path = onnx_path_for(model_path)
         report["onnx_model"] = str(onnx_path) if onnx_path.is_file() else None
+        static_path = static_onnx_path_for(model_path)
+        report["static_onnx"] = str(static_path) if static_path.is_file() else None
     return report

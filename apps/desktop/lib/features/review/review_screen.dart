@@ -7102,6 +7102,7 @@ String? _inferenceDeviceName(Map<String, dynamic> checkpoint) {
   return switch (raw) {
     'dml' => 'DirectML',
     'cuda' => 'CUDA',
+    'coreml' => 'CoreML',
     'mps' => 'Metal',
     'cpu' => 'CPU',
     _ => raw.toUpperCase(),
@@ -7111,7 +7112,7 @@ String? _inferenceDeviceName(Map<String, dynamic> checkpoint) {
 /// 这次分析是否真的跑在 GPU 上；后端未知或回落 CPU 都不算。
 bool _inferenceAccelerated(Map<String, dynamic> checkpoint) {
   final raw = checkpoint['inference_device']?.toString().trim().toLowerCase();
-  return raw == 'dml' || raw == 'cuda' || raw == 'mps';
+  return raw == 'dml' || raw == 'cuda' || raw == 'coreml' || raw == 'mps';
 }
 
 String _analysisDetailLabel(

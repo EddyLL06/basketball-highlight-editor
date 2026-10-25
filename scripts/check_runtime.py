@@ -69,8 +69,13 @@ def _acceleration_report(python_path: str, model: Path) -> dict[str, object]:
 
     桌面端 DirectML 需要两件事同时成立:装了 onnxruntime-directml,且
     ``models/bball_model.onnx``(动态 batch)存在。缺任一项都会回落 CPU。
+
+    CoreML 同理:需要 wheel 带 ``CoreMLExecutionProvider``,且
+    ``models/bball_model.static.onnx``(静态 batch=1、640x640)存在。
+    动态模型不能给 CoreML 用(实测慢 4 倍),所以两条产物必须分开。
     """
     onnx_model = model.with_suffix(".onnx")
+    static_onnx = model.with_name(model.stem + ".static.onnx")
     probe = (
         "import json\n"
         "try:\n"
@@ -90,12 +95,17 @@ def _acceleration_report(python_path: str, model: Path) -> dict[str, object]:
     except (OSError, subprocess.CalledProcessError, ValueError, IndexError):
         payload = {"onnxruntime": None, "providers": []}
     providers = list(payload.get("providers") or [])
+    coreml_provider = "CoreMLExecutionProvider" in providers
+    static_ready = static_onnx.is_file()
     return {
         "onnxruntime": payload.get("onnxruntime"),
         "providers": providers,
         "dml_provider": "DmlExecutionProvider" in providers,
         "onnx_model": str(onnx_model) if onnx_model.is_file() else None,
         "dml_ready": "DmlExecutionProvider" in providers and onnx_model.is_file(),
+        "ort_coreml": coreml_provider,
+        "static_onnx": str(static_onnx) if static_ready else None,
+        "coreml_ready": coreml_provider and static_ready,
     }
 
 
@@ -150,14 +160,21 @@ def main() -> int:
             if not item["ok"]:
                 print(f"  {item}")
         accel = checks["acceleration"]
+        ready = []
         if accel.get("dml_ready"):
-            print("- acceleration: DirectML ready")
+            ready.append("DirectML")
+        if accel.get("coreml_ready"):
+            ready.append("CoreML")
+        if ready:
+            print(f"- acceleration: {' + '.join(ready)} ready")
         else:
             print(
                 "- acceleration: CPU only "
                 f"(onnxruntime={accel.get('onnxruntime')}, "
                 f"dml_provider={accel.get('dml_provider')}, "
-                f"onnx_model={'yes' if accel.get('onnx_model') else 'no'})"
+                f"onnx_model={'yes' if accel.get('onnx_model') else 'no'}, "
+                f"coreml_provider={accel.get('ort_coreml')}, "
+                f"static_onnx={'yes' if accel.get('static_onnx') else 'no'})"
             )
     return 0 if ok else 1
 
