@@ -173,7 +173,10 @@ def replay_crop(
         return None
     xs = [point[0] for point in points]
     ys = [point[1] for point in points]
-    span = max(max(xs) - min(xs), (max(ys) - min(ys)) * aspect) * 1.25 or 1.0
+    span = max(max(xs) - min(xs), (max(ys) - min(ys)) * aspect) * 1.25
+    # 球路点全重合时 span 为 0，除数兜底；显式判断而不是靠 `or`，负数不会被静默放过。
+    if span <= 0:
+        span = 1.0
     zoom = min(REPLAY_MAX_ZOOM, max(REPLAY_MIN_ZOOM, width / span))
     crop_width = width / zoom
     crop_height = crop_width / aspect
