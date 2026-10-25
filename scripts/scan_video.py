@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -14,6 +15,7 @@ from basketball_highlight.inference import (
     load_detector,
     select_device as resolve_device,
 )
+from basketball_highlight.roi import effective_crop_scale
 from basketball_highlight.sampling import canonical_sample_times, first_frame_index
 
 
@@ -27,7 +29,9 @@ def parse_args():
                         help="Optional duration limit in seconds, useful for benchmarks.")
     parser.add_argument("--time-offset", type=float, default=0.0,
                         help="Source timestamp offset for a clipped proxy.")
-    parser.add_argument("--scale", type=int, default=4)
+    parser.add_argument("--scale", type=int, default=4,
+                        help="Crop enlargement ceiling before the 640 letterbox; "
+                             "clamped so the crop never exceeds the model input.")
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--conf", type=float, default=0.15)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "mps", "cuda", "dml"))
@@ -80,6 +84,11 @@ def scan_video(args):
         or not 0 < args.conf < 1
     ):
         raise ValueError("SCAN_PARAMETERS_INVALID")
+    crop_scale = effective_crop_scale(args.roi, args.scale)
+    # Troubleshooting-only escape hatch back to the pre-clamp behaviour.  Not
+    # exposed in the settings UI and not a supported user option.
+    if os.environ.get("BHE_CROP_SCALE_COMPAT") == "1":
+        crop_scale = float(args.scale)
     device = args.device
 
     cache_path = None
@@ -172,10 +181,10 @@ def scan_video(args):
                 confidence = float(box.conf[0])
                 bx1, by1, bx2, by2 = box.xyxy[0].tolist()
                 coords = [
-                    x1 + bx1 / args.scale,
-                    y1 + by1 / args.scale,
-                    x1 + bx2 / args.scale,
-                    y1 + by2 / args.scale,
+                    x1 + bx1 / crop_scale,
+                    y1 + by1 / crop_scale,
+                    x1 + bx2 / crop_scale,
+                    y1 + by2 / crop_scale,
                 ]
                 detections.append({
                     "name": result.names[class_index],
@@ -210,8 +219,9 @@ def scan_video(args):
         crop = frame[y1:y2, x1:x2]
         if crop.size == 0:
             raise ValueError(f"ROI is outside the video frame: {(x1, y1, x2, y2)}")
-        if args.scale != 1:
-            crop = cv2.resize(crop, None, fx=args.scale, fy=args.scale, interpolation=cv2.INTER_CUBIC)
+        if crop_scale != 1:
+            crop = cv2.resize(crop, None, fx=crop_scale, fy=crop_scale,
+                              interpolation=cv2.INTER_CUBIC)
 
         pending_crops.append(crop)
         pending_meta.append({
@@ -242,6 +252,7 @@ def scan_video(args):
         "duration_limit": args.duration,
         "roi": [x1, y1, x2, y2],
         "scale": args.scale,
+        "effective_scale": round(crop_scale, 4),
         "batch": args.batch,
         "records": records,
         "cache_key": cache_key,

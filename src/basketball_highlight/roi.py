@@ -196,3 +196,28 @@ def select_stable_hoop(
             round(verified_confidence, 3) if verified_confidence is not None else None
         ),
     }
+
+
+MODEL_INPUT_PX = 640
+
+
+def effective_crop_scale(roi, requested_scale, model_input_px=MODEL_INPUT_PX):
+    """Return the crop enlargement actually worth doing before the letterbox.
+
+    Ultralytics letterboxes every crop to a fixed square input, so a uniform
+    pre-scale never changes what the network sees -- it only adds another
+    resampling pass.  Keep the enlargement only until the crop long side
+    reaches the model input (there a cubic pre-scale still beats the
+    letterbox's bilinear upscale), and never go below 1.0 so the crop is
+    never downscaled.  The requested scale stays an upper bound.
+    """
+    values = [float(value) for value in roi]
+    if len(values) != 4:
+        raise ValueError("ROI_INPUT_INVALID")
+    x1, y1, x2, y2 = values
+    if x2 <= x1 or y2 <= y1:
+        raise ValueError("ROI_INPUT_INVALID")
+    target = max(x2 - x1, y2 - y1)
+    if float(requested_scale) <= 0 or model_input_px <= 0:
+        raise ValueError("ROI_INPUT_INVALID")
+    return min(float(requested_scale), max(1.0, model_input_px / target))
