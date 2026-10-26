@@ -208,7 +208,12 @@ jobs:
             echo "::warning::onnxruntime with CoreML failed to install; macOS will use mps/CPU"
             exit 0
           fi
-          "$PYTHON_ROOT/bin/python3" -c "import onnxruntime; print('providers', onnxruntime.get_available_providers())"
+          # 装上了却导入不了时同样只告警，并卸掉坏包，免得运行时探测 CoreML 时出错。
+          if ! "$PYTHON_ROOT/bin/python3" -c "import onnxruntime; print('providers', onnxruntime.get_available_providers())"; then
+            echo "::warning::onnxruntime installed but cannot be imported; macOS will use mps/CPU"
+            "$PYTHON_ROOT/bin/python3" -m pip uninstall -y onnxruntime onnx || true
+            exit 0
+          fi
           # 静态 batch=1、640x640:CoreML 的静态输入只吃方形单张,动态 batch 模型这里不用。
           if ! "$PYTHON_ROOT/bin/python3" scripts/export_mobile_model.py \
             --model models/bball_model.pt \

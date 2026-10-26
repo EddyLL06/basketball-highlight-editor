@@ -62,7 +62,7 @@ cp "$MODEL" "$OUT/models/bball_model.pt"
 # 没有就只保留 Metal/CPU 路径(引擎会在缺文件时自动降级,不会报错)。
 STATIC_ONNX="${BHE_STATIC_ONNX:-${MODEL%.*}.static.onnx}"
 if [[ -f "$STATIC_ONNX" ]]; then
-  cp "$STATIC_ONNX" "$OUT/models/"
+  cp "$STATIC_ONNX" "$OUT/models/bball_model.static.onnx"
   echo "Packaged static ONNX for CoreML: $(basename "$STATIC_ONNX")"
 else
   echo "No static ONNX found; CoreML backend disabled, macOS will use Metal/CPU"
