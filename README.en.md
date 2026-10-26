@@ -1,22 +1,31 @@
-# Basketball Highlight Editor
+# BHE: Basketball Highlight Editor
 
-> A local tool for detecting basketball scoring candidates, reviewing them manually, and exporting highlight clips from fixed-camera game videos.
+**BHE is a free, local-first AI basketball highlight editor: it finds made baskets in your game video, you review them, and export per-player reels.**
+
+*BHE（篮球集锦 AI 剪辑）：完全本地、免费，自动找进球，人工审核，按球员导出集锦。*
 
 [简体中文](README.md) · **English** · [Website](https://bhe.jafir.top/en/)
 
-[![Python Tests](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/python-tests.yml?branch=main&style=flat-square&label=Python%20tests)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/python-tests.yml)
-[![Flutter Checks](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/flutter-check.yml?branch=main&style=flat-square&label=Flutter%20checks)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/flutter-check.yml)
+[🏠 Website](https://bhe.jafir.top/en/) · [⬇ Download](https://bhe.jafir.top/en/#download) · [Getting started](#quick-start-desktop) · [Features](#features) · [Documentation](#documentation)
+
+![BHE review screen: the clip plays on the left, the candidate list is on the right](docs/assets/demo-review.gif)
+
+> A local tool for detecting basketball scoring candidates, reviewing them manually, and exporting highlight clips from fixed-camera game videos.
+
 [![Latest tag](https://img.shields.io/github/v/tag/fly7632785/basketball-highlight-editor?include_prereleases&style=flat-square&label=latest%20tag)](https://github.com/fly7632785/basketball-highlight-editor/tags)
 [![License](https://img.shields.io/github/license/fly7632785/basketball-highlight-editor?style=flat-square)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Android%20%7C%20iOS-4c6ef5?style=flat-square)
 ![Local first](https://img.shields.io/badge/operation-local--first-2ea44f?style=flat-square)
-![Free](https://img.shields.io/badge/cost-free-f97316?style=flat-square)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
-[![Linux DO](https://img.shields.io/badge/Linux%20DO-community-00a67d?style=flat-square)](https://linux.do/)
 
-**Local-first · Free to use · Finds the moments · You stay in control**
+## What it supports
 
-[🏠 Website](https://bhe.jafir.top/en/) · [⬇ Download](https://bhe.jafir.top/en/#download) · [Getting started](#quick-start-desktop) · [Features](#features) · [Documentation](#documentation)
+| Works well | Not yet |
+|---|---|
+| Fixed-camera game video with a steady picture and a clear rim | Large camera moves or a blocked rim: review the results carefully |
+| One hoop per video | Several hoops in the same frame (for example full-court footage of both baskets) |
+| Analysis on macOS, Windows and Android | iPhone / iPad can play, review and export, but cannot analyze on the device yet |
+| Several clips of one game in a single project (desktop) | Cloud processing: everything runs on your own computer or phone |
+
 
 ## The problem BHE is meant to solve
 
@@ -357,3 +366,15 @@ The source code is released under the [MIT License](LICENSE). This does not auto
 
 # Thanks
 Thank [Linux.do](https://linux.do/)
+
+---
+
+## Project status
+
+[![Python Tests](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/python-tests.yml?branch=main&style=flat-square&label=Python%20tests)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/python-tests.yml)
+[![Flutter Checks](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/flutter-check.yml?branch=main&style=flat-square&label=Flutter%20checks)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/flutter-check.yml)
+![Free](https://img.shields.io/badge/cost-free-f97316?style=flat-square)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
+[![Linux DO](https://img.shields.io/badge/Linux%20DO-community-00a67d?style=flat-square)](https://linux.do/)
+
+**The only official sources are the website [bhe.jafir.top](https://bhe.jafir.top) and this repository.**

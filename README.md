@@ -1,24 +1,33 @@
-# Basketball Highlight Editor
+# BHE: Basketball Highlight Editor
+
+**BHE：完全本地、免费的篮球比赛 AI 剪辑工具。自动找进球，人工审核，按球员导出集锦。**
+
+*A free, local-first AI basketball highlight editor: finds made baskets in your game video; you review and export per-player reels.*
+
+[English](README.en.md) · **简体中文**
+
+[🏠 官网 bhe.jafir.top](https://bhe.jafir.top) · [⬇ 下载最新版](https://bhe.jafir.top/#download) · [开始使用](#开始使用) · [功能介绍](#它能帮你省下什么) · [交流群](#用户交流群) · [文档](#文档)
+
+![BHE 审核界面：左边播放进球片段，右边是候选列表](docs/assets/demo-review.gif)
 
 > 打完球，最不想做的事，往往是回家后再花几个小时剪视频。
 >
 > Basketball Highlight Editor 会先帮你把整场比赛里可能的进球片段找出来，你只需要快速看一遍、删掉误检，再导出自己的集锦。
 
-[English](README.en.md) · **简体中文**
-
-[![Python Tests](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/python-tests.yml?branch=main&style=flat-square&label=Python%20tests)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/python-tests.yml)
-[![Flutter Checks](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/flutter-check.yml?branch=main&style=flat-square&label=Flutter%20checks)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/flutter-check.yml)
 [![Latest tag](https://img.shields.io/github/v/tag/fly7632785/basketball-highlight-editor?include_prereleases&style=flat-square&label=latest%20tag)](https://github.com/fly7632785/basketball-highlight-editor/tags)
 [![License](https://img.shields.io/github/license/fly7632785/basketball-highlight-editor?style=flat-square)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Android%20%7C%20iOS-4c6ef5?style=flat-square)
 ![Local first](https://img.shields.io/badge/运行方式-完全本地-2ea44f?style=flat-square)
-![Free](https://img.shields.io/badge/费用-免费-f97316?style=flat-square)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
-[![Linux DO](https://img.shields.io/badge/Linux%20DO-社区交流-00a67d?style=flat-square)](https://linux.do/)
 
-**完全本地运行 · 免费使用 · 自动找片段 · 人工可控**
+## 支持与不支持
 
-[🏠 官网 bhe.jafir.top](https://bhe.jafir.top) · [⬇ 下载最新版](https://bhe.jafir.top/#download) · [开始使用](#开始使用) · [功能介绍](#它能帮你省下什么) · [交流群](#用户交流群) · [文档](#文档)
+| 能做 | 暂时做不到 |
+|---|---|
+| 固定机位、画面稳定、篮筐清晰的比赛视频 | 机位大幅变化、篮筐被遮挡时要认真审核结果 |
+| 一段视频里一个篮筐 | 同一画面里有多个篮筐（比如全场双篮筐） |
+| macOS、Windows、Android 上直接分析 | iPhone / iPad 目前能播放、审核、导出，还不能本地分析 |
+| 一场比赛的多段视频合在一个项目里审核和导出（桌面端） | 云端处理——所有视频都在你自己的电脑或手机上处理 |
+
 
 ## 先说它解决什么问题
 
@@ -291,3 +300,15 @@ models/bball_model.onnx
 
 # 致谢
 感谢 [Linux.do](https://linux.do/) 社区。
+
+---
+
+## 项目状态
+
+[![Python Tests](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/python-tests.yml?branch=main&style=flat-square&label=Python%20tests)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/python-tests.yml)
+[![Flutter Checks](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/flutter-check.yml?branch=main&style=flat-square&label=Flutter%20checks)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/flutter-check.yml)
+![Free](https://img.shields.io/badge/费用-免费-f97316?style=flat-square)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
+[![Linux DO](https://img.shields.io/badge/Linux%20DO-社区交流-00a67d?style=flat-square)](https://linux.do/)
+
+**官方来源只有官网 [bhe.jafir.top](https://bhe.jafir.top) 和本仓库。**
