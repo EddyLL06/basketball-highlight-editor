@@ -1508,6 +1508,9 @@ class EngineService:
                 "analysis_start_ms": int(video.get("analysis_start_ms") or 0),
                 "analysis_end_ms": int(video.get("analysis_end_ms") or video.get("duration_ms") or 0),
             }
+            # 排障用的旧放大倍数换了预处理，不能复用正常模式跑完的阶段；正常分析的键不变。
+            if os.environ.get("BHE_CROP_SCALE_COMPAT") == "1":
+                analysis_parameters["crop_scale_compat"] = True
             analysis_key = hashlib.sha256(
                 json.dumps(analysis_parameters, ensure_ascii=False, sort_keys=True).encode("utf-8")
             ).hexdigest()[:16]

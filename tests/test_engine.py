@@ -2712,3 +2712,21 @@ def test_inference_device_ignores_missing_or_unreadable_outputs(tmp_path: Path):
 
     # fast 模式没有 refined.json，坏文件也不能让分析收尾失败。
     assert EngineService._inference_device(tmp_path / "missing.json", malformed, None) is None
+
+
+def test_the_crop_scale_compat_switch_gets_its_own_analysis_stages(tmp_path: Path, monkeypatch):
+    service, store, video, model = _analysis_fixture(tmp_path)
+    captured, rim_calls = {}, []
+    fake_build, fake_run = _standard_rim_check_fakes(captured, rim_calls)
+    monkeypatch.setattr("engine.python.basketball_engine.service.build_pipeline_commands", fake_build)
+    monkeypatch.setattr("engine.python.basketball_engine.service.run_pipeline", fake_run)
+    monkeypatch.setattr(service, "_prepare_candidate_previews", lambda **_: {"generated": 0})
+
+    def stage_dir():
+        _run_standard_analysis(service, store, video, model)
+        return Path(captured["coarse_detections"]).parent
+
+    normal = stage_dir()
+    assert stage_dir() == normal
+    monkeypatch.setenv("BHE_CROP_SCALE_COMPAT", "1")
+    assert stage_dir() != normal
