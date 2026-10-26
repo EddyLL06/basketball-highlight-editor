@@ -17,6 +17,7 @@ import '../../components/cs_card.dart';
 import '../../components/cs_empty_state.dart';
 import '../../core/engine_session.dart';
 import '../../core/roi_geometry.dart';
+import '../../core/video_orientation.dart';
 import '../../core/video_segments.dart';
 import '../../providers/notice_provider.dart';
 import '../../providers/pending_import_provider.dart';
@@ -1024,6 +1025,7 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
           aspectRatio: videoWidth > 0 && videoHeight > 0
               ? videoWidth / videoHeight
               : 16 / 9,
+          rotation: (state.video?['rotation'] as num?)?.toInt() ?? 0,
           startMs: _analysisStartMs,
           endMs: _analysisEndMs,
           enabled:
@@ -1051,6 +1053,7 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
           editingNet: _editingNet,
           enabled: state.video != null && !busy,
           aspectRatio: sourceWidth / sourceHeight,
+          rotation: (state.video?['rotation'] as num?)?.toInt() ?? 0,
           onEditNetChanged: (value) => setState(() => _editingNet = value),
           onPreviewTimeChanged: (timeMs) {
             // 检测区域步骤由播放器即时 seek 呈现,这里只同步时间到
@@ -1504,6 +1507,55 @@ String _formatBytes(int bytes) {
   return '${(bytes / 1024).toStringAsFixed(0)} KB';
 }
 
+/// 临时诊断层：显示播放器上报的真实尺寸，用来判断竖拍视频的纹理方向。
+///
+/// 只在 `--dart-define BHE_DEBUG_VIDEO=true` 构建时出现。
+class _VideoProbe extends StatelessWidget {
+  const _VideoProbe({
+    required this.controller,
+    required this.rotation,
+    required this.aspectRatio,
+  });
+
+  final VideoController? controller;
+  final int rotation;
+  final double aspectRatio;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    if (c == null) return const SizedBox.shrink();
+    return StreamBuilder<int?>(
+      stream: c.player.stream.width,
+      builder: (context, widthSnapshot) {
+        return StreamBuilder<int?>(
+          stream: c.player.stream.height,
+          builder: (context, heightSnapshot) {
+            final width = widthSnapshot.data ?? 0;
+            final height = heightSnapshot.data ?? 0;
+            final ratio = height == 0 ? 0.0 : width / height;
+            return DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                child: Text(
+                  'tex ${width}x$height  rot=$rotation  '
+                  'texAR=${ratio.toStringAsFixed(2)}  '
+                  'frameAR=${aspectRatio.toStringAsFixed(2)}',
+                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
 class _AnalysisStep extends StatelessWidget {
   const _AnalysisStep({
     required this.videoPath,
@@ -1513,6 +1565,7 @@ class _AnalysisStep extends StatelessWidget {
     required this.endMs,
     required this.enabled,
     required this.onChanged,
+    this.rotation = 0,
   });
   final String? videoPath;
   final int durationMs;
@@ -1521,6 +1574,7 @@ class _AnalysisStep extends StatelessWidget {
   final int endMs;
   final bool enabled;
   final void Function(int startMs, int endMs) onChanged;
+  final int rotation;
 
   @override
   Widget build(BuildContext context) {
@@ -1534,6 +1588,7 @@ class _AnalysisStep extends StatelessWidget {
         videoPath: videoPath,
         durationMs: durationMs,
         aspectRatio: aspectRatio,
+        rotation: rotation,
         startMs: startMs,
         endMs: endMs,
         enabled: enabled,
@@ -1686,6 +1741,7 @@ class _DetectionStep extends ConsumerStatefulWidget {
     required this.previewPlaying,
     required this.onChanged,
     required this.onResetCurrent,
+    this.rotation = 0,
   });
   final ProjectState state;
   final Rect? hoopBbox;
@@ -1694,6 +1750,7 @@ class _DetectionStep extends ConsumerStatefulWidget {
   final bool editingNet;
   final bool enabled;
   final double aspectRatio;
+  final int rotation;
   final ValueChanged<bool> onEditNetChanged;
   final ValueChanged<int> onPreviewTimeChanged;
   final VoidCallback onPreviewPlaybackToggled;
@@ -1904,6 +1961,7 @@ class _DetectionStepState extends ConsumerState<_DetectionStep> {
             videoController: _playerReady ? _controller : null,
             previewPath: state.previewPath,
             aspectRatio: widget.aspectRatio,
+            rotation: widget.rotation,
             roi: widget.editingNet ? widget.netRoi : widget.roi,
             secondaryRoi: widget.editingNet ? widget.roi : widget.netRoi,
             activeColor: widget.editingNet ? Colors.white : c.orange,
@@ -2810,11 +2868,13 @@ class _AnalysisRangeEditor extends ConsumerStatefulWidget {
     required this.enabled,
     required this.onChanged,
     required this.onCommit,
+    this.rotation = 0,
   });
 
   final String? videoPath;
   final int durationMs;
   final double aspectRatio;
+  final int rotation;
   final int startMs;
   final int endMs;
   final bool enabled;
@@ -3048,15 +3108,29 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
                       children: [
                         Positioned.fill(
                           child: IgnorePointer(
-                            child: Video(
+                            // 框已按显示方向算好比例。手机竖拍的源带 rotation,
+                            // Windows 软渲染不会自动转正,这里补上;转正后比例
+                            // 与框一致,contain 不会裁掉画面。
+                            child: OrientedVideo(
                               controller: controller,
-                              // 框已是视频比例。Windows 软件渲染的纹理比例可能
-                              // 不对、里面带黑边,cover 正好把黑边裁掉。
-                              fit: BoxFit.cover,
-                              controls: NoVideoControls,
+                              rotation: playerAppliesRotation()
+                                  ? 0
+                                  : widget.rotation,
+                              displayAspectRatio: widget.aspectRatio,
+                              fit: BoxFit.contain,
                             ),
                           ),
                         ),
+                        if (const bool.fromEnvironment('BHE_DEBUG_VIDEO'))
+                          Positioned(
+                            left: 8,
+                            top: 8,
+                            child: _VideoProbe(
+                              controller: controller,
+                              rotation: widget.rotation,
+                              aspectRatio: widget.aspectRatio,
+                            ),
+                          ),
                         Positioned.fill(
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
@@ -3709,12 +3783,14 @@ class _RoiCanvas extends StatefulWidget {
     required this.onChanged,
     required this.onEditComplete,
     this.videoController,
+    this.rotation = 0,
   });
 
   final bool enabled;
   final String? previewPath;
   final VideoController? videoController;
   final double aspectRatio;
+  final int rotation;
   final Rect? roi;
   final Rect? secondaryRoi;
   final Color activeColor;
@@ -3865,13 +3941,15 @@ class _RoiCanvasState extends State<_RoiCanvas> {
                             children: [
                               if (widget.videoController != null)
                                 Positioned.fill(
-                                  child: Video(
-                                    controller: widget.videoController!,
-                                    // 框已是视频比例。Windows 软件渲染的纹理比例
-                                    // 可能不对、里面带黑边,cover 正好把黑边裁掉,
-                                    // 画面才和检测框对齐。
-                                    fit: BoxFit.cover,
-                                    controls: NoVideoControls,
+                                  // 竖拍的源在 Windows 上纹理不会自动转正,
+                                  // 交给 OrientedVideo 处理,检测框才和画面对齐。
+                                  child: OrientedVideo(
+                                    controller: widget.videoController,
+                                    rotation: playerAppliesRotation()
+                                        ? 0
+                                        : widget.rotation,
+                                    displayAspectRatio: widget.aspectRatio,
+                                    fit: BoxFit.contain,
                                   ),
                                 )
                               else if (widget.previewPath != null &&
@@ -3879,7 +3957,9 @@ class _RoiCanvasState extends State<_RoiCanvas> {
                                 Positioned.fill(
                                   child: Image.file(
                                     File(widget.previewPath!),
-                                    fit: BoxFit.fill,
+                                    // 引擎抽帧时已按显示方向转正,这里再 fill
+                                    // 会把画面拉变形,用 contain 保持等比。
+                                    fit: BoxFit.contain,
                                     errorBuilder: (context, error, _) => Center(
                                       child: Padding(
                                         padding: const EdgeInsets.all(
