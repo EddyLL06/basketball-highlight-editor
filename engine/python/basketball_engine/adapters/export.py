@@ -62,9 +62,16 @@ class MediaCommandError(subprocess.CalledProcessError):
         return f"{message}: {tail}" if tail else message
 
 
+# 编码器没编进这份 FFmpeg（Windows 随包的 LGPL 版没有 libx264）时，FFmpeg 8 也会接着报
+# "Error opening output file"，这种情况必须继续换下一个编码器。
+MISSING_ENCODER_STDERR = ("Unknown encoder", "Encoder not found")
+
+
 def is_retryable_failure(exc: subprocess.CalledProcessError) -> bool:
     """这个失败值得换编码器重试吗？环境类错误换哪个编码器都一样。"""
     tail = getattr(exc, "stderr_tail", "") or ""
+    if any(marker in tail for marker in MISSING_ENCODER_STDERR):
+        return True
     return not any(marker in tail for marker in NON_RETRYABLE_STDERR)
 
 

@@ -482,6 +482,32 @@ def test_encoder_fallback_still_switches_encoder_on_encoder_failures(tmp_path: P
     assert attempts == ["libx264", "libopenh264", "mpeg4"]
 
 
+def test_encoder_fallback_continues_past_an_encoder_missing_from_the_ffmpeg_build(tmp_path: Path, monkeypatch):
+    # Windows 随包的 LGPL FFmpeg 没有 libx264；FFmpeg 8 的原话会带上 "Error opening output file"。
+    monkeypatch.setattr(export.platform, "system", lambda: "Linux")
+    attempts = []
+
+    def fake(command, output_path, **kwargs):
+        codec = command[command.index("-c:v") + 1]
+        attempts.append(codec)
+        if codec == "libx264":
+            raise export.MediaCommandError(
+                4294967288, command,
+                "[vost#0:0 @ 0x1] Unknown encoder 'libx264'\n"
+                "[vost#0:0 @ 0x1] Error selecting an encoder\n"
+                "Error opening output file x.part.mp4.\n"
+                "Error opening output files: Encoder not found",
+            )
+        output_path.write_bytes(b"video")
+
+    monkeypatch.setattr(export, "run_atomic_ffmpeg", fake)
+    export.export_goal_clips(
+        [{"source_path": str(tmp_path / "source.mp4"), "event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
+        tmp_path / "export", "separate",
+    )
+    assert attempts == ["libx264", "libopenh264"]
+
+
 def test_media_command_error_prints_a_signed_windows_exit_code():
     message = str(export.MediaCommandError(4294967274, ["ffmpeg"], "Invalid argument"))
     assert "-22" in message
