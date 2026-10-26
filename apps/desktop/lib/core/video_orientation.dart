@@ -36,7 +36,8 @@ class OrientedVideo extends StatelessWidget {
 
   final VideoController? controller;
 
-  /// 源文件声明的旋转角度（引擎 `inspect_video` 返回的 `rotation`）。
+  /// 源文件声明的旋转角度（引擎 `inspect_video` 返回的 `rotation`），按 ffmpeg 显示矩阵
+  /// 的约定是**逆时针**角度：90 表示显示时要把编码画面逆时针转 90°。
   final int rotation;
 
   /// 显示方向的宽高比（宽/高）。用来反推编码方向的宽高比。
@@ -104,9 +105,9 @@ double? sourceAspectRatio(double? displayAspectRatio, int turns) {
   return 1 / aspect;
 }
 
-/// 把任意角度归一成 0/1/2/3 个四分之一转，非法值当 0。
+/// 把逆时针的 [rotation] 换成 [RotatedBox] 用的顺时针四分之一圈数（0/1/2/3），非法值当 0。
 int rotationQuarterTurns(int rotation) {
-  final normalized = ((rotation % 360) + 360) % 360;
+  final normalized = ((-rotation % 360) + 360) % 360;
   switch (normalized) {
     case 90:
       return 1;

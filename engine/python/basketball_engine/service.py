@@ -544,7 +544,7 @@ class EngineService:
             "width": width,
             "height": height,
             # 播放器不会自动应用 MP4 的旋转矩阵（Windows 软渲染路径尤其如此），
-            # 前端据此自己转画面。宽高已是显示方向，这里是原始旋转角度。
+            # 前端据此自己转画面。宽高已是显示方向，这里是逆时针的旋转角度。
             "rotation": rotation,
             "fps": fps,
             "video_codec": video_stream.get("codec_name"),
@@ -563,18 +563,21 @@ class EngineService:
 
     @staticmethod
     def _display_rotation(stream: Dict[str, Any]) -> int:
-        """Display rotation in degrees, as the player applies it (MP4 matrix or old rotate tag)."""
+        """Display rotation in degrees counterclockwise, ffmpeg's display matrix convention.
+
+        The old ``rotate`` tag counts clockwise, so it is negated to match.
+        """
         candidates = [
-            item.get("rotation")
+            (item.get("rotation"), 1)
             for item in stream.get("side_data_list") or []
             if isinstance(item, dict)
         ]
-        candidates.append((stream.get("tags") or {}).get("rotate"))
-        for value in candidates:
+        candidates.append(((stream.get("tags") or {}).get("rotate"), -1))
+        for value, sign in candidates:
             if value is None:
                 continue
             try:
-                return int(round(float(value)))
+                return sign * int(round(float(value)))
             except (TypeError, ValueError, OverflowError):
                 continue
         return 0

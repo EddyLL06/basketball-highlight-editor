@@ -193,3 +193,12 @@ def test_a_file_whose_only_video_stream_is_cover_art_still_reports_its_size(tmp_
     }])
 
     assert (info["width"], info["height"]) == (1920, 1080)
+
+
+def test_rotation_is_reported_counterclockwise_whichever_field_holds_it(tmp_path: Path, monkeypatch):
+    portrait = {"codec_type": "video", "width": 1080, "height": 1920, "r_frame_rate": "30/1"}
+    # 显示矩阵 -90 和旧标签 rotate=90 都表示显示时顺时针转 90°。
+    matrix = _inspect_fake(tmp_path, monkeypatch, [{**portrait, "side_data_list": [{"rotation": -90}]}])
+    tag = _inspect_fake(tmp_path, monkeypatch, [{**portrait, "tags": {"rotate": "90"}}])
+
+    assert matrix["rotation"] == tag["rotation"] == -90
