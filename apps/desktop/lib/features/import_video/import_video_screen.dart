@@ -1858,7 +1858,7 @@ class _DetectionStepState extends ConsumerState<_DetectionStep> {
         _controller = VideoController(
           _player!,
           configuration: VideoControllerConfiguration(
-            enableHardwareAcceleration: !Platform.isWindows,
+            enableHardwareAcceleration: !useSoftwareVideo(),
           ),
         );
       }
@@ -2965,7 +2965,7 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
       _controller = VideoController(
         _player!,
         configuration: VideoControllerConfiguration(
-          enableHardwareAcceleration: !Platform.isWindows,
+          enableHardwareAcceleration: !useSoftwareVideo(),
         ),
       );
     }

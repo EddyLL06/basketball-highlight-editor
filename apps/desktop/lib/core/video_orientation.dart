@@ -123,11 +123,18 @@ int rotationQuarterTurns(int rotation) {
   }
 }
 
+/// 调试用：`--dart-define=BHE_SOFTWARE_VIDEO=true` 让 Mac 也按 Windows 的方式播放
+/// （软件渲染 + 自己转画面），不用回到 Windows 就能检查带旋转角的视频。
+const _forceSoftwareVideo = bool.fromEnvironment('BHE_SOFTWARE_VIDEO');
+
+/// 播放器是否走软件渲染：Windows 上关了硬件加速。
+bool useSoftwareVideo() => Platform.isWindows || _forceSoftwareVideo;
+
 /// 播放器是否已经把画面转正。
 ///
-/// Windows 上关了硬件加速，mpv 软件渲染不处理旋转，要由 [OrientedVideo] 转正（见
-/// [matchPlayerToSourceRotation]）；其它平台交给播放器自己处理。
-bool playerAppliesRotation() => !Platform.isWindows;
+/// 软件渲染下 mpv 不处理旋转，要由 [OrientedVideo] 转正（见
+/// [matchPlayerToSourceRotation]）；硬件渲染交给播放器自己处理。
+bool playerAppliesRotation() => !useSoftwareVideo();
 
 /// 打开带旋转角的视频之前调用（播放器会在片源之间复用，每次 open 前都要调）。
 ///

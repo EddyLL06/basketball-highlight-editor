@@ -1585,7 +1585,7 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
         _controller = VideoController(
           _player!,
           configuration: VideoControllerConfiguration(
-            enableHardwareAcceleration: !Platform.isWindows,
+            enableHardwareAcceleration: !useSoftwareVideo(),
           ),
         );
       } catch (error) {
@@ -3911,7 +3911,7 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
       _controller = VideoController(
         player,
         configuration: VideoControllerConfiguration(
-          enableHardwareAcceleration: !Platform.isWindows,
+          enableHardwareAcceleration: !useSoftwareVideo(),
         ),
       );
       _positionSubscription = player.stream.position.listen((position) {
