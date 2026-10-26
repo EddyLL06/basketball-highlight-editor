@@ -25,6 +25,7 @@ import '../../providers/project_state.dart';
 import '../../providers/playback_coordinator.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
+import '../review/media_readiness.dart';
 
 const _beforeSecondOptions = <int>[0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 15];
 const _afterSecondOptions = <int>[1, 2, 3, 4, 5, 6, 8, 10, 12, 15];
@@ -551,7 +552,9 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
     // 进入检测区域步骤时,标记画面跟随分析范围起点,而不是停在片头。
     if (next == 2 && _analysisStartMs > 0) {
       final state = ref.read(projectProvider);
-      if (state.previewTimeMs < _analysisStartMs) {
+      final preview = state.previewTimeMs;
+      if (preview < _analysisStartMs ||
+          (_analysisEndMs > _analysisStartMs && preview > _analysisEndMs)) {
         ref.read(projectProvider.notifier).setPreviewTimeOnly(_analysisStartMs);
       }
     }
@@ -1875,6 +1878,10 @@ class _DetectionStepState extends ConsumerState<_DetectionStep> {
         setState(() => _playing = playing);
       });
       await _player!.open(Media(Uri.file(path).toString()), play: false);
+      await waitForPlayableDuration(
+        current: _player!.state.duration,
+        updates: _player!.stream.duration,
+      );
       final target = widget.state.previewTimeMs;
       if (target > 0) await _player!.seek(Duration(milliseconds: target));
       _lastSyncedMs = target;
