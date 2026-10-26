@@ -516,6 +516,10 @@ jobs:
           apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
           certs="$("$apksigner" verify --print-certs "$apk")"
           grep -q 'SHA-256 digest: 14f6d1117b858058f730afd96b880dff0fd8ecff2ebc10e387a5d89c10c0084e' <<< "$certs"
+          # 检查更新要联网；v0.1.11 的 release 清单漏了 INTERNET，App 里连不上更新服务器。
+          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/aapt2"
+          permissions="$("$aapt2" dump permissions "$apk")"
+          grep -q "name='android.permission.INTERNET'" <<< "$permissions"
           mkdir -p "$GITHUB_WORKSPACE/dist"
           cp "$apk" \
             "$GITHUB_WORKSPACE/dist/BHE-android-arm64-v8a-v${version}-debug-signed.apk"
