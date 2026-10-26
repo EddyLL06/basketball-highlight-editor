@@ -242,10 +242,16 @@ class OnnxDetector:
         self.input_name = model_input.name
         self.max_batch = max_batch or BACKEND_MAX_BATCH.get(self.device, 1)
         self.max_batch = max(1, int(self.max_batch))
-        # 静态模型（手机端导出的 1×3×640×640）一次只能喂声明的张数，按模型封顶。
+        # 静态模型（手机端导出的 1×3×640×640）一次只能喂 1 张；固定成更多张的模型每批必须
+        # 正好凑满，尾批会失败，只支持单张或动态 batch。
         batch_dim = (model_input.shape or [None])[0]
-        if isinstance(batch_dim, int) and batch_dim > 0:
-            self.max_batch = min(self.max_batch, batch_dim)
+        if isinstance(batch_dim, int) and batch_dim > 1:
+            raise ValueError(
+                f"不支持固定 batch={batch_dim} 的 ONNX 模型：{self.onnx_path.name}，"
+                "请导出单张或动态 batch 模型（scripts/export_mobile_model.py --dynamic）"
+            )
+        if batch_dim == 1:
+            self.max_batch = 1
 
     @staticmethod
     def _providers(device: str) -> list[str]:

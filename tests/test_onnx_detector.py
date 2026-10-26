@@ -299,10 +299,8 @@ def test_a_broken_torch_without_onnx_still_reports_the_error(tmp_path, monkeypat
         inference.load_detector(model, device="cpu")
 
 
-@pytest.mark.parametrize(("batch_dim", "expected"), [(1, 1), ("batch", 8)])
-def test_a_static_model_caps_the_batch_at_its_declared_size(tmp_path, monkeypatch, batch_dim, expected):
-    import onnxruntime as ort
-
+def _detector_for_model_input(tmp_path, monkeypatch, batch_dim):
+    """注入假的 onnxruntime 跑真实的 OnnxDetector.__init__，不依赖可选的 ORT 包。"""
     model = tmp_path / "model.onnx"
     model.write_bytes(b"onnx")
 
@@ -316,6 +314,18 @@ def test_a_static_model_caps_the_batch_at_its_declared_size(tmp_path, monkeypatc
         def get_inputs(self):
             return [type("Input", (), {"name": "images", "shape": [batch_dim, 3, 640, 640]})()]
 
-    monkeypatch.setattr(ort, "InferenceSession", Session)
-    detector = OnnxDetector(model, device="cpu", names={0: "ball"})
-    assert detector.max_batch == expected
+    fake_ort = type(sys)("onnxruntime")
+    fake_ort.InferenceSession = Session
+    fake_ort.SessionOptions = lambda: type("Options", (), {})()
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
+    return OnnxDetector(model, device="cpu", names={0: "ball"})
+
+
+@pytest.mark.parametrize(("batch_dim", "expected"), [(1, 1), ("batch", 8)])
+def test_a_single_image_model_feeds_one_image_at_a_time(tmp_path, monkeypatch, batch_dim, expected):
+    assert _detector_for_model_input(tmp_path, monkeypatch, batch_dim).max_batch == expected
+
+
+def test_a_model_fixed_to_several_images_is_rejected_up_front(tmp_path, monkeypatch):
+    with pytest.raises(ValueError, match="batch=2"):
+        _detector_for_model_input(tmp_path, monkeypatch, 2)
