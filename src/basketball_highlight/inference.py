@@ -44,7 +44,8 @@ def onnx_path_for(model_path: str | Path) -> Path:
 def _torch_cuda_available() -> bool:
     try:
         import torch
-    except ImportError:
+    except (ImportError, OSError):
+        # Windows 上 c10.dll 初始化失败(WinError 1114)抛的是 OSError。
         return False
     try:
         return bool(torch.cuda.is_available())
@@ -56,7 +57,7 @@ def _torch_cuda_available() -> bool:
 def _torch_mps_available() -> bool:
     try:
         import torch
-    except ImportError:
+    except (ImportError, OSError):
         return False
     try:
         return bool(torch.backends.mps.is_available())
@@ -153,7 +154,19 @@ def load_detector(
         )
         target = "cpu"
 
-    from ultralytics import YOLO
+    try:
+        from ultralytics import YOLO
+    except OSError as error:
+        # torch 的 DLL 起不来时，CPU 改走 ORT，检测结果和 .pt 一致。
+        onnx_path = onnx_path_for(path)
+        if target != "cpu" or not onnx_path.is_file():
+            raise
+        from .onnx_detector import OnnxDetector
+
+        print(f"torch unavailable ({error}); using onnxruntime cpu", file=sys.stderr)
+        detector = OnnxDetector(onnx_path, device="cpu", **kwargs)
+        _remember(detector.device)
+        return detector
 
     _remember(target if target in {"cuda", "mps"} else "cpu")
     return YOLO(str(path))

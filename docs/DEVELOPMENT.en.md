@@ -265,7 +265,7 @@ OSError: [WinError 1114] DLL initialization routine failed.
 Error loading "...\runtime\python\Lib\site-packages\torch\lib\c10.dll" or one of its dependencies.
 ```
 
-`1114` is not "dependency missing" (that is 126): the DLL was found and its `DllMain` failed. `_torch_cuda_available()` in `inference.py` swallows this and reports "no CUDA", but `load_detector()` still does `from ultralytics import YOLO` → `import torch`, so **torch not loading means analysis cannot run at all** — unrelated to whether `onnxruntime-directml` is installed. `detect_auto_roi.py` goes through torch too, which is why auto ROI detection fails first with `ROI_DETECTION_FAILED`.
+`1114` is not "dependency missing" (that is 126): the DLL was found and its `DllMain` failed. In v0.1.11 and earlier, torch not loading meant analysis could not run at all, and auto ROI detection failed first with `ROI_DETECTION_FAILED`. Now `inference.py` treats this `OSError` as "no CUDA", and when the CPU backend cannot import `ultralytics` it switches to ONNX Runtime CPU as long as the runtime ships `models/bball_model.onnx` (the log shows `torch unavailable ...; using onnxruntime cpu`); machines with a GPU still use DirectML. The error only surfaces when the `.onnx` is missing.
 
 Causes to check, in order:
 
@@ -280,7 +280,7 @@ Verify with the bundled interpreter:
 & "<runtime>\python\python.exe" -c "import torch; print(torch.__version__, torch.rand(2,2).sum())"
 ```
 
-If it prints, the environment is fine; 1114 means one of the four cases above. **Routing through DirectML does not avoid this**: `select_device()` in `scan_video.py` still imports torch to probe CUDA.
+If it prints, the environment is fine; 1114 means one of the four cases above. Analysis keeps working through ONNX, but torch itself is still broken and worth fixing as above.
 
 ## 10. Pre-submit checks
 

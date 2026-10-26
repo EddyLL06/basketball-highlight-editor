@@ -242,3 +242,58 @@ def test_load_detector_falls_back_to_torch_when_onnx_missing(tmp_path, monkeypat
     detector = inference.load_detector(model)
     assert detector == ("yolo", str(model))
     assert inference.current_device() == "cpu"
+
+
+def _imports_fail_with_oserror(monkeypatch, *names):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name.split(".")[0] in names:
+            raise OSError("[WinError 1114] 动态链接库(DLL)初始化例程失败。")
+        return real_import(name, *args, **kwargs)
+
+    for name in names:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+
+def test_a_broken_torch_dll_counts_as_no_cuda(monkeypatch):
+    _imports_fail_with_oserror(monkeypatch, "torch")
+    inference._torch_cuda_available.cache_clear()
+    inference._torch_mps_available.cache_clear()
+    try:
+        assert inference._torch_cuda_available() is False
+        assert inference._torch_mps_available() is False
+    finally:
+        inference._torch_cuda_available.cache_clear()
+        inference._torch_mps_available.cache_clear()
+
+
+def test_cpu_uses_onnxruntime_when_torch_cannot_load(tmp_path, monkeypatch):
+    model = tmp_path / "model.pt"
+    model.write_bytes(b"pt")
+    (tmp_path / "model.onnx").write_bytes(b"onnx")
+
+    from basketball_highlight import onnx_detector
+
+    class FakeOnnx:
+        def __init__(self, path, *, device, **kwargs):
+            self.path, self.device = path, device
+
+    monkeypatch.setattr(onnx_detector, "OnnxDetector", FakeOnnx)
+    _imports_fail_with_oserror(monkeypatch, "ultralytics", "torch")
+
+    detector = inference.load_detector(model, device="cpu")
+    assert (detector.path, detector.device) == (tmp_path / "model.onnx", "cpu")
+    assert inference.current_device() == "cpu"
+
+
+def test_a_broken_torch_without_onnx_still_reports_the_error(tmp_path, monkeypatch):
+    model = tmp_path / "model.pt"
+    model.write_bytes(b"pt")
+    _imports_fail_with_oserror(monkeypatch, "ultralytics", "torch")
+
+    with pytest.raises(OSError, match="1114"):
+        inference.load_detector(model, device="cpu")

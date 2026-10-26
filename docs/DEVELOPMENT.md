@@ -285,10 +285,11 @@ Error loading "...\runtime\python\Lib\site-packages\torch\lib\c10.dll" or one of
 ```
 
 `1114` 不是「找不到依赖」（那是 126），而是 **DLL 已找到但 `DllMain` 自己失败**。
-`inference.py` 里 `_torch_cuda_available()` 会吞掉这个异常当作「无 CUDA」，但
-`load_detector()` 在非 DML 后端仍然 `from ultralytics import YOLO` → `import torch`，
-所以 **torch 起不来 = 整个分析起不来**，与打不开/未装 `onnxruntime-directml` 无关。
-`detect_auto_roi.py` 也走 torch，于是自动 ROI 检测会先报 `ROI_DETECTION_FAILED`。
+v0.1.11 及更早版本里 torch 起不来 = 整个分析起不来，自动 ROI 检测会先报
+`ROI_DETECTION_FAILED`。现在 `inference.py` 把这个 `OSError` 当作「没有 CUDA」，
+CPU 后端加载 `ultralytics` 失败时，只要运行时里有 `models/bball_model.onnx` 就改走
+ONNX Runtime CPU（日志里会有 `torch unavailable ...; using onnxruntime cpu`），
+有显卡时照常走 DirectML。只有缺 `.onnx` 时才会报这个错。
 
 常见诱因，按排查顺序：
 
@@ -308,8 +309,8 @@ Error loading "...\runtime\python\Lib\site-packages\torch\lib\c10.dll" or one of
 & "<runtime>\python\python.exe" -c "import torch; print(torch.__version__, torch.rand(2,2).sum())"
 ```
 
-能打印就是环境正常；报 1114 就是上面 1–4 之一。**只走 DirectML 路径不能绕过这个问题**：
-`scan_video.py` 的 `select_device()` 同样会 `import torch` 探测 CUDA。
+能打印就是环境正常；报 1114 就是上面 1–4 之一。分析能靠 ONNX 跑起来，但 torch 本身
+还是坏的，仍然要按上面排查。
 
 ## 10. 提交前检查
 
