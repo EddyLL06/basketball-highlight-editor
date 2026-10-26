@@ -404,7 +404,9 @@ def test_list_exports_returns_recent_export_metrics(tmp_path: Path):
     assert result["exports"][0]["metadata"] == {"files": ["highlights.mp4"]}
 
 
-def test_export_rejects_overwriting_source_video(tmp_path: Path):
+# 保存名不写扩展名时导出会补成 .mp4，补完后正好是原视频，同样要拦下。
+@pytest.mark.parametrize("output_name", ["source.mp4", "source"])
+def test_export_rejects_overwriting_source_video(tmp_path: Path, output_name: str):
     project_root = tmp_path / "project"
     source = tmp_path / "source.mp4"
     source.write_bytes(b"source")
@@ -436,7 +438,7 @@ def test_export_rejects_overwriting_source_video(tmp_path: Path):
             "project_root": str(project_root),
             "video_id": video["id"],
             "mode": "merge",
-            "output_path": str(source),
+            "output_path": str(tmp_path / output_name),
         },
     )
     service._job_threads[started["job"]["id"]].join(timeout=2)

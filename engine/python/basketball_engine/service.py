@@ -35,6 +35,7 @@ from .adapters.export import (
     available_output_path,
     ensure_writable_directory,
     export_goal_clips,
+    normalize_output_path,
     safe_file_stem,
     trajectory_points,
     validate_output_file,
@@ -2304,7 +2305,8 @@ class EngineService:
             merged_output = Path(output_path).expanduser()
             if not merged_output.is_absolute():
                 merged_output = store.root / merged_output
-            merged_output = merged_output.resolve()
+            # 先补全扩展名再比较：保存成 "game" 时最终写的是 "game.mp4"，可能正是原视频。
+            merged_output = normalize_output_path(merged_output).resolve()
         for video in videos.values():
             if merged_output is not None and merged_output == video["source"].resolve():
                 raise ProtocolError(
