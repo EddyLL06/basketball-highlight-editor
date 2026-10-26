@@ -379,17 +379,15 @@ class ProjectNotifier extends Notifier<ProjectState> {
               rethrow;
             }
             // 默认目录被安全软件拦截、或「视频」文件夹失效时建不了项目，改存到应用数据目录。
-            final fallbackUsedBefore = Directory(fallback).existsSync();
+            // 之后本次运行直接用备用目录，不会再失败，所以每次启动最多提示一次。
             final failedRoot = knownRoot;
             knownRoot = fallback;
             projectRoot = '$knownRoot/$folderName';
             await session.createProject(name: stem, rootPath: projectRoot);
-            if (!fallbackUsedBefore) {
-              _pushNotice(
-                '无法在 $failedRoot 新建项目，已改存到 $knownRoot',
-                NoticeSeverity.warning,
-              );
-            }
+            _pushNotice(
+              '无法在 $failedRoot 新建项目，已改存到 $knownRoot',
+              NoticeSeverity.warning,
+            );
           }
           projectCreated = true;
           linked = await session.linkVideo(path);

@@ -85,6 +85,10 @@ void main() {
       final state = container.read(projectProvider);
       expect(state.knownProjectsRoot, fallback);
       expect(state.video?['id'], 'vid-1');
+      expect(
+        container.read(noticeProvider).map((notice) => notice.title),
+        contains(contains('已改存到 $fallback')),
+      );
     });
 
     test('其它建项目错误不换目录，照常报错', () async {
