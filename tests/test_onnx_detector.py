@@ -515,3 +515,34 @@ def test_coreml_that_fails_to_build_a_session_falls_back_to_mps(tmp_path, monkey
 
     assert inference.load_detector(model, device="coreml") == ("yolo", str(model))
     assert inference.current_device() == "mps"
+
+
+def _coreml_factory_case(tmp_path, monkeypatch, error):
+    model = tmp_path / "bball_model.pt"
+    model.write_bytes(b"pt")
+    (tmp_path / "bball_model.static.onnx").write_bytes(b"not a model")
+
+    from basketball_highlight import onnx_detector
+
+    def broken(path, *, device, **kwargs):
+        raise error
+
+    fake_ultralytics = type(sys)("ultralytics")
+    fake_ultralytics.YOLO = lambda path: ("yolo", path)
+    monkeypatch.setattr(onnx_detector, "OnnxDetector", broken)
+    monkeypatch.setitem(sys.modules, "ultralytics", fake_ultralytics)
+    return model
+
+
+def test_a_static_model_that_cannot_be_loaded_falls_back_to_mps(tmp_path, monkeypatch):
+    model = _coreml_factory_case(tmp_path, monkeypatch, RuntimeError("InvalidProtobuf"))
+
+    assert inference.load_detector(model, device="coreml") == ("yolo", str(model))
+    assert inference.current_device() == "mps"
+
+
+def test_a_wrong_call_to_the_coreml_detector_is_not_swallowed(tmp_path, monkeypatch):
+    model = _coreml_factory_case(tmp_path, monkeypatch, TypeError("unexpected keyword"))
+
+    with pytest.raises(TypeError):
+        inference.load_detector(model, device="coreml")

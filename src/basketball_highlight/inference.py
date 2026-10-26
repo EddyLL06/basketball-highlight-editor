@@ -242,16 +242,23 @@ def load_detector(
             # 方形 letterbox 是硬要求：静态模型只吃 1×3×640×640，rect 输入直接报错。
             kwargs.setdefault("max_batch", 1)
             kwargs.setdefault("letterbox_mode", "square")
-            detector = OnnxDetector(onnx_path, device="coreml", **kwargs)
-            if detector.device == "coreml":
-                _remember("coreml")
-                return detector
-            # CoreML EP 没建起来时 ORT 只剩单张 CPU，比 mps 慢，退回合并前的 torch/mps。
-            print(
-                "device=coreml unavailable at session level "
-                f"(providers={detector.provider}); falling back to mps",
-                file=sys.stderr,
-            )
+            try:
+                detector = OnnxDetector(onnx_path, device="coreml", **kwargs)
+            except TypeError:
+                raise
+            except Exception as error:
+                # 静态模型是可选产物，损坏或 ORT 读不了时不能让整次分析失败。
+                print(f"device=coreml failed to load {onnx_path.name} ({error}); falling back to mps", file=sys.stderr)
+            else:
+                if detector.device == "coreml":
+                    _remember("coreml")
+                    return detector
+                # CoreML EP 没建起来时 ORT 只剩单张 CPU，比 mps 慢，退回合并前的 torch/mps。
+                print(
+                    "device=coreml unavailable at session level "
+                    f"(providers={detector.provider}); falling back to mps",
+                    file=sys.stderr,
+                )
         else:
             print(
                 f"device=coreml skipped: {onnx_path.name} not found "
