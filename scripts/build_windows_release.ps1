@@ -29,7 +29,10 @@ if ($Ffprobe) { $prepareArgs.Ffprobe = $Ffprobe }
 
 Push-Location "$Root\apps\desktop"
 try {
-    $buildArgs = @('build', 'windows', '--release', '--dart-define', "BHE_VERSION=$Version")
+    # Keep platform hotfix tags compatible with the updater's numeric version parser.
+    $AppVersion = $Version.Replace('-windows.', '+windows.')
+    Write-Host "Windows app version: $AppVersion (release $Version)"
+    $buildArgs = @('build', 'windows', '--release', '--dart-define', "BHE_VERSION=$AppVersion")
     foreach ($define in $DartDefine) { $buildArgs += @('--dart-define', $define) }
     & $Flutter @buildArgs
     if ($LASTEXITCODE -ne 0) { Write-Error "flutter build windows failed" }
