@@ -22,6 +22,7 @@ import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
 import 'clip_range_timeline.dart';
 import 'media_readiness.dart';
+import 'player_group_editor.dart';
 import 'review_video_viewport.dart';
 
 bool _annotationHintSeen = false;
@@ -6443,7 +6444,7 @@ class _PlayerGroupsDialog extends ConsumerWidget {
       ),
       title: Text(context.bheText('球员分组')),
       content: SizedBox(
-        width: 380,
+        width: 480,
         child: groups.isEmpty
             ? Text(
                 context.bheText('还没有分组。把当前项目的球员存为分组后，其他项目可以一键导入。'),
@@ -6472,6 +6473,16 @@ class _PlayerGroupsDialog extends ConsumerWidget {
                             onPressed: () => ref.read(playerGroupsProvider.notifier)
                                 .setDefault(defaultGroup == group.name ? null : group.name),
                             icon: Icon(defaultGroup == group.name ? Icons.star : Icons.star_border, size: 18),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          IconButton(
+                            key: ValueKey('player-group-edit-${group.name}'),
+                            tooltip: context.bheText('编辑球员分组'),
+                            onPressed: () => showDialog<void>(
+                              context: context,
+                              builder: (_) => PlayerGroupEditor(group: group),
+                            ),
+                            icon: const Icon(Icons.edit_outlined, size: 18),
                             visualDensity: VisualDensity.compact,
                           ),
                           TextButton(

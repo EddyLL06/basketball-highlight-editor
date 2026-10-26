@@ -949,6 +949,38 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
   });
 
+  testWidgets('player group editor opens from review and follows the renamed default', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'bhe.player_groups': jsonEncode([
+        {'name': 'Saturday', 'players': ['Chris', 'Alex']},
+      ]),
+    });
+    final notifier = _TagReviewNotifier(_tagReviewState());
+    final originalPlayers = [for (final player in notifier.initialState.players) Map.of(player)];
+    await _pumpReview(tester, notifier.initialState, notifier: notifier);
+    await tester.tap(find.byKey(const ValueKey('player-chip-c1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('球员分组'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('player-group-default-Saturday')));
+    await tester.pumpAndSettle();
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('bhe.default_player_group'), 'Saturday');
+    await tester.tap(find.byKey(const ValueKey('player-group-edit-Saturday')));
+    await tester.pumpAndSettle();
+    expect(find.text('编辑球员分组'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('player-group-name')), 'Weekday');
+    await tester.tap(find.byKey(const Key('player-group-save')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('player-group-Weekday')), findsOneWidget);
+    expect(prefs.getString('bhe.default_player_group'), 'Weekday');
+    expect(notifier.importedNames, isNull);
+    expect(notifier.current.players, originalPlayers);
+    await tester.tap(find.byKey(const ValueKey('player-group-default-Weekday')));
+    await tester.pumpAndSettle();
+    expect(prefs.containsKey('bhe.default_player_group'), isFalse);
+  });
+
   testWidgets('a multi-part project reviews parts in order and follows the part', (
     tester,
   ) async {

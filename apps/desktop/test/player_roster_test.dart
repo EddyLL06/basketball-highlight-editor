@@ -37,7 +37,6 @@ class _RosterProject extends ProjectNotifier {
       'width': 1920,
       'height': 1080,
     },
-    videoPath: 'test-game.mp4',
     suggestedRoi: const Rect.fromLTWH(.2, .2, .4, .4),
     workflowDraft: const {'step': 3, 'video_id': 'video-test'},
     videos: multi
@@ -163,6 +162,28 @@ Future<void> _analyze(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets(
+    'renaming the selected default invalidates this selection but updates the saved default',
+    (tester) async {
+      final notifier = _RosterProject();
+      final container = await _pump(tester, notifier);
+      await container
+          .read(playerGroupsProvider.notifier)
+          .update('Saturday', name: 'Renamed', players: ['Blake', 'Chris']);
+      await tester.pumpAndSettle();
+      expect(container.read(defaultPlayerGroupProvider), 'Renamed');
+      expect(
+        tester
+            .widget<DropdownButton<String>>(
+              find.byKey(const Key('player-roster-group')),
+            )
+            .value,
+        '',
+      );
+      await _analyze(tester);
+      expect(notifier.imports, isEmpty);
+    },
+  );
   testWidgets('returning to confirmation preserves this project attendance', (
     tester,
   ) async {

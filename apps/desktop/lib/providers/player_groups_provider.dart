@@ -66,6 +66,40 @@ class PlayerGroupsNotifier extends Notifier<List<PlayerGroup>> {
     state = [...state];
   });
 
+  Future<void> update(
+    String originalName, {
+    required String name,
+    required List<String> players,
+  }) => _change(() {
+    final nextName = name.trim();
+    if (nextName.isEmpty) throw const PlayerGroupException('分组名不能为空');
+    if (!state.any((group) => group.name == originalName)) {
+      throw const PlayerGroupException('球员分组已不存在，请重新选择');
+    }
+    if (state.any(
+      (group) => group.name != originalName && group.name == nextName,
+    )) {
+      throw const PlayerGroupException('分组名已存在，请使用其他名称');
+    }
+    final nextPlayers = <String>[];
+    final seen = <String>{};
+    for (final player in players) {
+      final trimmed = player.trim();
+      if (trimmed.isEmpty) throw const PlayerGroupException('球员名不能为空');
+      if (!seen.add(trimmed)) throw const PlayerGroupException('分组内的球员不能重名');
+      nextPlayers.add(trimmed);
+    }
+    // Move the default in the same in-memory transition as the rename.
+    if (_defaultGroupName == originalName) _defaultGroupName = nextName;
+    state = [
+      for (final group in state)
+        if (group.name == originalName)
+          (name: nextName, players: List<String>.unmodifiable(nextPlayers))
+        else
+          group,
+    ];
+  });
+
   Future<void> delete(String name) => _change(() {
     if (_defaultGroupName == name) _defaultGroupName = null;
     state = [

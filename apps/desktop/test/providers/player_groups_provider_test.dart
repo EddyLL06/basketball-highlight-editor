@@ -28,6 +28,110 @@ void main() {
   ]);
 
   test(
+    'editing preserves group position, player order and default across reload',
+    () async {
+      final container = await load({
+        playerGroupsPrefsKey: groups,
+        defaultPlayerGroupPrefsKey: 'Saturday',
+      });
+      final notifier = container.read(playerGroupsProvider.notifier);
+      await notifier.update(
+        'Saturday',
+        name: '  New team  ',
+        players: [' Blake ', 'Chris', 'Evan'],
+      );
+      expect(container.read(playerGroupsProvider).map((g) => g.name), [
+        'New team',
+        'Sunday',
+      ]);
+      expect(container.read(playerGroupsProvider).first.players, [
+        'Blake',
+        'Chris',
+        'Evan',
+      ]);
+      expect(container.read(defaultPlayerGroupProvider), 'New team');
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(defaultPlayerGroupPrefsKey), 'New team');
+      final reloaded = ProviderContainer();
+      addTearDown(reloaded.dispose);
+      await reloaded.read(playerGroupsProvider.notifier).ready;
+      final reread = reloaded.read(playerGroupsProvider);
+      expect(reread.map((group) => group.name), ['New team', 'Sunday']);
+      expect(reread.first.players, ['Blake', 'Chris', 'Evan']);
+      expect(reread.last.players, ['Dana']);
+      expect(reloaded.read(defaultPlayerGroupProvider), 'New team');
+    },
+  );
+
+  for (final invalid in [
+    (name: ' ', players: <String>['Chris'], error: '分组名不能为空'),
+    (name: 'Sunday', players: <String>['Chris'], error: '分组名已存在，请使用其他名称'),
+    (name: 'Team', players: <String>[' '], error: '球员名不能为空'),
+    (name: 'Team', players: <String>['Chris', ' Chris '], error: '分组内的球员不能重名'),
+  ]) {
+    test(
+      'invalid edit is rejected without changing groups or default: ${invalid.error}',
+      () async {
+        final container = await load({
+          playerGroupsPrefsKey: groups,
+          defaultPlayerGroupPrefsKey: 'Saturday',
+        });
+        await expectLater(
+          container
+              .read(playerGroupsProvider.notifier)
+              .update('Saturday', name: invalid.name, players: invalid.players),
+          throwsA(
+            isA<PlayerGroupException>().having(
+              (e) => e.message,
+              'message',
+              invalid.error,
+            ),
+          ),
+        );
+        expect(container.read(playerGroupsProvider).first.name, 'Saturday');
+        expect(container.read(defaultPlayerGroupProvider), 'Saturday');
+        expect(
+          (await SharedPreferences.getInstance()).getString(
+            playerGroupsPrefsKey,
+          ),
+          groups,
+        );
+      },
+    );
+  }
+
+  test(
+    'renaming a non-default group leaves the selected default unchanged',
+    () async {
+      final container = await load({
+        playerGroupsPrefsKey: groups,
+        defaultPlayerGroupPrefsKey: 'Sunday',
+      });
+      await container
+          .read(playerGroupsProvider.notifier)
+          .update('Saturday', name: 'Team', players: []);
+      expect(container.read(defaultPlayerGroupProvider), 'Sunday');
+      expect(container.read(playerGroupsProvider).first.players, isEmpty);
+    },
+  );
+
+  test(
+    'editing a group deleted while the editor was open does not recreate it',
+    () async {
+      final container = await load({playerGroupsPrefsKey: groups});
+      final notifier = container.read(playerGroupsProvider.notifier);
+      await notifier.delete('Saturday');
+      await expectLater(
+        notifier.update('Saturday', name: 'Team', players: ['Chris']),
+        throwsA(isA<PlayerGroupException>()),
+      );
+      expect(container.read(playerGroupsProvider).map((g) => g.name), [
+        'Sunday',
+      ]);
+    },
+  );
+
+  test(
     'loads the default after the groups without changing player order',
     () async {
       final container = await load({
