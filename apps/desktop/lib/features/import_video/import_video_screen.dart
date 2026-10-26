@@ -549,8 +549,8 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
     if (_step == 2 && next != 2) _stopPreviewPlayback();
     setState(() => _step = next);
     await _persistDraft(step: next);
-    // 进入检测区域步骤时,标记画面跟随分析范围起点,而不是停在片头。
-    if (next == 2 && _analysisStartMs > 0) {
+    // 进入检测区域步骤时,标记画面落在分析范围内,而不是停在片头或范围之外。
+    if (next == 2) {
       final state = ref.read(projectProvider);
       final preview = state.previewTimeMs;
       if (preview < _analysisStartMs ||
