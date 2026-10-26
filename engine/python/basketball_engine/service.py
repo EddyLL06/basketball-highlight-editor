@@ -2306,9 +2306,10 @@ class EngineService:
             if not merged_output.is_absolute():
                 merged_output = store.root / merged_output
             # 先补全扩展名再比较：保存成 "game" 时最终写的是 "game.mp4"，可能正是原视频。
-            merged_output = normalize_output_path(merged_output).resolve()
+            # 待写路径不换成解析后的路径：alias.mp4 -> game 解析后再补全会变成 game.mp4。
+            merged_output = normalize_output_path(merged_output)
         for video in videos.values():
-            if merged_output is not None and merged_output == video["source"].resolve():
+            if merged_output is not None and merged_output.resolve() == video["source"].resolve():
                 raise ProtocolError(
                     "EXPORT_SOURCE_CONFLICT",
                     "导出目标不能覆盖原始视频",
