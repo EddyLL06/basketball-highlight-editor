@@ -262,6 +262,7 @@ class OnnxDetector:
         imgsz: int | None = None,
         max_det: int = MAX_DET,
         agnostic_nms: bool = False,
+        rect: bool = True,
         batch: int = 1,
         verbose: bool = False,
         **_ignored: Any,
@@ -277,17 +278,18 @@ class OnnxDetector:
         step = max(1, min(self.max_batch, len(frames)))
         for start in range(0, len(frames), step):
             chunk = frames[start:start + step]
-            results.extend(self._predict_chunk(chunk, size, conf, iou, max_det, agnostic_nms))
+            results.extend(self._predict_chunk(chunk, size, conf, iou, max_det, agnostic_nms, rect))
         return results
 
     def _predict_chunk(
         self, frames: list[np.ndarray], size: int,
-        conf: float, iou: float, max_det: int, agnostic_nms: bool,
+        conf: float, iou: float, max_det: int, agnostic_nms: bool, rect: bool = True,
     ) -> list[Result]:
         tensors = []
         meta = []
-        # 和 ultralytics 一样：整批尺寸相同才用矩形输入，否则补成方形才能拼成一批。
-        auto = len({frame.shape for frame in frames}) == 1
+        # 和 ultralytics 一样：rect=True 且整批尺寸相同才用矩形输入，否则补成方形。
+        # 分析脚本都传 rect=False，和 .pt 一样喂 640×640。
+        auto = rect and len({frame.shape for frame in frames}) == 1
         for frame in frames:
             tensor, scale, offset_x, offset_y = preprocess(frame, size, auto)
             tensors.append(tensor)

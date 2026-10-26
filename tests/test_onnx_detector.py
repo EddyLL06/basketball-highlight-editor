@@ -185,6 +185,12 @@ def test_predict_uses_rectangular_input_when_a_batch_shares_one_size():
     assert detector.session.shapes == [(2, 3, 480, 640)]
 
 
+def test_predict_keeps_the_input_square_when_rect_is_off():
+    detector = _fake_detector(8)
+    detector.predict([np.zeros((1440, 1920, 3), dtype=np.uint8)] * 2, conf=0.5, rect=False)
+    assert detector.session.shapes == [(2, 3, 640, 640)]
+
+
 def test_predict_pads_mixed_sizes_to_a_square_batch():
     detector = _fake_detector(8)
     detector.predict(
