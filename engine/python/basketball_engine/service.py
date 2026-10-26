@@ -223,12 +223,31 @@ class EngineService:
             except (ProtocolError, OSError):
                 continue
             # 只修正横竖互换的记录（旧版本存的是编码尺寸），其它差异不动。
-            if (video.get("width"), video.get("height")) != (probed["height"], probed["width"]):
+            orientation_wrong = (video.get("width"), video.get("height")) == (
+                probed["height"],
+                probed["width"],
+            )
+            # 尺寸已经对、只是没存过旋转角（加 rotation 列之前写入的项目）：
+            # 只补字段，不动 ROI 和候选，否则用户已有的标注会被清掉。
+            # 尺寸既不是互换也存错的记录不去碰，那种情况补个角度只会误导。
+            size_matches = (video.get("width"), video.get("height")) == (
+                probed["width"],
+                probed["height"],
+            )
+            missing_rotation = (
+                size_matches
+                and not video.get("rotation")
+                and bool(probed.get("rotation"))
+            )
+            if not orientation_wrong and not missing_rotation:
                 continue
-            store.relink_video(video["id"], {
-                **probed,
-                "source_fingerprint": video.get("source_fingerprint"),
-            })
+            if orientation_wrong:
+                store.relink_video(video["id"], {
+                    **probed,
+                    "source_fingerprint": video.get("source_fingerprint"),
+                })
+            else:
+                store.set_video_rotation(video["id"], probed["rotation"])
             corrected.append(video["id"])
         return corrected
 
@@ -520,6 +539,9 @@ class EngineService:
             "duration_ms": duration_ms,
             "width": width,
             "height": height,
+            # 播放器不会自动应用 MP4 的旋转矩阵（Windows 软渲染路径尤其如此），
+            # 前端据此自己转画面。宽高已是显示方向，这里是原始旋转角度。
+            "rotation": rotation,
             "fps": fps,
             "video_codec": video_stream.get("codec_name"),
             "audio_codec": audio_stream.get("codec_name") if audio_stream else None,
