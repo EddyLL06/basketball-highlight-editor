@@ -4,7 +4,7 @@
 # docs/benchmarks/COREML_BACKEND_BENCHMARK_20261025.md)。
 # 不装、机器不是 arm64、或缺静态模型时自动回落 mps/CPU,不影响功能。
 # 体积:本包约 80MB(压缩后约 22MB),另加静态模型 12.2MB(压缩后 10.5MB)。
-onnxruntime>=1.20
+onnxruntime==1.29.0
 # 只有导出 models/bball_model.static.onnx 这一步需要 onnx(约 32MB);
 # 发布脚本导出完成后会把它卸掉,避免跟着安装包发出去。
-onnx>=1.16
+onnx==1.23.2
