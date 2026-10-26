@@ -173,16 +173,7 @@ def scan_window(
         net_y2 = min(y2, int(rim["rim_y"] + 4.0 * rim_height))
     else:
         net_x1 = net_x2 = net_y1 = net_y2 = 0
-    # zones 由篮筐几何推出来,可能超出画面或 ROI 边界(竖拍、筐贴边时常见)。
-    # 不裁的话下面 frame[signal_y1:signal_y2, signal_x1:signal_x2] 会切出空图,
-    # cv2.cvtColor 直接断言失败,整个精修阶段连带分析一起失败。
-    signal_bounds = [
-        (max(x1, box[0]), max(y1, box[1]), min(x2, box[2]), min(y2, box[3]))
-        for box in zones.values()
-    ]
-    signal_bounds = [
-        bounds for bounds in signal_bounds if bounds[2] > bounds[0] and bounds[3] > bounds[1]
-    ]
+    signal_bounds = [*zones.values()]
     if net_x2 > net_x1 and net_y2 > net_y1:
         signal_bounds.append((net_x1, net_y1, net_x2, net_y2))
     if signal_bounds:
@@ -268,8 +259,8 @@ def scan_window(
             "net_below_orange_score": 0.0,
             "net_whole_signal_score": 0.0,
         }
-        # 几何异常时 signal_frame 可能为空,此时跳过篮网信号测量,
-        # 但仍要正常走完这一帧(下面会推进 sample_index),不能 continue。
+        # ROI 或篮筐超出实际解码的画面时 signal_frame 是空图,cv2.cvtColor 会断言失败;
+        # 跳过篮网信号测量,但仍要正常走完这一帧(下面会推进 sample_index),不能 continue。
         signal_frame = (
             frame[signal_y1:signal_y2, signal_x1:signal_x2]
             if rim and net_x2 > net_x1 and net_y2 > net_y1

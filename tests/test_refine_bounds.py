@@ -7,8 +7,8 @@ cv2.cvtColor 断言失败，整个分析随之中断。
 import sys
 from pathlib import Path
 
+import cv2
 import numpy as np
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "scripts") not in sys.path:
@@ -21,50 +21,52 @@ def _frame(height=720, width=1280):
     return np.full((height, width, 3), 40, dtype=np.uint8)
 
 
-def test_zone_bounds_are_clipped_to_the_roi():
-    """zones 超出 ROI 时应被裁进 ROI，而不是留一个越界的框。"""
-    roi = (100, 100, 400, 400)
-    frame = _frame()
-    rim = {"center_x": 120.0, "rim_y": 380.0, "width": 90.0, "height": 40.0}
-    zones = refine_candidates._net_zones(
-        rim,
-        frame.shape[1],
-        frame.shape[0],
-        net_roi=None,
-    )
-    assert zones, "篮筐几何应该能推出检测区域"
-    # 模拟 scan_window 里的裁剪逻辑
-    x1, y1, x2, y2 = roi
-    clipped = [
-        (max(x1, b[0]), max(y1, b[1]), min(x2, b[2]), min(y2, b[3]))
-        for b in zones.values()
-    ]
-    kept = [b for b in clipped if b[2] > b[0] and b[3] > b[1]]
-    for box in kept:
-        assert box[0] >= x1 and box[1] >= y1
-        assert box[2] <= x2 and box[3] <= y2
+class _NoDetections:
+    boxes = []
 
 
-def test_clipped_bounds_never_produce_an_empty_slice():
-    """裁剪后的每个框都必须能切出非空图像。"""
-    frame = _frame()
-    roi = (100, 100, 400, 400)
-    x1, y1, x2, y2 = roi
-    # 故意给一个远离 ROI 的篮筐，制造完全越界的情况
-    rim = {"center_x": 1200.0, "rim_y": 650.0, "width": 90.0, "height": 40.0}
-    zones = refine_candidates._net_zones(
-        rim,
-        frame.shape[1],
-        frame.shape[0],
-        net_roi=None,
+class _Model:
+    def predict(self, crops, **kwargs):
+        return [_NoDetections() for _ in crops]
+
+
+def _video(tmp_path: Path, width=640, height=480) -> Path:
+    path = tmp_path / "clip.mp4"
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30, (width, height))
+    for index in range(90):
+        frame = _frame(height, width)
+        cv2.circle(frame, (200 + index * 2, 150 + index), 20, (0, 120, 255), -1)
+        writer.write(frame)
+    writer.release()
+    return path
+
+
+def _scan(video: Path, roi, rim):
+    return refine_candidates.scan_window(
+        _Model(), video, roi, 1.5, 1.5, 5, 1, 0.15, "cpu", rim=rim, batch=8,
     )
-    clipped = [
-        (max(x1, b[0]), max(y1, b[1]), min(x2, b[2]), min(y2, b[3]))
-        for b in zones.values()
-    ]
-    kept = [b for b in clipped if b[2] > b[0] and b[3] > b[1]]
-    for left, top, right, bottom in kept:
-        assert frame[top:bottom, left:right].size > 0
+
+
+def test_a_hoop_outside_the_decoded_frame_skips_the_net_signal_instead_of_crashing(tmp_path: Path):
+    """ROI 和篮筐超出实际解码的画面时，之前 cv2.cvtColor 对空图断言失败，整个精修中断。"""
+    records = _scan(
+        _video(tmp_path),
+        (100, 100, 400, 700),
+        {"center_x": 250.0, "rim_y": 520.0, "width": 90.0, "height": 40.0},
+    )
+
+    assert records
+    assert not any(record["net_measurement_valid"] for record in records)
+
+
+def test_a_hoop_inside_the_frame_still_measures_the_net(tmp_path: Path):
+    records = _scan(
+        _video(tmp_path),
+        (100, 100, 400, 400),
+        {"center_x": 250.0, "rim_y": 200.0, "width": 90.0, "height": 40.0},
+    )
+
+    assert any(record["net_measurement_valid"] for record in records)
 
 
 def test_net_zones_stay_inside_the_frame_for_portrait_video():
