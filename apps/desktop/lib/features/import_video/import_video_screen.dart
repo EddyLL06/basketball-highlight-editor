@@ -1877,12 +1877,7 @@ class _DetectionStepState extends ConsumerState<_DetectionStep> {
         }
         setState(() => _playing = playing);
       });
-      await matchPlayerToSourceRotation(
-        _player!,
-        _controller!,
-        rotation: widget.rotation,
-        displayAspectRatio: widget.aspectRatio,
-      );
+      await matchPlayerToSourceRotation(_player!, rotation: widget.rotation);
       await _player!.open(Media(Uri.file(path).toString()), play: false);
       await waitForPlayableDuration(
         current: _player!.state.duration,
@@ -2996,12 +2991,7 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
       }
     });
     try {
-      await matchPlayerToSourceRotation(
-        player,
-        _controller!,
-        rotation: widget.rotation,
-        displayAspectRatio: widget.aspectRatio,
-      );
+      await matchPlayerToSourceRotation(player, rotation: widget.rotation);
       await player.open(Media(Uri.file(path).toString()), play: false);
       _playbackRequested = false;
       await player.pause();
@@ -3135,7 +3125,6 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
                               rotation: playerAppliesRotation()
                                   ? 0
                                   : widget.rotation,
-                              displayAspectRatio: widget.aspectRatio,
                               fit: BoxFit.cover,
                             ),
                           ),
@@ -3969,7 +3958,6 @@ class _RoiCanvasState extends State<_RoiCanvas> {
                                     rotation: playerAppliesRotation()
                                         ? 0
                                         : widget.rotation,
-                                    displayAspectRatio: widget.aspectRatio,
                                     fit: BoxFit.cover,
                                   ),
                                 )

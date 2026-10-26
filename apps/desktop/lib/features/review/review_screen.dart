@@ -1838,15 +1838,7 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
         });
         return;
       }
-      final controller = _controller;
-      if (controller != null) {
-        await matchPlayerToSourceRotation(
-          player,
-          controller,
-          rotation: widget.rotation,
-          displayAspectRatio: widget.frameSize.width / widget.frameSize.height,
-        );
-      }
+      await matchPlayerToSourceRotation(player, rotation: widget.rotation);
       await player.open(Media(Uri.file(path).toString()), play: false);
       if (!_isCurrent(generation)) return;
       await waitForPlayableDuration(
@@ -2110,9 +2102,6 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
                                 rotation: playerAppliesRotation()
                                     ? 0
                                     : widget.rotation,
-                                displayAspectRatio:
-                                    widget.frameSize.width /
-                                    widget.frameSize.height,
                                 fit: BoxFit.cover,
                               ),
                             ),
@@ -3937,12 +3926,7 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
           unawaited(player.pause());
         }
       });
-      await matchPlayerToSourceRotation(
-        player,
-        _controller!,
-        rotation: widget.rotation,
-        displayAspectRatio: widget.frameSize.width / widget.frameSize.height,
-      );
+      await matchPlayerToSourceRotation(player, rotation: widget.rotation);
       await player.open(Media(Uri.file(path).toString()), play: false);
       // 等媒体元数据就绪后再 seek:open 后立即 seek 在加载较慢时
       // (Windows 软件解码)会被丢弃,导致播放从 0 开始而非片段起点。
@@ -4370,9 +4354,6 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
                                   rotation: playerAppliesRotation()
                                       ? 0
                                       : widget.rotation,
-                                  displayAspectRatio:
-                                      widget.frameSize.width /
-                                      widget.frameSize.height,
                                   fit: BoxFit.cover,
                                 ),
                               ),

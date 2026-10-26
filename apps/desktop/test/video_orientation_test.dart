@@ -37,43 +37,4 @@ void main() {
       expect(rotationQuarterTurns(37), 0);
     });
   });
-
-  group('sourceAspectRatio（显示比例反推编码比例）', () {
-    // 竖拍横看：显示 1512x720（2.10），编码是 720x1512（0.476）。
-    test('90 度时宽高互换', () {
-      expect(sourceAspectRatio(2.10, 1), closeTo(1 / 2.10, 1e-9));
-    });
-
-    test('270 度时同样互换', () {
-      expect(sourceAspectRatio(0.476, 3), closeTo(1 / 0.476, 1e-9));
-    });
-
-    test('180 度不互换', () {
-      expect(sourceAspectRatio(2.10, 2), closeTo(2.10, 1e-9));
-    });
-
-    test('不旋转时保持原值', () {
-      expect(sourceAspectRatio(1.778, 0), closeTo(1.778, 1e-9));
-    });
-
-    test('非法比例返回 null，退化为普通播放', () {
-      expect(sourceAspectRatio(null, 1), isNull);
-      expect(sourceAspectRatio(0, 1), isNull);
-      expect(sourceAspectRatio(-1, 1), isNull);
-    });
-  });
-
-  group('softwareOutputSize（Windows 软件渲染的输出尺寸）', () {
-    test('竖拍 720x1512 等比放进 1080 高，不再被整数除法算成宽 0', () {
-      expect(softwareOutputSize(720 / 1512), (width: 514, height: 1080));
-    });
-
-    test('比 16:9 还宽的画面以 1920 宽为准', () {
-      expect(softwareOutputSize(1512 / 720), (width: 1920, height: 914));
-    });
-
-    test('4:3 画面以 1080 高为准', () {
-      expect(softwareOutputSize(4 / 3), (width: 1440, height: 1080));
-    });
-  });
 }
