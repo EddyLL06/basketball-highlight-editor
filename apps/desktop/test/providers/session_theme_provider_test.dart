@@ -242,7 +242,11 @@ void main() {
         await notifier.ensure();
         expect(client.startCalls, 1);
 
-        await notifier.resumeAfterUpdateFailure();
+        // 不依赖本机有没有 .venv：显式给出运行时目录和 Python，CI 上也一样。
+        await notifier.resumeAfterUpdateFailure(
+          runtimeRootOverride: Directory.systemTemp.path,
+          pythonExecutableOverride: 'python3',
+        );
         expect(client.startCalls, 2);
         client.running = false;
         client.onUnexpectedExit!(1, 'synthetic exit');

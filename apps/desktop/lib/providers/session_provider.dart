@@ -142,9 +142,15 @@ class EngineBootstrapNotifier extends Notifier<AsyncValue<bool>> {
     await ref.read(engineClientProvider).dispose();
   }
 
-  Future<void> resumeAfterUpdateFailure() {
+  Future<void> resumeAfterUpdateFailure({
+    String? runtimeRootOverride,
+    String? pythonExecutableOverride,
+  }) {
     _shuttingDownForUpdate = false;
-    return ensure();
+    return ensure(
+      runtimeRootOverride: runtimeRootOverride,
+      pythonExecutableOverride: pythonExecutableOverride,
+    );
   }
 
   Future<void> _ensure({
