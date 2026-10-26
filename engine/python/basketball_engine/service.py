@@ -30,7 +30,15 @@ from .adapters.analysis import (
     scale_roi_to_proxy,
     terminate_process,
 )
-from .adapters.export import EFFECTS, available_output_path, export_goal_clips, safe_file_stem, trajectory_points
+from .adapters.export import (
+    EFFECTS,
+    available_output_path,
+    ensure_writable_directory,
+    export_goal_clips,
+    safe_file_stem,
+    trajectory_points,
+    validate_output_file,
+)
 from .protocol import ProtocolError
 from .storage import ProjectStore, new_id
 from .media_tools import resolve_media_tool
@@ -2304,6 +2312,14 @@ class EngineService:
                     "导出目标不能覆盖原始视频",
                     {"source_path": str(video["source"].resolve())},
                 )
+        # 导出前自检：路径写错、目录没权限、漏写扩展名，都在编码开始前说清楚，
+        # 不要让用户等编码跑起来再从 FFmpeg 的 muxer 报错里猜（issue #8）。
+        try:
+            ensure_writable_directory(output_dir)
+            if merged_output is not None:
+                merged_output = validate_output_file(merged_output)
+        except OSError as exc:
+            raise ProtocolError("EXPORT_PATH_INVALID", str(exc)) from exc
         try:
             if mode == "merge_by_player":
                 result = self._export_merged_per_player(

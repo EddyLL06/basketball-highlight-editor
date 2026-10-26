@@ -349,3 +349,140 @@ def test_merge_across_sources_scales_to_the_first_clip_and_names_segments(tmp_pa
             check=True, capture_output=True, text=True,
         ).stdout.strip()
         assert size == "320,240"
+
+
+# --- issue #8：输出路径不可推断封装格式导致导出必然失败 -------------------------
+
+
+def test_atomic_ffmpeg_keeps_media_extension_and_declares_container(tmp_path: Path, monkeypatch):
+    output = tmp_path / "clip.mp4"
+    commands = []
+
+    class FakeProcess:
+        returncode = 0
+
+        def __init__(self, command, **_kwargs):
+            commands.append(command)
+            Path(command[-1]).write_bytes(b"video")
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(export.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(
+        export.subprocess, "run",
+        lambda *args, **kwargs: type("Completed", (), {"stdout": "1.25\n"})(),
+    )
+    run_atomic_ffmpeg(["ffmpeg", "-y", "-i", "source.mp4", str(output)], output)
+    temporary = Path(commands[0][-1])
+    assert temporary.name.endswith(".part.mp4")
+    assert commands[0][-3:-1] == ["-f", "mp4"]
+    assert output.read_bytes() == b"video"
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["BHE.highlights-261003", "highlights-261003", "导出"],
+)
+def test_atomic_ffmpeg_never_ends_the_temp_name_with_part(tmp_path: Path, monkeypatch, name):
+    output = tmp_path / name
+    commands = []
+
+    class FakeProcess:
+        returncode = 0
+
+        def __init__(self, command, **_kwargs):
+            commands.append(command)
+            Path(command[-1]).write_bytes(b"video")
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(export.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(
+        export.subprocess, "run",
+        lambda *args, **kwargs: type("Completed", (), {"stdout": "1.25\n"})(),
+    )
+    run_atomic_ffmpeg(["ffmpeg", "-y", "-i", "source.mp4", str(output)], output)
+    assert Path(commands[0][-1]).suffix == ".mp4"
+    assert commands[0][-3:-1] == ["-f", "mp4"]
+
+
+def test_output_path_gains_mp4_without_losing_dots_in_the_name():
+    assert export.normalize_output_path(Path("BHE.highlights-261003")) == Path(
+        "BHE.highlights-261003.mp4"
+    )
+    assert export.normalize_output_path(Path("highlights")) == Path("highlights.mp4")
+    assert export.normalize_output_path(Path("clip.MP4")) == Path("clip.MP4")
+
+
+def test_validate_output_file_reports_unwritable_location(tmp_path: Path, monkeypatch):
+    def deny(**kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(export.tempfile, "mkstemp", deny)
+    with pytest.raises(OSError, match="导出位置不可用"):
+        export.validate_output_file(tmp_path / "clip.mp4")
+
+
+def test_validate_output_file_rejects_a_directory_target(tmp_path: Path):
+    with pytest.raises(OSError, match="导出目标是文件夹"):
+        export.validate_output_file(tmp_path)
+
+
+def test_merge_writes_mp4_when_the_saved_name_has_no_extension(tmp_path: Path, monkeypatch):
+    def fake_ffmpeg(command, output_path, **kwargs):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"video")
+
+    monkeypatch.setattr(export, "run_atomic_ffmpeg", fake_ffmpeg)
+    result = export.export_goal_clips(
+        [{"source_path": str(tmp_path / "source.mp4"), "event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
+        tmp_path / "export", "merge", tmp_path / "BHE.highlights-261003",
+    )
+    assert Path(result["files"][0]).name == "BHE.highlights-261003.mp4"
+
+
+def test_encoder_fallback_does_not_retry_a_muxer_failure(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(export.platform, "system", lambda: "Linux")
+    attempts = []
+
+    def fail(command, output_path, **kwargs):
+        attempts.append(command[command.index("-c:v") + 1])
+        raise export.MediaCommandError(
+            234, command,
+            "Unable to choose an output format for 'x.part'; use a standard extension",
+        )
+
+    monkeypatch.setattr(export, "run_atomic_ffmpeg", fail)
+    with pytest.raises(export.MediaCommandError):
+        export.export_goal_clips(
+            [{"source_path": str(tmp_path / "source.mp4"), "event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
+            tmp_path / "export", "separate",
+        )
+    assert attempts == ["libx264"]
+
+
+def test_encoder_fallback_still_switches_encoder_on_encoder_failures(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(export.platform, "system", lambda: "Linux")
+    attempts = []
+
+    def fake(command, output_path, **kwargs):
+        codec = command[command.index("-c:v") + 1]
+        attempts.append(codec)
+        if codec != "mpeg4":
+            raise export.MediaCommandError(1, command, "Unknown encoder 'x'")
+        output_path.write_bytes(b"video")
+
+    monkeypatch.setattr(export, "run_atomic_ffmpeg", fake)
+    export.export_goal_clips(
+        [{"source_path": str(tmp_path / "source.mp4"), "event_time_ms": 500, "review_start_ms": 0, "review_end_ms": 1000}],
+        tmp_path / "export", "separate",
+    )
+    assert attempts == ["libx264", "libopenh264", "mpeg4"]
+
+
+def test_media_command_error_prints_a_signed_windows_exit_code():
+    message = str(export.MediaCommandError(4294967274, ["ffmpeg"], "Invalid argument"))
+    assert "-22" in message
+    assert "4294967274" not in message
