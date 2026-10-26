@@ -205,7 +205,7 @@ After downloading, Windows offers **Install and restart** alongside **Show in fo
 - Replacement or immediate launch failure triggers an attempt to restore/reopen the previous release. If locks prevent recovery, both versions and the recovery paths are retained. A process staying alive is not a full functionality check.
 - The two renames are not a single atomic transaction. Power loss or forcibly stopping the helper can require manual recovery: close related processes, preserve the failed release and rename the logged backup to the original location. Project databases are not modified by the helper.
 
-Logs are in `%LOCALAPPDATA%\BHE\updates\install-*`: `status.json` records phases and paths; `error.txt` records failure details; `cleanup.log` records backup cleanup. Staging is cleaned on normal completion; the latest rollback copy, failed releases and interrupted-operation leftovers are retained. Failed updates do not prune backups. The empty `.update.lock` remains a stable locking object to avoid an unlink/reopen race with another updater.
+Logs are in `%LOCALAPPDATA%\BHE\updates\install-*`: `status.json` records phases and paths; `error.txt` records failure details; `cleanup.log` records backup cleanup. Staging is cleaned on normal completion; the latest rollback copy, failed releases and interrupted-operation leftovers are retained. Failed updates do not prune backups. The empty `.update.lock` remains a stable locking object; closing its handle releases the lock, so the file's presence does not mean an update is running.
 
 Run the synthetic-app checks (also configured in Windows CI):
 
