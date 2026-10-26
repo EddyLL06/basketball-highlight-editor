@@ -364,13 +364,33 @@ class ProjectNotifier extends Notifier<ProjectState> {
           RegExp(r'\.[^.]+$'),
           '',
         );
-        final knownRoot = state.knownProjectsRoot ?? _projectsRoot;
-        final projectRoot =
-            '$knownRoot/$stem-${DateTime.now().millisecondsSinceEpoch}';
+        var knownRoot = state.knownProjectsRoot ?? _projectsRoot;
+        final folderName = '$stem-${DateTime.now().millisecondsSinceEpoch}';
+        var projectRoot = '$knownRoot/$folderName';
         late final JsonMap linked;
         var projectCreated = false;
         try {
-          await session.createProject(name: stem, rootPath: projectRoot);
+          try {
+            await session.createProject(name: stem, rootPath: projectRoot);
+          } on EngineException catch (error) {
+            final fallback = fallbackProjectsRoot(Platform.environment);
+            if (!const {'FILE_NOT_FOUND', 'FILE_ACCESS_DENIED'}.contains(error.code) ||
+                canonicalProjectPath(knownRoot) == canonicalProjectPath(fallback)) {
+              rethrow;
+            }
+            // 默认目录被安全软件拦截、或「视频」文件夹失效时建不了项目，改存到应用数据目录。
+            final fallbackUsedBefore = Directory(fallback).existsSync();
+            final failedRoot = knownRoot;
+            knownRoot = fallback;
+            projectRoot = '$knownRoot/$folderName';
+            await session.createProject(name: stem, rootPath: projectRoot);
+            if (!fallbackUsedBefore) {
+              _pushNotice(
+                '无法在 $failedRoot 新建项目，已改存到 $knownRoot',
+                NoticeSeverity.warning,
+              );
+            }
+          }
           projectCreated = true;
           linked = await session.linkVideo(path);
           projectCreatedForRecent = true;

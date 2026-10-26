@@ -1,5 +1,6 @@
 // test/providers/project_state_test.dart
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart' show Rect;
@@ -53,6 +54,54 @@ void main() {
   });
 
   group('ProjectNotifier.selectVideo', () {
+    ProviderContainer containerFor(_FakeProjectSession session) {
+      final container = ProviderContainer(
+        overrides: <Override>[
+          projectSessionProvider.overrideWithValue(session),
+          engineBootstrapProvider.overrideWith(_StubEngineBootstrap.new),
+        ],
+      );
+      addTearDown(container.dispose);
+      return container;
+    }
+
+    test('默认项目目录建不了项目时改存到应用数据目录', () async {
+      final fakeSession = _FakeProjectSession()
+        ..createProjectErrors.add(
+          const EngineException('FILE_NOT_FOUND', r'D:\Videos\BasketballProjects'),
+        );
+      final container = containerFor(fakeSession);
+
+      await container.read(projectProvider.notifier).selectVideo('/path/sample.mp4');
+
+      final fallback = fallbackProjectsRoot(Platform.environment);
+      expect(fakeSession.createdProjectRoots, hasLength(2));
+      expect(fakeSession.createdProjectRoots.first, isNot(startsWith(fallback)));
+      expect(fakeSession.createdProjectRoots.last, startsWith('$fallback/sample-'));
+      expect(
+        fakeSession.createdProjectRoots.first.split('/').last,
+        fakeSession.createdProjectRoots.last.split('/').last,
+      );
+      final state = container.read(projectProvider);
+      expect(state.knownProjectsRoot, fallback);
+      expect(state.video?['id'], 'vid-1');
+    });
+
+    test('其它建项目错误不换目录，照常报错', () async {
+      final fakeSession = _FakeProjectSession()
+        ..createProjectErrors.add(const EngineException('DISK_FULL', 'No space left'));
+      final container = containerFor(fakeSession);
+
+      await container.read(projectProvider.notifier).selectVideo('/path/sample.mp4');
+
+      expect(fakeSession.createdProjectRoots, hasLength(1));
+      expect(container.read(projectProvider).video, isNull);
+      expect(
+        container.read(noticeProvider).map((notice) => notice.title),
+        contains('磁盘空间不足'),
+      );
+    });
+
     test(
       '更新 videoPath/previewPath,自动 ROI 失败时记录 roiSuggestionError,push 成功 notice',
       () async {
@@ -1072,6 +1121,8 @@ class _FakeProjectSession extends ProjectSession {
   bool returnRoiSuggestion = false;
   int loadRecentProjectsCalls = 0;
   List<JsonMap> recentProjects = <JsonMap>[];
+  final List<String> createdProjectRoots = <String>[];
+  final List<EngineException> createProjectErrors = <EngineException>[];
 
   void seedCandidates(List<JsonMap> seed) {
     _candidates
@@ -1086,6 +1137,8 @@ class _FakeProjectSession extends ProjectSession {
     String? projectId,
     String language = 'zh-CN',
   }) async {
+    createdProjectRoots.add(rootPath);
+    if (createProjectErrors.isNotEmpty) throw createProjectErrors.removeAt(0);
     startAnalysisCalls++;
     return <String, dynamic>{
       'job': <String, dynamic>{'id': 'start-job', 'state': 'queued'},
