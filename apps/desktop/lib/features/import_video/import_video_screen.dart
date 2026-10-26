@@ -1887,9 +1887,8 @@ class _DetectionStepState extends ConsumerState<_DetectionStep> {
       _lastSyncedMs = target;
       if (mounted) setState(() => _playerReady = true);
     } catch (_) {
-      // 播放器创建/打开失败时回退到引擎抽帧预览。
-      _player = null;
-      _controller = null;
+      // 打开失败或等媒体就绪超时，回退到引擎抽帧预览。保留播放器实例：重新打开时
+      // 复用，组件卸载时由 dispose() 释放；直接置空会让这个实例永远不被释放。
       if (mounted) setState(() => _playerReady = false);
     }
   }
