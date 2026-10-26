@@ -1510,7 +1510,7 @@ String _formatBytes(int bytes) {
   return '${(bytes / 1024).toStringAsFixed(0)} KB';
 }
 
-/// 临时诊断层：显示播放器上报的真实尺寸，用来判断竖拍视频的纹理方向。
+/// 临时诊断层：显示播放器上报的媒体显示尺寸（不是原生纹理缓冲的尺寸），用来排查竖拍视频的方向。
 ///
 /// 只在 `--dart-define BHE_DEBUG_VIDEO=true` 构建时出现。
 class _VideoProbe extends StatelessWidget {
@@ -1545,8 +1545,8 @@ class _VideoProbe extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                 child: Text(
-                  'tex ${width}x$height  rot=$rotation  '
-                  'texAR=${ratio.toStringAsFixed(2)}  '
+                  'media ${width}x$height  rot=$rotation  '
+                  'mediaAR=${ratio.toStringAsFixed(2)}  '
                   'frameAR=${aspectRatio.toStringAsFixed(2)}',
                   style: const TextStyle(color: Colors.white, fontSize: 11),
                 ),

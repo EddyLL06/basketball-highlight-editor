@@ -15,14 +15,16 @@ import 'package:media_kit_video/media_kit_video.dart';
 /// else { width = dh; height = dw; }   // 90 / 270 度
 /// ```
 ///
-/// 但纹理内存仍是编码方向的布局。于是播放器对外声称「我是 1512×720 的横向
-/// 画面」，实际内容却是竖的 720×1512。`FittedBox` 按 1512 的宽度去采样，
-/// 越界后得到重复的像素——界面上表现为画面被拉伸、上下重复两遍。
+/// **以下根因是待验证的推测，Windows 上画面仍不正常。**推测纹理内存仍是编码方向的
+/// 布局：播放器对外声称「我是 1512×720 的横向画面」，实际内容却是竖的 720×1512，
+/// 采样越界后得到重复的像素——界面上表现为画面被拉伸、上下重复两遍。
+/// 但 `aspectRatio` 只改包裹 `Texture` 的 `SizedBox`，不改 Windows 原生缓冲的宽高
+/// 和行跨度；另一条待查线索是 media_kit_video 2.0.1 `windows/video_output.cc`
+/// 把 32 位的 `pitch` 地址传给要求 `size_t*` 的 `MPV_RENDER_PARAM_SW_STRIDE`。
 ///
-/// ## 修法
+/// ## 当前做法
 ///
-/// 1. 用 [Video] 的 `aspectRatio` 覆盖掉谎报的 rect，按**编码方向**的真实比例
-///    排版，纹理就不再被越界采样；
+/// 1. 用 [Video] 的 `aspectRatio` 覆盖播放器上报的 rect，按**编码方向**的比例排版；
 /// 2. 外层用 [RotatedBox] 把画面转到显示方向；
 /// 3. 外框在上游已按显示方向算好比例，转正后正好铺满。
 class OrientedVideo extends StatelessWidget {
