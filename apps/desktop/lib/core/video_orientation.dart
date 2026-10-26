@@ -56,12 +56,10 @@ class OrientedVideo extends StatelessWidget {
     // 编码方向（纹素真实布局）的宽高比。
     final sourceAspectRatio = _sourceAspectRatioFor(displayAspectRatio, turns);
     if (turns == 0) {
-      return Video(
-        controller: c,
-        fit: fit,
-        controls: NoVideoControls,
-        aspectRatio: sourceAspectRatio,
-      );
+      // 不转向时按播放器上报的尺寸排版：Windows 软件渲染会把 4:3 等非 16:9
+      // 画面塞进带黑边的 1920×1080 纹理，调用方用 cover 裁掉黑边，这里不能
+      // 再强制比例，否则黑边露出来、画面和检测框对不齐。
+      return Video(controller: c, fit: fit, controls: NoVideoControls);
     }
     final child = Video(
       controller: c,

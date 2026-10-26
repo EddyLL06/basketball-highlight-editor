@@ -3115,16 +3115,17 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
                       children: [
                         Positioned.fill(
                           child: IgnorePointer(
-                            // 框已按显示方向算好比例。手机竖拍的源带 rotation,
-                            // Windows 软渲染不会自动转正,这里补上;转正后比例
-                            // 与框一致,contain 不会裁掉画面。
+                            // 框已是视频的显示比例。Windows 软件渲染的纹理比例
+                            // 可能不对、里面带黑边,cover 正好把黑边裁掉;带
+                            // rotation 的源在 Windows 上不会自动转正,交给
+                            // OrientedVideo 处理。
                             child: OrientedVideo(
                               controller: controller,
                               rotation: playerAppliesRotation()
                                   ? 0
                                   : widget.rotation,
                               displayAspectRatio: widget.aspectRatio,
-                              fit: BoxFit.contain,
+                              fit: BoxFit.cover,
                             ),
                           ),
                         ),
@@ -3948,15 +3949,17 @@ class _RoiCanvasState extends State<_RoiCanvas> {
                             children: [
                               if (widget.videoController != null)
                                 Positioned.fill(
-                                  // 竖拍的源在 Windows 上纹理不会自动转正,
-                                  // 交给 OrientedVideo 处理,检测框才和画面对齐。
+                                  // 框已是视频比例。Windows 软件渲染的纹理比例
+                                  // 可能不对、里面带黑边,cover 正好把黑边裁掉,
+                                  // 画面才和检测框对齐;带 rotation 的源在
+                                  // Windows 上不会自动转正,交给 OrientedVideo。
                                   child: OrientedVideo(
                                     controller: widget.videoController,
                                     rotation: playerAppliesRotation()
                                         ? 0
                                         : widget.rotation,
                                     displayAspectRatio: widget.aspectRatio,
-                                    fit: BoxFit.contain,
+                                    fit: BoxFit.cover,
                                   ),
                                 )
                               else if (widget.previewPath != null &&
