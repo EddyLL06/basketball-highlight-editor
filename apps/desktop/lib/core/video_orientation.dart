@@ -1,6 +1,7 @@
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 /// 播放器画面的方向修正。
@@ -124,6 +125,38 @@ int rotationQuarterTurns(int rotation) {
 
 /// 播放器是否已经把画面转正。
 ///
-/// 只有 Windows 需要 [OrientedVideo] 兜底：media_kit 在那儿只交换宽高、
-/// 不转纹理。其它平台交给播放器自己处理。
+/// Windows 上关了硬件加速，mpv 软件渲染不处理旋转，要由 [OrientedVideo] 转正（见
+/// [matchPlayerToSourceRotation]）；其它平台交给播放器自己处理。
 bool playerAppliesRotation() => !Platform.isWindows;
+
+/// 打开带旋转角的视频之前调用（播放器会在片源之间复用，每次 open 前都要调）。
+///
+/// Windows 上关了硬件加速，mpv 的软件渲染不处理旋转：90/270 度时 media_kit 按转正后的
+/// 尺寸分配缓冲区，mpv 却按未转的画面裁剪，越界后画面错位、左右重复、带绿边；180 度则
+/// 原样不转（头下脚上）。这里让 mpv 按编码方向输出，由 [OrientedVideo] 在 Flutter 里转正。
+/// 输出尺寸也自己算：media_kit 软件渲染把纹理限在 1920×1080 内，竖的画面按
+/// `width / height` 整数相除会算出宽度 0。
+Future<void> matchPlayerToSourceRotation(
+  Player player,
+  VideoController controller, {
+  required int rotation,
+  required double? displayAspectRatio,
+}) async {
+  if (playerAppliesRotation()) return;
+  final native = player.platform;
+  if (native is! NativePlayer) return;
+  final turns = rotationQuarterTurns(rotation);
+  await native.setProperty('video-rotate', turns == 0 ? '0' : 'no');
+  final aspect = sourceAspectRatio(displayAspectRatio, turns);
+  if (turns == 0 || aspect == null) {
+    await controller.setSize();
+    return;
+  }
+  final size = softwareOutputSize(aspect);
+  await controller.setSize(width: size.width, height: size.height);
+}
+
+/// 编码方向的画面在 media_kit 软件渲染上限（1920×1080）内等比放下的尺寸。
+({int width, int height}) softwareOutputSize(double aspect) => aspect >= 1920 / 1080
+    ? (width: 1920, height: (1920 / aspect).round())
+    : (width: (1080 * aspect).round(), height: 1080);

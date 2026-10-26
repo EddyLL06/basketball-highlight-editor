@@ -62,4 +62,18 @@ void main() {
       expect(sourceAspectRatio(-1, 1), isNull);
     });
   });
+
+  group('softwareOutputSize（Windows 软件渲染的输出尺寸）', () {
+    test('竖拍 720x1512 等比放进 1080 高，不再被整数除法算成宽 0', () {
+      expect(softwareOutputSize(720 / 1512), (width: 514, height: 1080));
+    });
+
+    test('比 16:9 还宽的画面以 1920 宽为准', () {
+      expect(softwareOutputSize(1512 / 720), (width: 1920, height: 914));
+    });
+
+    test('4:3 画面以 1080 高为准', () {
+      expect(softwareOutputSize(4 / 3), (width: 1440, height: 1080));
+    });
+  });
 }

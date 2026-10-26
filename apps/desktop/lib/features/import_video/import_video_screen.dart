@@ -1877,6 +1877,12 @@ class _DetectionStepState extends ConsumerState<_DetectionStep> {
         }
         setState(() => _playing = playing);
       });
+      await matchPlayerToSourceRotation(
+        _player!,
+        _controller!,
+        rotation: widget.rotation,
+        displayAspectRatio: widget.aspectRatio,
+      );
       await _player!.open(Media(Uri.file(path).toString()), play: false);
       await waitForPlayableDuration(
         current: _player!.state.duration,
@@ -2990,6 +2996,12 @@ class _AnalysisRangeEditorState extends ConsumerState<_AnalysisRangeEditor> {
       }
     });
     try {
+      await matchPlayerToSourceRotation(
+        player,
+        _controller!,
+        rotation: widget.rotation,
+        displayAspectRatio: widget.aspectRatio,
+      );
       await player.open(Media(Uri.file(path).toString()), play: false);
       _playbackRequested = false;
       await player.pause();

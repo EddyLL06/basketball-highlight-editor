@@ -14,6 +14,7 @@ import '../feedback/feedback_dialog.dart';
 import '../../components/cs_button.dart';
 import '../../components/cs_empty_state.dart';
 import '../../components/cs_progress_track.dart';
+import '../../core/video_orientation.dart';
 import '../../providers/player_groups_provider.dart';
 import '../../providers/project_state.dart';
 import '../../providers/playback_coordinator.dart';
@@ -509,6 +510,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       (dialogContext) => _ClipRangeDialog(
         videoPath: ref.read(projectProvider).videoPath,
         frameSize: _videoFrameSize(ref.read(projectProvider).video),
+        rotation: _videoRotation(ref.read(projectProvider).video),
         startMs: _clipStart(candidate),
         endMs: clipEnd,
         defaultStartMs: candidate['default_start_ms'] == null
@@ -547,6 +549,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       (dialogContext) => _ClipRangeDialog(
         videoPath: state.videoPath,
         frameSize: _videoFrameSize(state.video),
+        rotation: _videoRotation(state.video),
         startMs: startMs,
         endMs: endMs,
         durationMs: durationMs,
@@ -804,6 +807,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     sourceSwitchToken: _videoSourceSwitchToken,
                     replayToken: _replayToken,
                     frameSize: _videoFrameSize(state.video),
+                    rotation: _videoRotation(state.video),
                     hasPrevious: _candidateIndex(candidates, selected) > 0,
                     hasNext:
                         _candidateIndex(candidates, selected) <
@@ -1460,6 +1464,7 @@ class _VideoPane extends ConsumerStatefulWidget {
     required this.sourceSwitchToken,
     required this.replayToken,
     required this.frameSize,
+    this.rotation = 0,
     required this.hasPrevious,
     required this.hasNext,
     required this.onPrevious,
@@ -1488,6 +1493,7 @@ class _VideoPane extends ConsumerStatefulWidget {
   final int sourceSwitchToken;
   final int replayToken;
   final Size frameSize;
+  final int rotation;
   final bool hasPrevious;
   final bool hasNext;
   final VoidCallback onPrevious;
@@ -1832,6 +1838,15 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
         });
         return;
       }
+      final controller = _controller;
+      if (controller != null) {
+        await matchPlayerToSourceRotation(
+          player,
+          controller,
+          rotation: widget.rotation,
+          displayAspectRatio: widget.frameSize.width / widget.frameSize.height,
+        );
+      }
       await player.open(Media(Uri.file(path).toString()), play: false);
       if (!_isCurrent(generation)) return;
       await waitForPlayableDuration(
@@ -2089,10 +2104,16 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
                           fit: StackFit.expand,
                           children: [
                             IgnorePointer(
-                              child: Video(
+                              // 带 rotation 的原视频在 Windows 上要自己转正。
+                              child: OrientedVideo(
                                 controller: controller,
+                                rotation: playerAppliesRotation()
+                                    ? 0
+                                    : widget.rotation,
+                                displayAspectRatio:
+                                    widget.frameSize.width /
+                                    widget.frameSize.height,
                                 fit: BoxFit.cover,
-                                controls: NoVideoControls,
                               ),
                             ),
                             if (_showAnnotations && widget.candidate != null)
@@ -3799,6 +3820,7 @@ class _ClipRangeDialog extends StatefulWidget {
   const _ClipRangeDialog({
     required this.videoPath,
     required this.frameSize,
+    this.rotation = 0,
     required this.startMs,
     required this.endMs,
     required this.durationMs,
@@ -3812,6 +3834,7 @@ class _ClipRangeDialog extends StatefulWidget {
 
   final String? videoPath;
   final Size frameSize;
+  final int rotation;
   final int startMs;
   final int endMs;
   final int durationMs;
@@ -3914,6 +3937,12 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
           unawaited(player.pause());
         }
       });
+      await matchPlayerToSourceRotation(
+        player,
+        _controller!,
+        rotation: widget.rotation,
+        displayAspectRatio: widget.frameSize.width / widget.frameSize.height,
+      );
       await player.open(Media(Uri.file(path).toString()), play: false);
       // 等媒体元数据就绪后再 seek:open 后立即 seek 在加载较慢时
       // (Windows 软件解码)会被丢弃,导致播放从 0 开始而非片段起点。
@@ -4333,12 +4362,18 @@ class _ClipRangeDialogState extends State<_ClipRangeDialog> {
                                   : null,
                               child: MouseRegion(
                                 cursor: SystemMouseCursors.click,
-                                child: Video(
+                                child: OrientedVideo(
                                   controller: controller,
                                   // 框已是视频比例。Windows 软件渲染的纹理比例
-                                  // 可能不对、里面带黑边,cover 正好把黑边裁掉。
+                                  // 可能不对、里面带黑边,cover 正好把黑边裁掉;
+                                  // 带 rotation 的原视频在 Windows 上要自己转正。
+                                  rotation: playerAppliesRotation()
+                                      ? 0
+                                      : widget.rotation,
+                                  displayAspectRatio:
+                                      widget.frameSize.width /
+                                      widget.frameSize.height,
                                   fit: BoxFit.cover,
-                                  controls: NoVideoControls,
                                 ),
                               ),
                             ),
@@ -6827,6 +6862,9 @@ double _number(dynamic value) {
   if (value is num) return value.toDouble();
   return double.tryParse('$value') ?? 0.0;
 }
+
+int _videoRotation(Map<String, dynamic>? video) =>
+    (video?['rotation'] as num?)?.toInt() ?? 0;
 
 Size _videoFrameSize(Map<String, dynamic>? video) {
   final width = _number(video?['width']);
