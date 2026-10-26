@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import os
 import statistics
 import sys
 import time
@@ -21,7 +22,7 @@ from cache_io import read_json_cache, write_json_cache
 
 
 DETECTION_CACHE_VERSION = "python-v2.5-white-net-region"
-ALGORITHM_VERSION = "python-v2.14-white-net-trajectory"
+ALGORITHM_VERSION = "python-v2.15-crop-scale-clamp"
 REFINED_SCHEMA_VERSION = 3
 
 
@@ -241,6 +242,12 @@ def main(args):
                 "window": args.window,
                 "sample_fps": args.sample_fps,
                 "scale": args.scale,
+                # 和 refine_candidates.scan_window 一致的实际放大倍数，见 scan_video.py。
+                "crop_scale": (
+                    float(args.scale)
+                    if os.environ.get("BHE_CROP_SCALE_COMPAT") == "1"
+                    else effective_crop_scale(args.roi, args.scale)
+                ),
                 "conf": args.conf,
                 "batch": args.batch,
                 "rim": rim,

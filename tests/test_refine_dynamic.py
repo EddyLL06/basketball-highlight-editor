@@ -44,6 +44,7 @@ def test_main_does_not_load_yolo_when_all_detection_caches_hit(tmp_path, monkeyp
         "window": 2.5,
         "sample_fps": 30,
         "scale": 2,
+        "crop_scale": 2.0,
         "conf": 0.1,
         "batch": 8,
         "rim": scaled_rim,
@@ -255,6 +256,7 @@ def test_scan_video_cache_hit_skips_video_and_model_loading(tmp_path, monkeypatc
         "duration": args.duration,
         "time_offset": args.time_offset,
         "scale": args.scale,
+        "crop_scale": 3.2,  # 200 宽的 ROI 放大到 640，低于请求的 4 倍
         "batch": args.batch,
         "conf": args.conf,
     }, sort_keys=True).encode()).hexdigest()

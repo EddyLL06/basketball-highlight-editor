@@ -106,6 +106,8 @@ def scan_video(args):
             "duration": args.duration,
             "time_offset": args.time_offset,
             "scale": args.scale,
+            # 实际放大倍数：#9 起按裁切尺寸钳制，兼容开关又会改回旧倍数，都不能共用缓存。
+            "crop_scale": crop_scale,
             "batch": args.batch,
             "conf": args.conf,
         }, sort_keys=True).encode()).hexdigest()

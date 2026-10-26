@@ -48,7 +48,7 @@ from basketball_highlight.rim_check import RIM_CHECK_VERSION
 from basketball_highlight.tracking import link_ball_detections
 
 
-ANALYSIS_ALGORITHM_VERSION = "python-v2.14-white-net-trajectory"
+ANALYSIS_ALGORITHM_VERSION = "python-v2.15-crop-scale-clamp"
 
 
 class EngineService:
