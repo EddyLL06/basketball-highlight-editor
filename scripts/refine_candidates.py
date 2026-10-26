@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+import os
 import sys
 import time
 from collections import deque
@@ -12,6 +13,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from basketball_highlight.events import find_refined_crossings
+from basketball_highlight.roi import effective_crop_scale
 from basketball_highlight.sampling import canonical_sample_times, first_frame_index
 
 
@@ -23,7 +25,9 @@ def parse_args():
     parser.add_argument("--roi", nargs=4, type=int, metavar=("X1", "Y1", "X2", "Y2"), required=True)
     parser.add_argument("--window", type=float, default=1.5)
     parser.add_argument("--sample-fps", type=float, default=30)
-    parser.add_argument("--scale", type=int, default=4)
+    parser.add_argument("--scale", type=int, default=4,
+                        help="Crop enlargement ceiling before the 640 letterbox; "
+                             "clamped so the crop never exceeds the model input.")
     parser.add_argument("--conf", type=float, default=0.2)
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--net-roi", nargs=4, type=int, metavar=("X1", "Y1", "X2", "Y2"))
@@ -134,6 +138,11 @@ def scan_window(
     net_roi=None,
 ):
     x1, y1, x2, y2 = roi
+    crop_scale = effective_crop_scale(roi, scale)
+    # Troubleshooting-only escape hatch back to the pre-clamp behaviour.  Not
+    # exposed in the settings UI and not a supported user option.
+    if os.environ.get("BHE_CROP_SCALE_COMPAT") == "1":
+        crop_scale = float(scale)
     cap = cv2.VideoCapture(str(video))
     if not cap.isOpened():
         raise RuntimeError(f"Unable to open video: {video}")
@@ -212,10 +221,10 @@ def scan_window(
                     continue
                 bx1, by1, bx2, by2 = box.xyxy[0].tolist()
                 coords = [
-                    x1 + bx1 / scale,
-                    y1 + by1 / scale,
-                    x1 + bx2 / scale,
-                    y1 + by2 / scale,
+                    x1 + bx1 / crop_scale,
+                    y1 + by1 / crop_scale,
+                    x1 + bx2 / crop_scale,
+                    y1 + by2 / crop_scale,
                 ]
                 detections.append({
                     "name": name,
@@ -314,8 +323,9 @@ def scan_window(
             zone_values["net_whole_signal_score"] = round(
                 _clamp01(max(signals, default=0.0)), 4,
             )
-        if scale != 1:
-            crop = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        if crop_scale != 1:
+            crop = cv2.resize(crop, None, fx=crop_scale, fy=crop_scale,
+                              interpolation=cv2.INTER_CUBIC)
         pending_crops.append(crop)
         pending_meta.append({
             "frame": frame_index,
@@ -371,6 +381,7 @@ def main(args):
         "roi": roi,
         "window": args.window,
         "sample_fps": args.sample_fps,
+        "effective_scale": round(effective_crop_scale(roi, args.scale), 4),
         "batch": args.batch,
         "results": refined,
         "elapsed_seconds": round(time.perf_counter() - started, 3),

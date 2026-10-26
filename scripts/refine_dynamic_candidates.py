@@ -15,6 +15,7 @@ from basketball_highlight.inference import (
     select_device as resolve_device,
 )
 from basketball_highlight.ranking import dedupe_candidates
+from basketball_highlight.roi import effective_crop_scale
 from basketball_highlight.tracking import link_ball_detections
 from cache_io import read_json_cache, write_json_cache
 
@@ -395,6 +396,7 @@ def main(args):
         "proxy_scale": args.proxy_scale,
         "window": args.window,
         "sample_fps": args.sample_fps,
+        "effective_scale": round(effective_crop_scale(args.roi, args.scale), 4),
         "min_score": args.min_score,
         "batch": args.batch,
         "cache_dir": str(args.cache_dir) if args.cache_dir else None,
