@@ -8,7 +8,10 @@
 
 [🏠 Website](https://bhe.jafir.top/en/) · [⬇ Download](https://bhe.jafir.top/en/#download) · [Getting started](#quick-start-desktop) · [Features](#features) · [Documentation](#documentation)
 
-![BHE review screen: the clip plays on the left, the candidate list is on the right](docs/assets/demo-review.gif)
+▶ **Demo video:**
+
+https://github.com/user-attachments/assets/43bfed76-bbc6-42c2-bbaa-ea2bf0604292
+
 
 > A local tool for detecting basketball scoring candidates, reviewing them manually, and exporting highlight clips from fixed-camera game videos.
 
@@ -16,16 +19,6 @@
 [![License](https://img.shields.io/github/license/fly7632785/basketball-highlight-editor?style=flat-square)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Android%20%7C%20iOS-4c6ef5?style=flat-square)
 ![Local first](https://img.shields.io/badge/operation-local--first-2ea44f?style=flat-square)
-
-## What it supports
-
-| Works well | Not yet |
-|---|---|
-| Fixed-camera game video with a steady picture and a clear rim | Large camera moves or a blocked rim: review the results carefully |
-| One hoop per video | Several hoops in the same frame (for example full-court footage of both baskets) |
-| Analysis on macOS, Windows and Android | iPhone / iPad can play, review and export, but cannot analyze on the device yet |
-| Several clips of one game in a single project (desktop) | Cloud processing: everything runs on your own computer or phone |
-
 
 ## The problem BHE is meant to solve
 
@@ -37,46 +30,53 @@ Cloud editors can make this trade-off even less appealing: large videos take tim
 
 ## What it saves you
 
-### Less time searching
-
-Instead of watching the entire game just to find a handful of scores, BHE scans the video and presents a shortlist of suspected scoring moments.
-
-### Less repetitive work
-
-Candidates are kept by default. In most cases, you remove false positives and adjust a few seconds rather than confirming every item one by one.
-
-### No upload and no subscription
-
-Analysis, preview, review, and export run locally by default. There is no account, online API, video-length billing, or export quota.
-
-### A draft, not a black box
-
-You can keep or exclude candidates, change their boundaries, add notes, tag players or scenes, and add a missed moment manually. The exported result is always yours to decide.
-
-## Project status
-
-**Current version: V1 desktop preview.** GitHub Actions builds downloadable packages for Intel macOS, Apple Silicon macOS, Windows x64, and Android `arm64-v8a` whenever a `v*` tag is pushed. The Android APK is `debug-signed` for sideloaded testing, not a Google Play production package. Desktop is the primary product path. Mobile is an independent experimental app: Android has a native analysis path, while iOS local AI analysis still requires the final Rust/ONNX Runtime artifacts to be linked.
-
-| Target | Status | Intended use |
-|---|---|---|
-| macOS Desktop | Primary path; complete import → analysis → review → export loop | Local long-video processing |
-| Windows Desktop | Compatibility path with runtime and packaging scripts; release validation is still pending | Development and experiments |
-| Android Mobile | Independent Flutter app; native frame extraction, Rust/ONNX analysis, review, and export are integrated; `arm64-v8a` is the current validation target | Mobile analysis and review experiments |
-| iOS Mobile | Project, playback, review, and export are available; local analysis waits for native runtime linking | Mobile UI and media-flow validation |
-
-> **Important:** model weights, input videos, training data, FFmpeg builds, and third-party dependencies do not automatically inherit this project's MIT License. Verify each item before publishing or redistributing it.
+| What you save | How |
+|---|---|
+| **Time** | Instead of watching the entire game just to find a handful of scores, BHE scans the video and presents a shortlist of suspected scoring moments. |
+| **Effort** | Candidates are kept by default. In most cases, you remove false positives and adjust a few seconds rather than confirming every item one by one. |
+| **Upload and subscription** | Analysis, preview, review, and export run locally by default. There is no account, online API, video-length billing, or export quota. |
+| **Control** | A draft, not a black box: you can keep or exclude candidates, change their boundaries, add notes, tag players or scenes, and add a missed moment manually. The exported result is always yours to decide. |
 
 ## Features
 
-- Import a video and inspect duration, resolution, frame rate, codecs, and file size; the source video is referenced rather than copied by default.
-- Automatically suggest a hoop ROI (region of interest), with manual drawing and adjustment as a fallback.
-- Standard and Fast analysis modes: Standard favors quality; Fast favors shorter processing time and may miss events.
-- Show analysis stages, progress, and elapsed time; support cancellation, retry, and interrupted-job discovery after restart.
-- Review the source video, navigate candidates, keep or exclude them, add notes, adjust ranges, and add manual candidates.
-- Candidates are included by default; only excluded candidates are left out of export, so users do not have to confirm every item individually.
-- Put several videos of the same game into one project: they are ordered by recording time, analyzed one after another in a queue, and reviewed and exported together.
-- Export clips separately or merge them in event-time order; persist export history and statistics.
-- Use SQLite on desktop for project, ROI, candidate, review, job, and export state.
+| Stage | Feature | What it does |
+|---|---|---|
+| **Find** | Scoring candidates | Scans fixed-camera, single-hoop game video and suggests the moments that look like made baskets |
+| | Hoop area | Suggests the hoop ROI (region of interest) automatically, with manual drawing and adjustment as a fallback |
+| | Standard and Fast modes | Standard favors quality; Fast favors shorter processing time and may miss events |
+| | Several videos per game | Put several videos of the same game into one project: ordered by recording time, analyzed one after another, and reviewed and exported together |
+| | Progress | Shows analysis stages, progress and elapsed time; supports cancellation, retry, and finding interrupted jobs after a restart |
+| **Review** | Review workbench | Review the source video, navigate candidates, keep or exclude them, and add notes |
+| | Included by default | Only excluded candidates are left out of export, so you do not have to confirm every item |
+| | Range editing | Adjust the start and end of each clip, and add a missed moment manually |
+| **Organize** | Tags | Tag players or scenes (three-pointers, dunks, fouls…) and export by tag |
+| **Export** | Two ways | Export clips separately, or merge them in event-time order; one merged video per tag is also possible |
+| | Goal effects | Optional slow motion into the shot, or a slow-motion close-up replay |
+| | Game stats | The export page shows estimated hit rate, goals per player, and goals over time |
+| | History | Export history and statistics are kept with the project |
+| **Under the hood** | Local project data | Desktop keeps project, ROI, candidate, review, job, and export state in SQLite; the source video is referenced rather than copied by default |
+
+## See it in action
+
+The review workbench keeps the video large and the candidates in time order:
+
+![BHE review workbench](capture/screenshot-20260813-150054.png)
+
+This recording walks through importing a video, analyzing candidates, reviewing them, and exporting the result:
+
+[![BHE workflow demo](capture/录制视频封面.jpg)](https://shengshengniannian.oss-cn-beijing.aliyuncs.com/shengshengniannian/basketball-highlight-editor/recording-demo.mp4)
+
+Click the cover to open the recording. The large video is hosted outside the repository so cloning BHE does not download a large demo file.
+
+Candidate and tag management:
+
+![BHE candidate and tag management](capture/screenshot-20260813-150302.png)
+
+After review, you can filter by tag and merge the result or export each clip separately:
+
+![BHE highlight export](capture/screenshot-20260813-150335.png)
+
+For more screens, controls, shortcuts, and the light theme, see [`docs/USER_FLOW_V1.md`](docs/USER_FLOW_V1.md) and [`docs/README.en.md`](docs/README.en.md).
 
 ## A typical session
 
@@ -100,27 +100,27 @@ Merge the reel or export clips by tag
 
 Tags are not limited to player names. Create tags such as `Alex`, `Jordan`, `three-pointer`, `dunk`, `foul`, or `great defense`, then apply them to one or more candidates. You can export a personal highlight reel, a three-point reel, a dunk reel, or the complete game from the same reviewed set.
 
-## See it in action
+## What it supports
 
-The review workbench keeps the video large and the candidates in time order:
+| Works well | Not yet |
+|---|---|
+| Fixed-camera game video with a steady picture and a clear rim | Large camera moves or a blocked rim: review the results carefully |
+| One hoop per video | Several hoops in the same frame (for example full-court footage of both baskets) |
+| Analysis on macOS, Windows and Android | iPhone / iPad can play, review and export, but cannot analyze on the device yet |
+| Several clips of one game in a single project (desktop) | Cloud processing: everything runs on your own computer or phone |
 
-![BHE review workbench](capture/screenshot-20260813-150054.png)
+## Project status
 
-This recording walks through importing a video, analyzing candidates, reviewing them, and exporting the result:
+**Current version: V1 desktop preview.** GitHub Actions builds downloadable packages for Intel macOS, Apple Silicon macOS, Windows x64, and Android `arm64-v8a` whenever a `v*` tag is pushed. The Android APK is `debug-signed` for sideloaded testing, not a Google Play production package. Desktop is the primary product path. Mobile is an independent experimental app: Android has a native analysis path, while iOS local AI analysis still requires the final Rust/ONNX Runtime artifacts to be linked.
 
-[![BHE workflow demo](capture/录制视频封面.jpg)](https://shengshengniannian.oss-cn-beijing.aliyuncs.com/shengshengniannian/basketball-highlight-editor/recording-demo.mp4)
+| Target | Status | Intended use |
+|---|---|---|
+| macOS Desktop | Primary path; complete import → analysis → review → export loop | Local long-video processing |
+| Windows Desktop | Compatibility path with runtime and packaging scripts; release validation is still pending | Development and experiments |
+| Android Mobile | Independent Flutter app; native frame extraction, Rust/ONNX analysis, review, and export are integrated; `arm64-v8a` is the current validation target | Mobile analysis and review experiments |
+| iOS Mobile | Project, playback, review, and export are available; local analysis waits for native runtime linking | Mobile UI and media-flow validation |
 
-Click the cover to open the recording. The large video is hosted outside the repository so cloning BHE does not download a large demo file.
-
-Candidate and tag management:
-
-![BHE candidate and tag management](capture/screenshot-20260813-150302.png)
-
-After review, you can filter by tag and merge the result or export each clip separately:
-
-![BHE highlight export](capture/screenshot-20260813-150335.png)
-
-For more screens, controls, shortcuts, and the light theme, see [`docs/USER_FLOW_V1.md`](docs/USER_FLOW_V1.md) and [`docs/README.en.md`](docs/README.en.md).
+> **Important:** model weights, input videos, training data, FFmpeg builds, and third-party dependencies do not automatically inherit this project's MIT License. Verify each item before publishing or redistributing it.
 
 ## Android and iOS mobile apps
 
@@ -369,7 +369,7 @@ Thank [Linux.do](https://linux.do/)
 
 ---
 
-## Project status
+## Project health
 
 [![Python Tests](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/python-tests.yml?branch=main&style=flat-square&label=Python%20tests)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/python-tests.yml)
 [![Flutter Checks](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/flutter-check.yml?branch=main&style=flat-square&label=Flutter%20checks)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/flutter-check.yml)
