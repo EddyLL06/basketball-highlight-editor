@@ -53,6 +53,8 @@ if ($LASTEXITCODE -ne 0) { Write-Error "runtime check failed" }
 & "$AppRuntime\python\python.exe" "$AppRuntime\scripts\check_media_pipeline.py" --root "$AppRuntime"
 if ($LASTEXITCODE -ne 0) { Write-Error "media pipeline check failed" }
 
+& "$Root\scripts\write_windows_release_inventory.ps1" -Root $ReleaseDir -Version $Version
+
 if ($Zip -or $PackageOut) {
     $Dist = "$Root\dist"
     New-Item -ItemType Directory -Force -Path $Dist | Out-Null

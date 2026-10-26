@@ -106,6 +106,7 @@ String findPython(String runtimeRoot, {required Map<String, String> env}) {
 /// client.start→engine.hello),失败时 state 转为 AsyncError。
 class EngineBootstrapNotifier extends Notifier<AsyncValue<bool>> {
   Future<void>? _ensureInFlight;
+  bool _shuttingDownForUpdate = false;
   int _restartAttempts = 0;
   DateTime? _lastEngineExitAt;
 
@@ -117,6 +118,7 @@ class EngineBootstrapNotifier extends Notifier<AsyncValue<bool>> {
     String? runtimeRootOverride,
     String? pythonExecutableOverride,
   }) {
+    if (_shuttingDownForUpdate) return Future<void>.value();
     final client = ref.read(engineClientProvider);
     if (state.valueOrNull == true && client.isRunning) {
       return Future<void>.value();
@@ -131,6 +133,18 @@ class EngineBootstrapNotifier extends Notifier<AsyncValue<bool>> {
     return future.whenComplete(() {
       if (identical(_ensureInFlight, future)) _ensureInFlight = null;
     });
+  }
+
+  Future<void> shutdownForUpdate() async {
+    _shuttingDownForUpdate = true;
+    // A startup/restart already in flight must finish before disposing it.
+    await _ensureInFlight;
+    await ref.read(engineClientProvider).dispose();
+  }
+
+  Future<void> resumeAfterUpdateFailure() {
+    _shuttingDownForUpdate = false;
+    return ensure();
   }
 
   Future<void> _ensure({
@@ -178,6 +192,7 @@ class EngineBootstrapNotifier extends Notifier<AsyncValue<bool>> {
   /// 上限按时间窗口计:距上次意外退出超过 10 分钟视为新一轮,计数
   /// 重置,避免长会话中偶发崩溃累计到上限后不再自愈。
   void _handleUnexpectedExit(int exitCode, String stderrTail) {
+    if (_shuttingDownForUpdate) return;
     final now = DateTime.now();
     final lastExit = _lastEngineExitAt;
     if (lastExit != null &&

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:bhe_l10n/bhe_l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +12,7 @@ import '../../theme/tokens.dart';
 Future<void> showUpdateDialog(BuildContext context) {
   return showDialog<void>(
     context: context,
+    barrierDismissible: false,
     builder: (_) => const UpdateDialog(),
   );
 }
@@ -50,10 +49,9 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
     final notifier = ref.read(updateProvider.notifier);
     final appVersion = ref.watch(appVersionProvider);
     final project = ref.watch(projectProvider);
-    final busy =
-        project.analysisRunning ||
-        project.exportRunning ||
-        project.analysisQueue.isNotEmpty && !project.queuePaused;
+    final busy = updateBlockedByProject(project);
+    final installing = update.status == UpdateStatus.installing;
+    final canInstall = ref.watch(updateServiceProvider).supportsInstallation;
     final manifest = update.manifest;
     final package = update.package;
     final hasUpdate =
@@ -62,6 +60,7 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
         (update.status == UpdateStatus.available ||
             update.status == UpdateStatus.downloading ||
             update.status == UpdateStatus.ready ||
+            update.status == UpdateStatus.installing ||
             update.status == UpdateStatus.failed);
 
     final body = <Widget>[];
@@ -190,30 +189,56 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
           body.add(
             Text(
               context.bheText(
-                Platform.isWindows
-                    ? '下载完成。退出 BHE，把压缩包解压后替换原来的 BHE 文件夹，再重新打开。项目保存在别的位置，不会丢。'
+                canInstall
+                    ? '下载完成。安装更新会保存当前项目、退出 BHE 并在更新后重新打开。旧版本会保留在原文件夹旁。'
                     : '下载完成。退出 BHE，打开安装包把 BHE 拖进「应用程序」替换旧版本，再重新打开。项目保存在别的位置，不会丢。',
               ),
               style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
             ),
           );
+          if (update.error != null) {
+            body.add(Text(context.bheText('未能自动安装。可重试或打开所在文件夹手动更新。')));
+            body.add(_ErrorText(update.error!));
+          }
           if (busy) {
             body.addAll([
               const SizedBox(height: Spacing.xs),
               Text(
-                context.bheText('现在有分析或导出在进行，等它完成再退出替换。'),
+                context.bheText('请等待当前操作结束后再安装更新'),
                 style: theme.textTheme.bodySmall?.copyWith(color: c.orange),
               ),
             ]);
           }
           actions.add(
-            FilledButton.icon(
+            TextButton.icon(
               key: const Key('update-open'),
               onPressed: notifier.openPackage,
               icon: const Icon(LucideIcons.packageOpen, size: 16),
-              label: Text(
-                context.bheText(Platform.isWindows ? '打开所在文件夹' : '打开安装包'),
+              label: Text(context.bheText(canInstall ? '打开所在文件夹' : '打开安装包')),
+            ),
+          );
+          if (canInstall) {
+            actions.add(
+              FilledButton.icon(
+                key: const Key('update-install'),
+                onPressed: busy ? null : notifier.install,
+                icon: const Icon(LucideIcons.refreshCw, size: 16),
+                label: Text(context.bheText('安装并重启')),
               ),
+            );
+          }
+        case UpdateStatus.installing:
+          body.add(
+            Row(
+              children: [
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: Spacing.sm),
+                Expanded(child: Text(context.bheText('正在准备更新，请稍候…'))),
+              ],
             ),
           );
         default:
@@ -221,50 +246,55 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
       }
     }
 
-    return Dialog(
-      backgroundColor: c.surface,
-      surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(CsRadius.md),
-        side: BorderSide(color: c.borderStrong),
-      ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480),
-        child: Padding(
-          padding: const EdgeInsets.all(Spacing.xl),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(LucideIcons.circleArrowUp, color: c.orange, size: 20),
-                  const SizedBox(width: Spacing.sm),
-                  Expanded(
-                    child: Text(
-                      context.bheText('检查更新'),
-                      style: theme.textTheme.titleMedium,
+    return PopScope(
+      canPop: !installing,
+      child: Dialog(
+        backgroundColor: c.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(CsRadius.md),
+          side: BorderSide(color: c.borderStrong),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Padding(
+            padding: const EdgeInsets.all(Spacing.xl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(LucideIcons.circleArrowUp, color: c.orange, size: 20),
+                    const SizedBox(width: Spacing.sm),
+                    Expanded(
+                      child: Text(
+                        context.bheText('检查更新'),
+                        style: theme.textTheme.titleMedium,
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    tooltip: context.bheText('关闭'),
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(LucideIcons.x, size: 18),
+                    IconButton(
+                      tooltip: context.bheText('关闭'),
+                      onPressed: installing
+                          ? null
+                          : () => Navigator.pop(context),
+                      icon: const Icon(LucideIcons.x, size: 18),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: Spacing.md),
+                ...body,
+                if (actions.isNotEmpty) ...[
+                  const SizedBox(height: Spacing.lg),
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: Spacing.xs,
+                    runSpacing: Spacing.xs,
+                    children: actions,
                   ),
                 ],
-              ),
-              const SizedBox(height: Spacing.md),
-              ...body,
-              if (actions.isNotEmpty) ...[
-                const SizedBox(height: Spacing.lg),
-                Wrap(
-                  alignment: WrapAlignment.end,
-                  spacing: Spacing.xs,
-                  runSpacing: Spacing.xs,
-                  children: actions,
-                ),
               ],
-            ],
+            ),
           ),
         ),
       ),

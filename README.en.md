@@ -153,6 +153,8 @@ See [`apps/mobile/README.md`](apps/mobile/README.md) for mobile builds, device t
 
 BHE is actively maintained, with new releases roughly every week. See [`CHANGELOG.md`](CHANGELOG.md) for the full list of changes.
 
+**In development, not yet released:** Windows one-click updates. Manually download and replace the app once for the first release containing this feature; subsequent releases can use **Install and restart** inside BHE.
+
 | Version | Date | Highlights |
 |---|---|---|
 | v0.1.12 | 2026-10-26 | Export can add a goal effect: slow motion into the shot or a slow-motion close-up replay; the export page shows game stats (estimated hit rate, goals per player, goals over time) and can merge one video per tag; clips now default to 3 s before and 1 s after the goal; Windows can analyze on the GPU and Mac uses CoreML, so analysis is faster; fixed scrambled portrait videos and upside-down iPhone videos on Windows, exports failing without a file extension, and some Windows PCs that could not analyze or create projects |

@@ -9,6 +9,17 @@ permissions:
   contents: read
 
 jobs:
+  windows-updater:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Large Windows PowerShell 5.1 release inventory
+        shell: powershell
+        run: ./scripts/test_windows_update_inventory.ps1
+      - name: Windows updater security and replacement tests
+        shell: powershell
+        run: ./scripts/test_windows_update.ps1
+
   runtime:
     name: Rust runtime
     runs-on: ubuntu-latest

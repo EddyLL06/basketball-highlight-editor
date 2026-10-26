@@ -219,6 +219,39 @@ void main() {
       expect(client.startCalls, 1);
       expect(client.helloCalls, 1);
     });
+
+    test(
+      'update shutdown joins startup and suppresses queued restarts',
+      () async {
+        final client = FakeEngineClient(
+          startDelay: const Duration(milliseconds: 20),
+        );
+        final container = ProviderContainer(
+          overrides: [engineClientProvider.overrideWithValue(client)],
+        );
+        addTearDown(container.dispose);
+        final notifier = container.read(engineBootstrapProvider.notifier);
+        final startup = notifier.ensure(
+          runtimeRootOverride: Directory.systemTemp.path,
+          pythonExecutableOverride: 'python3',
+        );
+        await notifier.shutdownForUpdate();
+        await startup;
+        expect(client.running, isFalse);
+        expect(client.disposeCalls, 1);
+        await notifier.ensure();
+        expect(client.startCalls, 1);
+
+        await notifier.resumeAfterUpdateFailure();
+        expect(client.startCalls, 2);
+        client.running = false;
+        client.onUnexpectedExit!(1, 'synthetic exit');
+        await notifier.shutdownForUpdate();
+        await Future<void>.delayed(const Duration(milliseconds: 1100));
+        expect(client.startCalls, 2);
+        expect(client.running, isFalse);
+      },
+    );
   });
 
   group('themeModeProvider', () {
@@ -271,10 +304,17 @@ class FakeEngineClient extends EngineClient {
   final Duration startDelay;
   int startCalls = 0;
   int helloCalls = 0;
+  int disposeCalls = 0;
   bool running = false;
 
   @override
   bool get isRunning => running;
+
+  @override
+  Future<void> dispose() async {
+    disposeCalls++;
+    running = false;
+  }
 
   @override
   Future<void> start({

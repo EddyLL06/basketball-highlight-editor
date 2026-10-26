@@ -1184,6 +1184,18 @@ const _englishText = <String, String>{
   '下载中断，请检查网络后继续': 'The download was interrupted. Check your network and resume.',
   '安装包校验失败，请重新下载': 'The package failed its checksum. Download it again.',
   '安装更新': 'Install update',
+  '安装并重启': 'Install and restart',
+  '未能自动安装。可重试或打开所在文件夹手动更新。': 'Automatic installation failed. Retry or show the package in its folder to update manually.',
+  '正在准备更新，请稍候…': 'Preparing the update. Please wait…',
+  '请等待当前操作结束后再安装更新':
+      'Wait for the current operation to finish before installing the update.',
+  '退出前保存未完成，请重试': 'Could not save before exiting. Please try again.',
+  '准备更新超时，请打开所在文件夹手动更新':
+      'Update preparation timed out. Show the package in its folder to update manually.',
+  '此平台请手动打开安装包更新': 'Open the installer to update on this platform.',
+  '请在正式发布版 BHE 中安装更新': 'Install updates from a release build of BHE.',
+  '下载完成。安装更新会保存当前项目、退出 BHE 并在更新后重新打开。旧版本会保留在原文件夹旁。':
+      'Download complete. Installing saves your project, closes BHE and reopens it after the update. The previous version is kept beside the app folder.',
   '视频或项目文件夹可能被移动、改名或删除。请确认它还在原来的位置，必要时到导入页重新定位视频。':
       'The video or project folder may have been moved, renamed or deleted. Check that it is still there, and relink the video on the import page if needed.',
   '请确认文件没有被其它程序占用，或者换一个有读写权限的文件夹。':

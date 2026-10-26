@@ -112,6 +112,7 @@ class _CourtsideAppState extends ConsumerState<CourtsideApp>
 
   @override
   void onWindowClose() {
+    if (ref.read(updateProvider).status == UpdateStatus.installing) return;
     unawaited(_confirmWindowClose());
   }
 

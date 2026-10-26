@@ -36,6 +36,7 @@ class EngineClient implements EngineTransport {
   /// 引擎进程意外退出(非 dispose 触发)时回调,携带退出码与 stderr 尾部。
   void Function(int exitCode, String stderrTail)? onUnexpectedExit;
   bool _disposedIntentionally = false;
+  Future<void>? _disposeInFlight;
   Process? _process;
   StreamSubscription<String>? _stdoutSubscription;
   StreamSubscription<String>? _stderrSubscription;
@@ -52,10 +53,14 @@ class EngineClient implements EngineTransport {
     String pythonExecutable = 'python3',
     String? extraPath,
   }) async {
+    await _disposeInFlight;
     if (isRunning) return;
+    _disposedIntentionally = false;
     final environment = Map<String, String>.from(Platform.environment);
     environment['PYTHONPATH'] = enginePythonPath;
     environment['PYTHONIOENCODING'] = 'utf-8';
+    // Keep the packaged runtime read-only; generated files block safe updates.
+    if (Platform.isWindows) environment['PYTHONDONTWRITEBYTECODE'] = '1';
     // 让 Engine 内部的 Python 代码能稳定定位 runtime/bin 下的媒体工具，
     // 不依赖 macOS 从 Finder 启动 App 时不完整的 PATH。
     environment['BHE_RUNTIME_ROOT'] = workingDirectory;
@@ -162,23 +167,32 @@ class EngineClient implements EngineTransport {
     return requestTimeout;
   }
 
-  Future<void> dispose() async {
+  Future<void> dispose() => _disposeInFlight ??= _dispose();
+
+  Future<void> _dispose() async {
     _disposedIntentionally = true;
     final process = _process;
-    _process = null;
-    await _stdoutSubscription?.cancel();
-    await _stderrSubscription?.cancel();
-    _stdoutSubscription = null;
-    _stderrSubscription = null;
-    if (process != null) {
-      try {
-        await process.stdin.close();
-        await process.exitCode.timeout(const Duration(seconds: 6));
-      } on Object {
-        process.kill();
+    try {
+      if (process != null) {
+        // Keep draining stdout/stderr while the service shuts down.
+        try {
+          await process.stdin.close().timeout(const Duration(seconds: 6));
+          await process.exitCode.timeout(const Duration(seconds: 6));
+        } on Object {
+          process.kill();
+          // Returning before exit would let the updater race locked DLLs.
+          await process.exitCode.timeout(const Duration(seconds: 6));
+        }
       }
+      if (identical(_process, process)) _process = null;
+      await _stdoutSubscription?.cancel();
+      await _stderrSubscription?.cancel();
+      _stdoutSubscription = null;
+      _stderrSubscription = null;
+      _closePending(const EngineException('ENGINE_DISPOSED', 'Engine 已关闭'));
+    } finally {
+      _disposeInFlight = null;
     }
-    _closePending(const EngineException('ENGINE_DISPOSED', 'Engine 已关闭'));
   }
 
   Future<void> _enqueueWrite(String line) {

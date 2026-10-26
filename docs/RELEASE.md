@@ -194,6 +194,31 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows_release.ps1 `
 
 Windows 当前属于兼容路径，仍需验证 Flutter 工具链、Python/Torch/OpenCV/Ultralytics、FFmpeg DLL 和安装流程；它不能替代正式安装器、签名和用户验收。
 
+### Windows 应用内安装更新
+
+Windows 下载完成后提供「安装并重启」和「打开所在文件夹」。安装会先在程序目录外启动 PowerShell 助手，重新校验下载包的 SHA-256（文件内容摘要）、大小和目录结构，再解压到安装目录旁的暂存目录。助手就绪后，BHE 保存当前项目、明确等待引擎退出，收到助手接收确认后关闭窗口。助手等待 BHE 进程退出，依次重命名旧目录和新目录，再启动新版。分析、导出或其他操作进行中不能安装。
+
+适用条件与保护范围：
+
+- 仅支持 Windows x64 的便携 ZIP 发布包；使用系统自带 Windows PowerShell 5.1。企业策略禁止脚本时仍可手动更新。
+- `build_windows_release.ps1` 会调用 `write_windows_release_inventory.ps1` 生成 `bhe-release.json`（程序文件清单），再放入 ZIP。**第一次引入此功能的版本仍须手动安装一次**；旧版不能直接获得自动替换能力。
+- 助手检查已安装版和新版文件清单，拒绝额外文件、额外文件夹、符号链接或目录联接。因此项目、视频、自定义模型等个人文件应放在程序目录之外；检查不通过时不会关闭 BHE，也不会替换文件。
+- 安装目录的父目录必须可写，需留出新版解压所需的磁盘空间。不会请求管理员权限；受保护目录请改用可写目录或手动更新。
+- 旧版保留为同级的 `BHE.previous-<32 位十六进制编号>`（实际前缀随安装目录名变化），附带同级的 `.bhe-update.json` 归属记录。下一次更新的新进程通过基础启动检查后，会清理更早的、由本机制创建的备份，只保留本次更新的回退版本。仅名字匹配但没有归属记录、归属不符、含个人文件、存在链接或仍在运行的备份不会删除；清理失败不阻断更新，并记录到 `cleanup.log`。
+- 替换或立即启动失败时尝试恢复并重新打开旧版；若文件仍被占用，则保留旧版目录和错误日志，并提示恢复路径。**进程存活检查不等于功能验收**，不会自动判断分析、导出是否正常。
+- 两次目录重命名之间遇断电或进程被强制结束，仍可能需要人工恢复。关闭相关进程后，保留失败新版，按日志中的 `backup` 路径把旧目录改回原名称。失败流程不会清理旧备份，也不会更改项目数据库。
+
+日志保存在 `%LOCALAPPDATA%\BHE\updates\install-*`：`status.json` 记录阶段与目录，`error.txt` 记录失败原因，`cleanup.log` 记录旧备份清理情况。暂存目录在安装目录旁，正常结束会清理；最近的回退备份、失败新版和中断遗留物保留。空的 `.update.lock` 作为稳定互斥文件保留，防止解锁后删除与另一更新进程重新加锁发生竞争。
+
+自动检查（只使用临时目录中的模拟程序，不操作真实 BHE）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_windows_update.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_windows_update_inventory.ps1
+```
+
+该检查已接入 Windows CI（持续集成，即每次推送或提交审查时自动运行）。上线前仍需在真实 Windows 发布包中验证：中文与空格路径；从版本 A 更新到 B；分析、导出期间禁用安装；程序目录混入项目时拒绝；其他进程占用文件时恢复；关闭窗口失败时保持应用可用；恢复旧版后项目可打开；更新后视频播放、分析和导出正常。
+
 Windows 发布包采用不含 `libx264` 的 LGPL FFmpeg。导出依次尝试硬件编码 `h264_nvenc`（NVIDIA）、`h264_qsv`（Intel）、`h264_amf`（AMD）、`h264_mf`（Media Foundation），再尝试 `libx264`、`libopenh264` 和 `mpeg4`，仅在前一种编码失败时切换；第一个成功的编码器用于同一次导出的后续片段。最后一种使用高质量 MPEG-4 Part 2，仍封装为 MP4，但不保证所有仅支持 H.264 的播放器都能播放。逐片导出与合并失败后的重新编码采用同一规则。代理视频在 Windows 上先用 D3D11VA 显卡解码，失败时回退纯软件解码。打包前运行 `scripts/check_media_pipeline.py --root <runtime>`，实际生成代理、片段和合并视频；检查失败时停止打包。常规 Python CI 也会在 Windows 上用发布包同款 LGPL FFmpeg 执行该检查。
 
 ### 自动发布模式与热修复 tag

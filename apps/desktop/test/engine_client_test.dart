@@ -40,6 +40,46 @@ void _writeFakeEngine(Directory directory, String mainSource) {
 
 void main() {
   test(
+    'dispose waits for graceful engine exit and supports a later restart',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('bhe-engine-');
+      addTearDown(() => directory.delete(recursive: true));
+      _writeFakeEngine(directory, '''
+import json, sys, time
+from pathlib import Path
+for line in sys.stdin:
+    request = json.loads(line)
+    print(json.dumps({"request_id": request["request_id"], "ok": True, "payload": {}}), flush=True)
+time.sleep(0.2)
+Path("exited.txt").write_text("exited")
+''');
+      var unexpectedExits = 0;
+      final client = EngineClient(
+        onUnexpectedExit: (_, _) => unexpectedExits++,
+      );
+      addTearDown(client.dispose);
+      Future<void> start() => client.start(
+        workingDirectory: directory.path,
+        enginePythonPath: directory.path,
+        pythonExecutable: _resolvePython(),
+      );
+      await start();
+      await client.request('hello', {});
+      final closing = client.dispose();
+      expect(identical(closing, client.dispose()), isTrue);
+      await closing;
+      expect(File('${directory.path}/exited.txt').existsSync(), isTrue);
+      expect(client.isRunning, isFalse);
+      expect(unexpectedExits, 0);
+      await start();
+      expect(client.isRunning, isTrue);
+      await client.request('hello', {});
+      await client.dispose();
+      expect(unexpectedExits, 0);
+    },
+  );
+
+  test(
     'matches out-of-order preview and player responses by request id',
     () async {
       final directory = await Directory.systemTemp.createTemp('bhe-engine-');

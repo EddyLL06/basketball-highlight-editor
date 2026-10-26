@@ -194,6 +194,28 @@ The script creates `dist\BHE-windows-x64-v0.1.0-alpha.3.zip` and its `.sha256` c
 
 Windows remains a compatibility path. Validate the Flutter toolchain, Python/Torch/OpenCV/Ultralytics, FFmpeg DLLs, and installation flow; these scripts are not a formal installer or signing process.
 
+### Installing updates inside the Windows app
+
+After downloading, Windows offers **Install and restart** alongside **Show in folder**. A separate Windows PowerShell 5.1 helper verifies the package size, SHA-256 and archive paths, then extracts beside the installation. Once the helper is ready, BHE saves the project, waits for the engine to exit, obtains the helper's acceptance and closes. The helper waits for BHE to exit, renames the old and staged directories, then launches the new version. Installation is disabled during analysis, export or another operation.
+
+- `build_windows_release.ps1` generates `bhe-release.json` using `write_windows_release_inventory.ps1`. **The first version introducing this feature must still be installed manually.** Subsequent releases must include the inventory too.
+- Both release trees are checked against their inventories. Extra files/folders and links stop installation before closing BHE. Keep projects, videos and custom models outside the app directory.
+- The installation's parent must be writable and have space for the unpacked release. No elevation is requested. Restricted folders or enterprise script policies may require manual installation.
+- The previous release remains beside the installation as `BHE.previous-<32-hex-id>` with a sibling `.bhe-update.json` ownership receipt (the prefix follows the installation folder name). Once the next update passes its basic process-start check, it prunes older owned backups and keeps that update's rollback version. Matching names without receipts, ownership mismatches, personal files, links or running releases prevent deletion. Cleanup failure does not fail installation and is logged in `cleanup.log`.
+- Replacement or immediate launch failure triggers an attempt to restore/reopen the previous release. If locks prevent recovery, both versions and the recovery paths are retained. A process staying alive is not a full functionality check.
+- The two renames are not a single atomic transaction. Power loss or forcibly stopping the helper can require manual recovery: close related processes, preserve the failed release and rename the logged backup to the original location. Project databases are not modified by the helper.
+
+Logs are in `%LOCALAPPDATA%\BHE\updates\install-*`: `status.json` records phases and paths; `error.txt` records failure details; `cleanup.log` records backup cleanup. Staging is cleaned on normal completion; the latest rollback copy, failed releases and interrupted-operation leftovers are retained. Failed updates do not prune backups. The empty `.update.lock` remains a stable locking object to avoid an unlink/reopen race with another updater.
+
+Run the synthetic-app checks (also configured in Windows CI):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_windows_update.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_windows_update_inventory.ps1
+```
+
+Before release, test a real Windows package for A-to-B updates, Unicode/space paths, busy-state blocking, mixed project/app directories, file locks, failed window closing, restoration, project reopening, playback, analysis and export.
+
 The Windows package uses LGPL FFmpeg without `libx264`. Export tries the hardware encoders `h264_nvenc` (NVIDIA), `h264_qsv` (Intel), `h264_amf` (AMD), and `h264_mf` (Media Foundation), then `libx264`, `libopenh264`, and `mpeg4`, switching only when an encoder fails; the first encoder that works is used for the rest of that export. The last option uses high-quality MPEG-4 Part 2 inside MP4; players that only support H.264 may not play it. Both individual clips and re-encoding after a failed merge use this policy. On Windows the proxy video is decoded with D3D11VA first and falls back to software decoding. Packaging runs `scripts/check_media_pipeline.py --root <runtime>` to generate a real proxy, clips, and merged video, and stops on failure. Regular Python CI also runs this check on Windows using the same LGPL FFmpeg variant as the release package.
 
 ### Automated release modes and hotfix tags
