@@ -256,6 +256,61 @@ coarse_scan device=cpu          # 回落到 CPU，检查 9.3 / 9.4
 
 DML 必须单张推理（`BACKEND_MAX_BATCH["dml"]=1`），批量喂反而更慢，这是后端特性不是 bug。
 
+### 9.6 手机竖拍视频的画面方向
+
+手机竖着拍的视频，编码出来的帧是 720×1512，转正角度写在 MP4 容器里
+（`rotation` side data）。ffmpeg 命令行默认会读它并自动加 `transpose`，所以
+引擎抽帧、生成代理都是正的；但 **media_kit 在 Windows 软件渲染路径下不应用
+这个旋转**，送出的纹理还是竖的。
+
+症状：画面被塞进按显示方向算好的横框里，看着像「放大了、只看到球场一块」，
+严重时像被裁成左右两截。数据层看不出问题——库里存的 `1512×720` 是对的。
+
+处理方式：
+
+- `inspect_video` 把 `rotation` 一起返回并存进 `videos.rotation`（加列之前
+  的项目在 `open_project` 时只补字段，不动 ROI 和候选）；
+- 前端用 `OrientedVideo` 在 Windows 上自己转纹理，其它平台交给播放器。
+
+排查时先确认三件事：`ffprobe` 的 `rotation`、库里存的宽高、UI 实际渲染的框
+比例。三者不一致时按上面这条链依次核对。
+
+### 9.7 `import torch` 报 WinError 1114（c10.dll 初始化失败）
+
+现象是分析在 `coarse_scan` 阶段必失败，日志里：
+
+```text
+OSError: [WinError 1114] 动态链接库(DLL)初始化例程失败。
+Error loading "...\runtime\python\Lib\site-packages\torch\lib\c10.dll" or one of its dependencies.
+```
+
+`1114` 不是「找不到依赖」（那是 126），而是 **DLL 已找到但 `DllMain` 自己失败**。
+`inference.py` 里 `_torch_cuda_available()` 会吞掉这个异常当作「无 CUDA」，但
+`load_detector()` 在非 DML 后端仍然 `from ultralytics import YOLO` → `import torch`，
+所以 **torch 起不来 = 整个分析起不来**，与打不开/未装 `onnxruntime-directml` 无关。
+`detect_auto_roi.py` 也走 torch，于是自动 ROI 检测会先报 `ROI_DETECTION_FAILED`。
+
+常见诱因，按排查顺序：
+
+1. **打包机的 CPU 指令集**。torch wheel 要求 AVX2；在只有 SSE 的机器（部分老 Xeon /
+   虚拟机 / 开了某些 BIOS 兼容选项）上加载 `c10.dll` 就是这个错误。用
+   `python -c "import torch"` 确认是**运行时环境**的问题还是**目标机**的问题。
+2. **杀毒软件拦截**。安装包放在 `下载` 目录、路径带中文时，360/Defender 的实时
+   防护拦 `c10.dll` 的加载时也会报 1114。把整个目录加白名单、或换到纯英文短路径试。
+3. **Visual C++ 运行库缺失或被替换**。装最新
+   [VC++ 2015-2022 x64 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)。
+4. **Python 运行时与 torch 版本不匹配**。python-build-standalone 的 3.x 与 torch
+   支持的 3.x 小版本错开时也会在这里失败。
+
+验证命令（用发布包自带的解释器）：
+
+```powershell
+& "<runtime>\python\python.exe" -c "import torch; print(torch.__version__, torch.rand(2,2).sum())"
+```
+
+能打印就是环境正常；报 1114 就是上面 1–4 之一。**只走 DirectML 路径不能绕过这个问题**：
+`scan_video.py` 的 `select_device()` 同样会 `import torch` 探测 CUDA。
+
 ## 10. 提交前检查
 
 ```bash

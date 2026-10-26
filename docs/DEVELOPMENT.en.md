@@ -256,6 +256,32 @@ coarse_scan device=cpu          # fell back to CPU; see 9.3 / 9.4
 
 DirectML must run one image at a time (`BACKEND_MAX_BATCH["dml"]=1`); batching is slower, which is a backend property rather than a bug.
 
+### 9.7 `import torch` fails with WinError 1114 (c10.dll init)
+
+Analysis always fails at `coarse_scan` with:
+
+```text
+OSError: [WinError 1114] DLL initialization routine failed.
+Error loading "...\runtime\python\Lib\site-packages\torch\lib\c10.dll" or one of its dependencies.
+```
+
+`1114` is not "dependency missing" (that is 126): the DLL was found and its `DllMain` failed. `_torch_cuda_available()` in `inference.py` swallows this and reports "no CUDA", but `load_detector()` still does `from ultralytics import YOLO` → `import torch`, so **torch not loading means analysis cannot run at all** — unrelated to whether `onnxruntime-directml` is installed. `detect_auto_roi.py` goes through torch too, which is why auto ROI detection fails first with `ROI_DETECTION_FAILED`.
+
+Causes to check, in order:
+
+1. **Build machine CPU feature set.** Torch wheels require AVX2; on SSE-only machines (older Xeons, some VMs, certain BIOS compatibility settings) loading `c10.dll` fails exactly this way. Run `python -c "import torch"` to tell whether it is the build environment or the target machine.
+2. **Antivirus interception.** With the install under `Downloads` and a non-ASCII path, 360/Defender real-time protection blocking `c10.dll` also yields 1114. Whitelist the directory or move it to a short ASCII path.
+3. **Missing or replaced Visual C++ runtime.** Install the latest [VC++ 2015-2022 x64 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+4. **Python runtime / torch version mismatch.** python-build-standalone minor versions that torch does not officially support fail here.
+
+Verify with the bundled interpreter:
+
+```powershell
+& "<runtime>\python\python.exe" -c "import torch; print(torch.__version__, torch.rand(2,2).sum())"
+```
+
+If it prints, the environment is fine; 1114 means one of the four cases above. **Routing through DirectML does not avoid this**: `select_device()` in `scan_video.py` still imports torch to probe CUDA.
+
 ## 10. Pre-submit checks
 
 ```bash
