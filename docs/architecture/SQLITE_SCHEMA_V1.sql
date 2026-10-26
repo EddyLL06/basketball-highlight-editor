@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS videos (
     duration_ms INTEGER,
     width INTEGER,
     height INTEGER,
+    rotation INTEGER NOT NULL DEFAULT 0,
     fps REAL,
     video_codec TEXT,
     audio_codec TEXT,

@@ -122,6 +122,7 @@ class ProjectStore:
             ("analysis_end_ms", "INTEGER"),
             ("sort_index", "INTEGER NOT NULL DEFAULT 0"),
             ("recorded_at", "TEXT"),
+            ("rotation", "INTEGER NOT NULL DEFAULT 0"),
         ):
             if name not in video_columns:
                 connection.execute(f"ALTER TABLE videos ADD COLUMN {name} {definition}")
@@ -416,6 +417,7 @@ class ProjectStore:
             metadata.get("duration_ms"),
             metadata.get("width"),
             metadata.get("height"),
+            int(metadata.get("rotation") or 0),
             metadata.get("fps"),
             metadata.get("video_codec"),
             metadata.get("audio_codec"),
@@ -430,10 +432,11 @@ class ProjectStore:
                 """
                 INSERT INTO videos (
                     id, project_id, source_path, source_size_bytes, source_mtime_ns,
-                    source_fingerprint, duration_ms, width, height, fps, video_codec, audio_codec,
+                    source_fingerprint, duration_ms, width, height, rotation, fps,
+                    video_codec, audio_codec,
                     analysis_start_ms, analysis_end_ms, recorded_at, sort_index,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                           (SELECT COALESCE(MAX(sort_index), -1) + 1 FROM videos), ?, ?)
                 """,
                 values,
@@ -444,6 +447,21 @@ class ProjectStore:
         with self.connect() as connection:
             row = connection.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
         return dict(row) if row else None
+
+    def set_video_rotation(self, video_id: str, rotation: int) -> Dict[str, Any] | None:
+        """Record the source rotation without invalidating analysis.
+
+        Only the display orientation changes, so the stored ROI and candidates
+        stay valid; relink_video would drop them.
+        """
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "UPDATE videos SET rotation = ?, updated_at = ? WHERE id = ?",
+                (int(rotation), now_iso(), video_id),
+            )
+            if cursor.rowcount != 1:
+                raise LookupError("VIDEO_NOT_FOUND")
+        return self.video(video_id)
 
     def set_analysis_range(
         self,
@@ -493,7 +511,8 @@ class ProjectStore:
                 """
                 UPDATE videos SET
                     source_path = ?, source_size_bytes = ?, source_mtime_ns = ?,
-                    source_fingerprint = ?, duration_ms = ?, width = ?, height = ?, fps = ?,
+                    source_fingerprint = ?, duration_ms = ?, width = ?, height = ?,
+                    rotation = ?, fps = ?,
                     video_codec = ?, audio_codec = ?,
                     status = 'linked', updated_at = ?
                 WHERE id = ?
@@ -506,6 +525,7 @@ class ProjectStore:
                     metadata.get("duration_ms"),
                     metadata.get("width"),
                     metadata.get("height"),
+                    int(metadata.get("rotation") or 0),
                     metadata.get("fps"),
                     metadata.get("video_codec"),
                     metadata.get("audio_codec"),
