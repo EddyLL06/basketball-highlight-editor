@@ -238,9 +238,14 @@ class OnnxDetector:
         self.provider = (self.session.get_providers() or ["CPUExecutionProvider"])[0]
         if self.device == "dml" and self.provider != "DmlExecutionProvider":
             self.device = "cpu"
-        self.input_name = self.session.get_inputs()[0].name
+        model_input = self.session.get_inputs()[0]
+        self.input_name = model_input.name
         self.max_batch = max_batch or BACKEND_MAX_BATCH.get(self.device, 1)
         self.max_batch = max(1, int(self.max_batch))
+        # 静态模型（手机端导出的 1×3×640×640）一次只能喂声明的张数，按模型封顶。
+        batch_dim = (model_input.shape or [None])[0]
+        if isinstance(batch_dim, int) and batch_dim > 0:
+            self.max_batch = min(self.max_batch, batch_dim)
 
     @staticmethod
     def _providers(device: str) -> list[str]:

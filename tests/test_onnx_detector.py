@@ -297,3 +297,25 @@ def test_a_broken_torch_without_onnx_still_reports_the_error(tmp_path, monkeypat
 
     with pytest.raises(OSError, match="1114"):
         inference.load_detector(model, device="cpu")
+
+
+@pytest.mark.parametrize(("batch_dim", "expected"), [(1, 1), ("batch", 8)])
+def test_a_static_model_caps_the_batch_at_its_declared_size(tmp_path, monkeypatch, batch_dim, expected):
+    import onnxruntime as ort
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"onnx")
+
+    class Session:
+        def __init__(self, path, sess_options=None, providers=None):
+            pass
+
+        def get_providers(self):
+            return ["CPUExecutionProvider"]
+
+        def get_inputs(self):
+            return [type("Input", (), {"name": "images", "shape": [batch_dim, 3, 640, 640]})()]
+
+    monkeypatch.setattr(ort, "InferenceSession", Session)
+    detector = OnnxDetector(model, device="cpu", names={0: "ball"})
+    assert detector.max_batch == expected
