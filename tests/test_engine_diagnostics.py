@@ -109,3 +109,18 @@ def test_environment_summary_names_the_machine_and_ffmpeg():
     for key in ("python=", "os=", "cpu=", "memory=", "ffmpeg="):
         assert key in summary
     assert "memory=unknown" not in summary
+
+
+def test_a_project_folder_that_cannot_be_created_logs_the_parent_state(tmp_path: Path, capsys):
+    videos = tmp_path / "Videos"
+    videos.write_bytes(b"not a folder")
+    root = videos / "BasketballProjects" / "game-1"
+
+    with pytest.raises(OSError):
+        EngineService().handle("create_project", {"name": "game", "root_path": str(root)})
+
+    log = capsys.readouterr().err
+    assert "create_project failed" in log
+    assert f"{root}: missing(" in log
+    assert f"{root.parent}: missing(" in log
+    assert f"{videos}: dir=False link=False reparse=False" in log

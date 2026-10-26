@@ -34,7 +34,7 @@ from .adapters.export import EFFECTS, available_output_path, export_goal_clips, 
 from .protocol import ProtocolError
 from .storage import ProjectStore, new_id
 from .media_tools import resolve_media_tool
-from .diagnostics import log_diagnostic, video_summary
+from .diagnostics import folder_summary, log_diagnostic, video_summary
 from basketball_highlight.rim_check import RIM_CHECK_VERSION
 from basketball_highlight.tracking import link_ball_detections
 
@@ -193,7 +193,11 @@ class EngineService:
             raise ProtocolError("INVALID_REQUEST", "缺少项目名称")
         if not isinstance(root_path, str) or not root_path.strip():
             raise ProtocolError("INVALID_REQUEST", "缺少 root_path")
-        store = self._store({"project_root": root_path})
+        try:
+            store = self._store({"project_root": root_path})
+        except OSError as exc:
+            log_diagnostic(f"create_project failed: {exc} | {folder_summary(Path(root_path))}")
+            raise
         if store.project():
             raise ProtocolError("INVALID_REQUEST", "项目数据库已经存在")
         project = store.create_project(payload.get("project_id") or new_id("project"), name.strip(), payload.get("language", "zh-CN"))

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import platform
+import stat
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any, Dict
 
 from . import __version__
@@ -14,6 +16,27 @@ from .media_tools import resolve_media_tool
 
 def log_diagnostic(message: str) -> None:
     print(f"[bhe] {message}", file=sys.stderr, flush=True)
+
+
+def folder_summary(path: Path) -> str:
+    """建目录失败时，记下路径上每一级是否存在，到第一个已存在的上级为止。
+
+    用来区分「上级不存在」「上级是失效的链接 / 重解析点（OneDrive、被挪走的视频文件夹）」
+    和「上级好好的但被拦截」（受控文件夹访问、安全软件）。
+    """
+    parts = []
+    for item in (path, *path.parents):
+        try:
+            info = os.lstat(item)
+        except OSError as exc:
+            parts.append(f"{item}: missing({exc.__class__.__name__})")
+            continue
+        reparse = bool(getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+        parts.append(
+            f"{item}: dir={item.is_dir()} link={stat.S_ISLNK(info.st_mode)} reparse={reparse}"
+        )
+        break
+    return " | ".join(parts)
 
 
 def video_summary(video: Dict[str, Any]) -> str:
