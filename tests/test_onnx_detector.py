@@ -493,3 +493,25 @@ def test_select_device_degrades_to_the_auto_chain_without_coreml(tmp_path, monke
     model.write_bytes(b"pt")
 
     assert inference.select_device("coreml", model) == "mps"
+
+
+def test_coreml_that_fails_to_build_a_session_falls_back_to_mps(tmp_path, monkeypatch):
+    model = tmp_path / "bball_model.pt"
+    model.write_bytes(b"pt")
+    (tmp_path / "bball_model.static.onnx").write_bytes(b"onnx")
+
+    from basketball_highlight import onnx_detector
+
+    class CpuOnly:
+        provider = "CPUExecutionProvider"
+
+        def __init__(self, path, *, device, **kwargs):
+            self.device = "cpu"
+
+    fake_ultralytics = type(sys)("ultralytics")
+    fake_ultralytics.YOLO = lambda path: ("yolo", path)
+    monkeypatch.setattr(onnx_detector, "OnnxDetector", CpuOnly)
+    monkeypatch.setitem(sys.modules, "ultralytics", fake_ultralytics)
+
+    assert inference.load_detector(model, device="coreml") == ("yolo", str(model))
+    assert inference.current_device() == "mps"

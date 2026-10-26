@@ -243,19 +243,21 @@ def load_detector(
             kwargs.setdefault("max_batch", 1)
             kwargs.setdefault("letterbox_mode", "square")
             detector = OnnxDetector(onnx_path, device="coreml", **kwargs)
-            _remember(detector.device)
-            if detector.device != "coreml":
-                print(
-                    "device=coreml unavailable at session level "
-                    f"(providers={detector.provider}); falling back",
-                    file=sys.stderr,
-                )
-            return detector
-        print(
-            f"device=coreml skipped: {onnx_path.name} not found "
-            f"(run scripts/export_mobile_model.py --imgsz 640 --batch 1); falling back",
-            file=sys.stderr,
-        )
+            if detector.device == "coreml":
+                _remember("coreml")
+                return detector
+            # CoreML EP 没建起来时 ORT 只剩单张 CPU，比 mps 慢，退回合并前的 torch/mps。
+            print(
+                "device=coreml unavailable at session level "
+                f"(providers={detector.provider}); falling back to mps",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"device=coreml skipped: {onnx_path.name} not found "
+                f"(run scripts/export_mobile_model.py --imgsz 640 --batch 1); falling back",
+                file=sys.stderr,
+            )
         target = "mps"
 
     try:
