@@ -1,7 +1,7 @@
 # 构建 Windows 发布包:Release exe + runtime,可选打 zip。
 # 用法:
 #   powershell -File scripts\build_windows_release.ps1 [-Zip] [-Version ...]
-#     [-PackageOut ...] [-PythonRuntime ...] [-Ffmpeg ...] [-Ffprobe ...]
+#     [-PackageOut ...] [-PythonRuntime ...] [-Ffmpeg ...] [-Ffprobe ...] [-DartDefine ...]
 #
 # 产物: apps\desktop\build\windows\x64\runner\Release\ (exe 与 runtime\ 同级),
 # -Zip 时另存带版本号的 dist\BHE-windows-x64-v<Version>.zip 和 SHA-256 文件。
@@ -13,7 +13,9 @@ param(
     [string]$Ffmpeg,
     [string]$Ffprobe,
     [string]$RuntimeOut = "$PSScriptRoot\..\dist\windows-runtime",
-    [string]$Flutter = "flutter"
+    [string]$Flutter = "flutter",
+    # 额外的 --dart-define，如本地测试升级时的 BHE_UPDATE_URL=... 和 BHE_UPDATE_PUBLIC_KEY=...
+    [string[]]$DartDefine = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,7 +29,9 @@ if ($Ffprobe) { $prepareArgs.Ffprobe = $Ffprobe }
 
 Push-Location "$Root\apps\desktop"
 try {
-    & $Flutter build windows --release --dart-define "BHE_VERSION=$Version"
+    $buildArgs = @('build', 'windows', '--release', '--dart-define', "BHE_VERSION=$Version")
+    foreach ($define in $DartDefine) { $buildArgs += @('--dart-define', $define) }
+    & $Flutter @buildArgs
     if ($LASTEXITCODE -ne 0) { Write-Error "flutter build windows failed" }
 } finally {
     Pop-Location

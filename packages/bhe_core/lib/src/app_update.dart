@@ -14,7 +14,11 @@ const updateManifestUrl = String.fromEnvironment(
 );
 
 /// 校验 latest.json 签名的 Ed25519 公钥，私钥只在发版流程里。
-const updatePublicKey = 'mr8tLeNqVjZ5CtVX9kxflbx0tomuQoFBT8MkFBknZ48=';
+/// 本地测试升级流程时用 --dart-define=BHE_UPDATE_PUBLIC_KEY 换成测试公钥，发版构建不设置。
+const updatePublicKey = String.fromEnvironment(
+  'BHE_UPDATE_PUBLIC_KEY',
+  defaultValue: 'mr8tLeNqVjZ5CtVX9kxflbx0tomuQoFBT8MkFBknZ48=',
+);
 
 class UpdateException implements Exception {
   const UpdateException(this.message);
