@@ -52,12 +52,12 @@ def parse_args() -> argparse.Namespace:
     # bundled mobile ONNX model. PT and ONNX can now be compared without an
     # unrecorded 1280-vs-640 preprocessing change.
     parser.add_argument("--imgsz", type=int, default=640)
-    parser.add_argument("--device", default="auto", choices=("auto", "cpu", "mps", "cuda", "dml"))
+    parser.add_argument("--device", default="auto", choices=("auto", "cpu", "mps", "cuda", "dml", "coreml"))
     return parser.parse_args()
 
 
 def select_device(requested: str) -> str:
-    """解析推理设备;`auto` 会按 cuda > dml > mps > cpu 选,详见 inference.py。"""
+    """解析推理设备;`auto` 会按 cuda > dml > coreml > mps > cpu 选,详见 inference.py。"""
     return resolve_device(requested)
 
 

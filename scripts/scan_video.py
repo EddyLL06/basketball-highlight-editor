@@ -34,7 +34,7 @@ def parse_args():
                              "clamped so the crop never exceeds the model input.")
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--conf", type=float, default=0.15)
-    parser.add_argument("--device", default="auto", choices=("auto", "cpu", "mps", "cuda", "dml"))
+    parser.add_argument("--device", default="auto", choices=("auto", "cpu", "mps", "cuda", "dml", "coreml"))
     parser.add_argument("--cache-dir", type=Path,
                         help="Optional directory for reusable coarse detection logs.")
     parser.add_argument("--output", required=True)
@@ -42,7 +42,7 @@ def parse_args():
 
 
 def select_device(requested):
-    """解析推理设备;`auto` 会按 cuda > dml > mps > cpu 选,详见 inference.py。"""
+    """解析推理设备;`auto` 会按 cuda > dml > coreml > mps > cpu 选,详见 inference.py。"""
     return resolve_device(requested)
 
 

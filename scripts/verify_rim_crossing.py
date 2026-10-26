@@ -41,7 +41,7 @@ def parse_args():
     parser.add_argument("--output", required=True)
     parser.add_argument("--conf", type=float, default=0.05)
     parser.add_argument("--batch", type=int, default=16)
-    parser.add_argument("--device", default="auto", choices=("auto", "cpu", "mps", "cuda", "dml"))
+    parser.add_argument("--device", default="auto", choices=("auto", "cpu", "mps", "cuda", "dml", "coreml"))
     return parser.parse_args()
 
 
@@ -50,10 +50,12 @@ CPU_BATCH = 8
 # DirectML 的 dynamic shape 路径在小批量上会退化(实测 batch=2 比 batch=1 慢 4 倍),
 # 所以 DML 固定单张;真正的批量合并交给 ORT 内部,这里不攒批。
 DML_BATCH = 1
+# CoreML 用的是静态 1x3x640x640 模型,一次只能送一张。
+COREML_BATCH = 1
 
 
 def select_device(requested):
-    """解析推理设备;`auto` 会按 cuda > dml > mps > cpu 选,详见 inference.py。"""
+    """解析推理设备;`auto` 会按 cuda > dml > coreml > mps > cpu 选,详见 inference.py。"""
     return resolve_device(requested)
 
 
@@ -163,6 +165,8 @@ def main(args):
         batch = min(args.batch, CPU_BATCH)
     elif device == "dml":
         batch = DML_BATCH
+    elif device == "coreml":
+        batch = COREML_BATCH
     pending = []
     for group_number, group in enumerate(groups, 1):
         cap.set(cv2.CAP_PROP_POS_FRAMES, group["first"])

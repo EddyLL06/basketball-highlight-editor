@@ -190,6 +190,39 @@ jobs:
           "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -r requirements.txt
           "$PYTHON_ROOT/bin/python3" -c 'import cv2, numpy, pandas, psutil, torch, ultralytics; print("runtime imports: OK")'
 
+      - name: Install CoreML acceleration and export static ONNX
+        shell: bash
+        env:
+          PYTHON_ROOT: ${{ steps.python.outputs.root }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          # CoreML 后端只跑在 Apple Silicon 上(代码里也用 platform.machine() 限定),
+          # Intel 包不塞 onnxruntime 和静态模型,免得白加 90MB。
+          if [[ "$ARCH" != "arm64" ]]; then
+            echo "Skipping CoreML packages for $ARCH"
+            exit 0
+          fi
+          # 装不上不应该阻断整条发布链路:没有 CoreML 时 mps/CPU 仍然可用。
+          if ! "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -r requirements-coreml.txt; then
+            echo "::warning::onnxruntime with CoreML failed to install; macOS will use mps/CPU"
+            exit 0
+          fi
+          "$PYTHON_ROOT/bin/python3" -c "import onnxruntime; print('providers', onnxruntime.get_available_providers())"
+          # 静态 batch=1、640x640:CoreML 的静态输入只吃方形单张,动态 batch 模型这里不用。
+          if ! "$PYTHON_ROOT/bin/python3" scripts/export_mobile_model.py \
+            --model models/bball_model.pt \
+            --output models/bball_model.static.onnx \
+            --imgsz 640 --batch 1; then
+            echo "::warning::static ONNX export failed; macOS will use mps/CPU"
+            exit 0
+          fi
+          test -s models/bball_model.static.onnx
+          ls -l models/bball_model.static.onnx
+          # onnx 只在导出时用得上,别让它跟着安装包出去(约 32MB)。
+          "$PYTHON_ROOT/bin/python3" -m pip uninstall -y onnx \
+            || echo "::warning::failed to drop the build-only onnx package"
+
       - name: Download self-contained FFmpeg
         id: ffmpeg
         shell: bash

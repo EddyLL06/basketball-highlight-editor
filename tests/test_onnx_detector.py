@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -153,7 +154,7 @@ class _FakeSession:
         return [np.zeros((batch, 6, 10), dtype=np.float32)]
 
 
-def _fake_detector(max_batch: int) -> OnnxDetector:
+def _fake_detector(max_batch: int, letterbox_mode: str = "auto") -> OnnxDetector:
     detector = object.__new__(OnnxDetector)
     detector.session = _FakeSession(max_batch)
     detector.input_name = "images"
@@ -161,6 +162,7 @@ def _fake_detector(max_batch: int) -> OnnxDetector:
     detector.names = {0: "ball"}
     detector.device = "dml" if max_batch == 1 else "cpu"
     detector.max_batch = max_batch
+    detector.letterbox_mode = letterbox_mode
     return detector
 
 
@@ -200,6 +202,32 @@ def test_predict_pads_mixed_sizes_to_a_square_batch():
     assert detector.session.shapes == [(2, 3, 640, 640)]
 
 
+def test_predict_square_letterbox_overrides_the_rect_default():
+    # 回归本次的必改点:CoreML 的静态模型只吃 1×3×640×640,
+    # 同尺寸批默认会走 rect(640×480),必须被 letterbox_mode 压成方形。
+    detector = _fake_detector(8, letterbox_mode="square")
+    detector.predict([np.zeros((1440, 1920, 3), dtype=np.uint8)] * 2, conf=0.5)
+    assert detector.session.shapes == [(2, 3, 640, 640)]
+
+
+def test_static_model_shape_mismatch_raises_a_readable_error():
+    detector = _fake_detector(1)
+    detector.input_shape = (1, 3, 640, 640)
+    detector.onnx_path = Path("bball_model.static.onnx")
+    with pytest.raises(ValueError) as error:
+        detector.predict([np.zeros((1440, 1920, 3), dtype=np.uint8)] * 2, conf=0.5)
+    message = str(error.value)
+    assert "640" in message
+    assert "letterbox_mode" in message
+
+
+def test_unknown_letterbox_mode_is_rejected():
+    from basketball_highlight.onnx_detector import OnnxDetector as Detector
+
+    with pytest.raises(ValueError):
+        Detector("missing.onnx", letterbox_mode="stretch")
+
+
 def test_predict_accepts_single_image():
     detector = _fake_detector(1)
     results = detector.predict(np.zeros((64, 64, 3), dtype=np.uint8))
@@ -207,6 +235,8 @@ def test_predict_accepts_single_image():
 
 
 def test_resolve_device_prefers_cuda_then_dml(monkeypatch):
+    # 平台门禁:macOS 没有 CUDA,先判平台就能省掉一次 import torch。
+    monkeypatch.setattr(inference, "_cuda_possible", lambda: True)
     monkeypatch.setattr(inference, "_torch_cuda_available", lambda: True)
     monkeypatch.setattr(inference, "_dml_provider_available", lambda: True)
     assert inference.resolve_device("auto") == "cuda"
@@ -216,13 +246,53 @@ def test_resolve_device_prefers_cuda_then_dml(monkeypatch):
     assert inference.resolve_device("auto") == "dml"
 
     monkeypatch.setattr(inference, "_dml_provider_available", lambda: False)
+    monkeypatch.setattr(inference, "_coreml_provider_available", lambda: False)
     assert inference.resolve_device("auto") == "mps"
 
 
+def test_resolve_device_puts_coreml_before_mps(tmp_path, monkeypatch):
+    # 阶段 2:auto 链是 cuda > dml > coreml > mps > cpu。
+    monkeypatch.setattr(inference, "_cuda_possible", lambda: True)
+    monkeypatch.setattr(inference, "_torch_cuda_available", lambda: False)
+    monkeypatch.setattr(inference, "_dml_provider_available", lambda: False)
+    monkeypatch.setattr(inference, "_torch_mps_available", lambda: True)
+    monkeypatch.setattr(inference, "_coreml_experiment_scope", lambda: True)
+    monkeypatch.setattr(inference, "_coreml_provider_available", lambda: True)
+
+    # 缺静态模型时仍然回落 mps:不能把"装了 ORT"当成"能跑 coreml"。
+    missing = tmp_path / "bball_model.pt"
+    missing.write_bytes(b"pt")
+    assert inference.resolve_device("auto", missing) == "mps"
+
+    (tmp_path / "bball_model.static.onnx").write_bytes(b"onnx")
+    assert inference.resolve_device("auto", missing) == "coreml"
+
+
+def test_auto_on_macos_does_not_probe_torch_when_coreml_wins(tmp_path, monkeypatch):
+    def explode():
+        raise AssertionError("coreml 已经可用时,auto 不应该再 import torch")
+
+    # 这条用例模拟的是 macOS:那里 _cuda_possible() 本来就是 False(没有 CUDA 版 torch),
+    # 所以 auto 不会去探 CUDA。必须显式钉住,否则在 Linux 上跑会真的去探 CUDA。
+    monkeypatch.setattr(inference, "_cuda_possible", lambda: False)
+    monkeypatch.setattr(inference, "_torch_cuda_available", explode)
+    monkeypatch.setattr(inference, "_torch_mps_available", explode)
+    monkeypatch.setattr(inference, "_dml_provider_available", lambda: False)
+    monkeypatch.setattr(inference, "_coreml_experiment_scope", lambda: True)
+    monkeypatch.setattr(inference, "_coreml_provider_available", lambda: True)
+    model = tmp_path / "bball_model.pt"
+    model.write_bytes(b"pt")
+    (tmp_path / "bball_model.static.onnx").write_bytes(b"onnx")
+
+    assert inference.select_device("auto", model) == "coreml"
+
+
 def test_resolve_device_falls_back_to_cpu(monkeypatch):
+    monkeypatch.setattr(inference, "_cuda_possible", lambda: True)
     monkeypatch.setattr(inference, "_torch_cuda_available", lambda: False)
     monkeypatch.setattr(inference, "_torch_mps_available", lambda: False)
     monkeypatch.setattr(inference, "_dml_provider_available", lambda: False)
+    monkeypatch.setattr(inference, "_coreml_provider_available", lambda: False)
     assert inference.resolve_device("auto") == "cpu"
     assert inference.select_device("dml") == "cpu"
     assert inference.current_device() == "cpu"
@@ -329,3 +399,97 @@ def test_a_single_image_model_feeds_one_image_at_a_time(tmp_path, monkeypatch, b
 def test_a_model_fixed_to_several_images_is_rejected_up_front(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="batch=2"):
         _detector_for_model_input(tmp_path, monkeypatch, 2)
+
+
+def test_coreml_providers_use_a_legal_compute_units_value():
+    # 回归:"All" 是 Rust 侧才有的枚举值,Python 侧写成 "All" 会被静默摘掉 EP,
+    # 回落到纯 CPU(实测慢 6 倍)且不报错,所以这里盯死合法取值。
+    providers = OnnxDetector._providers("coreml")
+    assert providers[0][0] == "CoreMLExecutionProvider"
+    assert providers[-1] == "CPUExecutionProvider"
+    options = providers[0][1]
+    assert options["ModelFormat"] == "MLProgram"
+    assert options["MLComputeUnits"] in {"CPUOnly", "CPUAndGPU", "CPUAndNeuralEngine"}
+    assert options["MLComputeUnits"] != "All"
+    # 神经引擎实测更慢(21.4 vs 8.3 ms/帧),收益来自 Metal。
+    assert options["MLComputeUnits"] == "CPUAndGPU"
+
+
+def test_coreml_is_single_image_per_run():
+    from basketball_highlight.onnx_detector import BACKEND_MAX_BATCH
+
+    assert BACKEND_MAX_BATCH["coreml"] == 1
+    assert inference.max_batch_for("coreml") == 1
+
+
+def test_static_onnx_path_for_keeps_onnx_and_renames_pt():
+    assert inference.static_onnx_path_for("/m/bball_model.pt") == Path("/m/bball_model.static.onnx")
+    onnx = Path("/m/bball_model.onnx")
+    assert inference.static_onnx_path_for(onnx) == onnx
+
+
+def test_coreml_available_needs_the_provider(monkeypatch):
+    monkeypatch.setattr(inference, "_coreml_experiment_scope", lambda: True)
+    monkeypatch.setattr(inference, "_coreml_provider_available", lambda: False)
+    assert inference.coreml_available() is False
+
+    monkeypatch.setattr(inference, "_coreml_provider_available", lambda: True)
+    assert inference.coreml_available() is True
+
+
+def test_coreml_available_needs_the_static_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(inference, "_coreml_experiment_scope", lambda: True)
+    monkeypatch.setattr(inference, "_coreml_provider_available", lambda: True)
+    model = tmp_path / "bball_model.pt"
+    model.write_bytes(b"pt")
+
+    # 动态 batch 的 bball_model.onnx 存在也不算数:CoreML 上它慢 4 倍。
+    (tmp_path / "bball_model.onnx").write_bytes(b"onnx")
+    assert inference.coreml_available(model) is False
+
+    (tmp_path / "bball_model.static.onnx").write_bytes(b"onnx")
+    assert inference.coreml_available(model) is True
+
+
+def test_select_device_coreml_skips_torch_probes(tmp_path, monkeypatch):
+    # 显式 coreml 的价值一半在省掉 import torch(3 s),所以这条路径不能碰 torch 探测。
+    def explode():
+        raise AssertionError("coreml 路径不应该探测 torch")
+
+    monkeypatch.setattr(inference, "_coreml_experiment_scope", lambda: True)
+    monkeypatch.setattr(inference, "_coreml_provider_available", lambda: True)
+    monkeypatch.setattr(inference, "_torch_cuda_available", explode)
+    monkeypatch.setattr(inference, "_torch_mps_available", explode)
+    model = tmp_path / "bball_model.pt"
+    model.write_bytes(b"pt")
+    (tmp_path / "bball_model.static.onnx").write_bytes(b"onnx")
+
+    assert inference.select_device("coreml", model) == "coreml"
+    assert inference.current_device() == "coreml"
+
+
+def test_select_device_coreml_degrades_when_model_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(inference, "_coreml_experiment_scope", lambda: True)
+    monkeypatch.setattr(inference, "_coreml_provider_available", lambda: True)
+    monkeypatch.setattr(inference, "_dml_provider_available", lambda: False)
+    monkeypatch.setattr(inference, "_torch_cuda_available", lambda: False)
+    monkeypatch.setattr(inference, "_torch_mps_available", lambda: True)
+    model = tmp_path / "bball_model.pt"
+    model.write_bytes(b"pt")
+
+    # 缺静态模型时不抛错,按 auto 的优先级降级。
+    assert inference.select_device("coreml", model) == "mps"
+
+
+def test_select_device_degrades_to_the_auto_chain_without_coreml(tmp_path, monkeypatch):
+    # coreml 不可用(没装 ORT/缺静态模型)时按 auto 的优先级走,不抛错。
+    monkeypatch.setattr(inference, "_coreml_experiment_scope", lambda: True)
+    monkeypatch.setattr(inference, "_coreml_provider_available", lambda: False)
+    monkeypatch.setattr(inference, "_dml_provider_available", lambda: False)
+    monkeypatch.setattr(inference, "_cuda_possible", lambda: True)
+    monkeypatch.setattr(inference, "_torch_cuda_available", lambda: False)
+    monkeypatch.setattr(inference, "_torch_mps_available", lambda: True)
+    model = tmp_path / "bball_model.pt"
+    model.write_bytes(b"pt")
+
+    assert inference.select_device("coreml", model) == "mps"

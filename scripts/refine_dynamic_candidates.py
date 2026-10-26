@@ -51,13 +51,13 @@ def parse_args():
                         help="Optional directory for per-window detection caches.")
     parser.add_argument("--min-score", type=float, default=0.0,
                         help="Keep only crossings at or above this multi-signal score.")
-    parser.add_argument("--device", default="auto", choices=("auto", "cpu", "mps", "cuda", "dml"))
+    parser.add_argument("--device", default="auto", choices=("auto", "cpu", "mps", "cuda", "dml", "coreml"))
     parser.add_argument("--output", required=True)
     return parser.parse_args()
 
 
 def select_device(requested):
-    """解析推理设备;`auto` 会按 cuda > dml > mps > cpu 选,详见 inference.py。"""
+    """解析推理设备;`auto` 会按 cuda > dml > coreml > mps > cpu 选,详见 inference.py。"""
     return resolve_device(requested)
 
 

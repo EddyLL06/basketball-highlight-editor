@@ -482,6 +482,44 @@ def test_start_analysis_rejects_existing_stale_job(tmp_path: Path):
     assert error.value.code == "JOB_RECOVERY_REQUIRED"
 
 
+def test_create_analysis_job_accepts_coreml_and_rejects_unknown_device(tmp_path: Path):
+    project_root = tmp_path / "project"
+    service = EngineService()
+    service.handle("create_project", {"name": "推理设备", "root_path": str(project_root)})
+    store = ProjectStore(project_root)
+    video = store.link_video({
+        "source_path": str(tmp_path / "source.mp4"),
+        "source_size_bytes": 1,
+        "source_mtime_ns": 1,
+        "duration_ms": 20_000,
+        "width": 960,
+        "height": 720,
+        "fps": 30.0,
+        "video_codec": "h264",
+        "audio_codec": "aac",
+    })
+    store.save_roi(video["id"], {"x1": 10, "y1": 20, "x2": 100, "y2": 120})
+
+    # 漏了白名单这一步,引擎会把 device=coreml 直接判成 INVALID_REQUEST。
+    job = service._create_analysis_job({
+        "project_root": str(project_root),
+        "video_id": video["id"],
+        "device": "coreml",
+    })["job"]
+    stored = store.get_job(job["id"])
+    assert stored is not None
+    assert json.loads(stored["checkpoint_json"])["device"] == "coreml"
+
+    with pytest.raises(ProtocolError) as error:
+        service._create_analysis_job({
+            "project_root": str(project_root),
+            "video_id": video["id"],
+            "device": "tpu",
+        })
+
+    assert error.value.code == "INVALID_REQUEST"
+
+
 def test_start_export_rejects_existing_stale_export_job(tmp_path: Path):
     project_root = tmp_path / "project"
     source = tmp_path / "source.mp4"

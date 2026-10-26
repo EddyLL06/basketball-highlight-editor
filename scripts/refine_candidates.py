@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument("--conf", type=float, default=0.2)
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--net-roi", nargs=4, type=int, metavar=("X1", "Y1", "X2", "Y2"))
-    parser.add_argument("--device", default="auto", choices=("auto", "cpu", "mps", "cuda", "dml"))
+    parser.add_argument("--device", default="auto", choices=("auto", "cpu", "mps", "cuda", "dml", "coreml"))
     parser.add_argument("--output", required=True)
     return parser.parse_args()
 
@@ -63,7 +63,7 @@ def validate_args(args):
 
 
 def select_device(requested):
-    """解析推理设备;`auto` 会按 cuda > dml > mps > cpu 选,详见 inference.py。"""
+    """解析推理设备;`auto` 会按 cuda > dml > coreml > mps > cpu 选,详见 inference.py。"""
     from basketball_highlight.inference import select_device as resolve_device
 
     return resolve_device(requested)
