@@ -21,11 +21,13 @@ import '../../core/video_orientation.dart';
 import '../../core/video_segments.dart';
 import '../../providers/notice_provider.dart';
 import '../../providers/pending_import_provider.dart';
+import '../../providers/player_groups_provider.dart';
 import '../../providers/project_state.dart';
 import '../../providers/playback_coordinator.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
 import '../review/media_readiness.dart';
+import 'player_roster_picker.dart';
 
 const _beforeSecondOptions = <int>[0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 15];
 const _afterSecondOptions = <int>[1, 2, 3, 4, 5, 6, 8, 10, 12, 15];
@@ -67,6 +69,7 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
   String _analysisMode = 'standard';
   Timer? _previewPlaybackTimer;
   bool _previewPlaying = false;
+  PlayerRosterSelection? _roster;
 
   @override
   void initState() {
@@ -396,13 +399,54 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
     }
   }
 
-  void _startQueue() {
-    unawaited(
-      ref.read(projectProvider.notifier).startAnalysisQueue(
-        beforeSeconds: _beforeSeconds.toDouble(),
-        afterSeconds: _afterSeconds.toDouble(),
+  Future<void> _startQueue() async {
+    if (_applying) return;
+    setState(() => _applying = true);
+    try {
+      if (!await _importSelectedRoster()) return;
+      await ref.read(projectProvider.notifier).startAnalysisQueue(
+            beforeSeconds: _beforeSeconds.toDouble(),
+            afterSeconds: _afterSeconds.toDouble(),
+          );
+    } finally {
+      if (mounted) setState(() => _applying = false);
+    }
+  }
+
+  Future<bool> _importSelectedRoster() async {
+    final before = ref.read(projectProvider);
+    final selection = _roster;
+    if (selection == null || before.players.isNotEmpty && !selection.explicit) {
+      return true;
+    }
+    final group = ref.read(playerGroupsProvider)
+        .where((group) => group.name == selection.groupName)
+        .firstOrNull;
+    if (group == null) return true;
+    final names = [
+      for (final name in group.players)
+        if (selection.players.contains(name)) name,
+    ];
+    if (names.isEmpty) return true;
+    await ref.read(projectProvider.notifier).importPlayers(names);
+    if (!mounted) return false;
+    final after = ref.read(projectProvider);
+    if (before.video?['id'] != after.video?['id'] ||
+        before.videoPath != after.videoPath) {
+      return false;
+    }
+    if (names.every((name) => after.players.any((player) => player['name'] == name))) {
+      return true;
+    }
+    ref.read(noticeProvider.notifier).push(
+      NoticeMessage(
+        id: 'roster-import',
+        severity: NoticeSeverity.error,
+        title: '球员名单未完整导入',
+        description: '请重试导入后再开始分析。',
       ),
     );
+    return false;
   }
 
   /// Runs the import after a path is chosen, from the picker or a drop.
@@ -608,6 +652,11 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
           .read(projectProvider.notifier)
           .applyWorkflowDraft(_backendDraft(step: _step));
       if (!mounted || !applied) return;
+      if (state.video?['id'] != ref.read(projectProvider).video?['id'] ||
+          state.videoPath != ref.read(projectProvider).videoPath) {
+        return;
+      }
+      if (!await _importSelectedRoster()) return;
       final started = await ref
           .read(projectProvider.notifier)
           .startAnalysis(
@@ -635,6 +684,11 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
           previousVideoId != nextVideoId ||
           previous?.videoPath != next.videoPath;
       if (!projectChanged) return;
+      final sameProjectSegments =
+          previous?.multiVideo == true && next.multiVideo &&
+          next.videos.any((video) => video['id'] == previousVideoId) &&
+          previous!.videos.any((video) => video['id'] == nextVideoId);
+      if (!sameProjectSegments) _roster = null;
       _stopPreviewPlayback();
       if (next.video == null) {
         setState(() {
@@ -1116,6 +1170,13 @@ class _ImportVideoScreenState extends ConsumerState<ImportVideoScreen> {
           beforeSeconds: _beforeSeconds,
           afterSeconds: _afterSeconds,
           fastModeEnabled: _fastAnalysisEnabled,
+          roster: PlayerRosterPicker(
+            key: ValueKey('roster-${state.video?['id']}'),
+            initialSelection: _roster,
+            hasExistingPlayers: state.players.isNotEmpty,
+            enabled: !busy,
+            onChanged: (selection) => _roster = selection,
+          ),
           onAnalysisModeChanged: (mode) {
             setState(() => _analysisMode = mode);
             unawaited(_persistDraft());
@@ -2298,6 +2359,7 @@ class _SummaryStep extends StatelessWidget {
     required this.onBeforeSecondsChanged,
     required this.onAfterSecondsChanged,
     required this.onEditStep,
+    required this.roster,
   });
   final ProjectState state;
   final int startMs;
@@ -2312,6 +2374,7 @@ class _SummaryStep extends StatelessWidget {
   final ValueChanged<int> onBeforeSecondsChanged;
   final ValueChanged<int> onAfterSecondsChanged;
   final ValueChanged<int>? onEditStep;
+  final Widget roster;
 
   @override
   Widget build(BuildContext context) {
@@ -2454,6 +2517,8 @@ class _SummaryStep extends StatelessWidget {
     final settings = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        roster,
+        const SizedBox(height: Spacing.lg),
         if (fastModeEnabled) ...[
           Text(
             l10n?.importAnalysisMode ?? '分析模式',

@@ -6430,6 +6430,7 @@ class _PlayerGroupsDialog extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final c = AppColors.of(context);
     final groups = ref.watch(playerGroupsProvider);
+    final defaultGroup = ref.watch(defaultPlayerGroupProvider);
     final hasPlayers = ref.watch(
       projectProvider.select((state) => state.players.isNotEmpty),
     );
@@ -6465,6 +6466,14 @@ class _PlayerGroupsDialog extends ConsumerWidget {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          IconButton(
+                            key: ValueKey('player-group-default-${group.name}'),
+                            tooltip: context.bheText(defaultGroup == group.name ? '取消默认' : '设为默认'),
+                            onPressed: () => ref.read(playerGroupsProvider.notifier)
+                                .setDefault(defaultGroup == group.name ? null : group.name),
+                            icon: Icon(defaultGroup == group.name ? Icons.star : Icons.star_border, size: 18),
+                            visualDensity: VisualDensity.compact,
+                          ),
                           TextButton(
                             onPressed: () {
                               Navigator.of(context).pop();

@@ -891,6 +891,7 @@ void main() {
       final notifier = container.read(projectProvider.notifier);
       await notifier.createPlayer('科比');
       await notifier.importPlayers(['科比', '罗斯', '小夏']);
+      await notifier.importPlayers(['小夏', '科比', '罗斯']);
       expect(
         [
           for (final player in container.read(projectProvider).players)

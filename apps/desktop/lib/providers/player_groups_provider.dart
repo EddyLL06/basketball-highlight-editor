@@ -4,13 +4,27 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const String playerGroupsPrefsKey = 'bhe.player_groups';
+const String defaultPlayerGroupPrefsKey = 'bhe.default_player_group';
 
 typedef PlayerGroup = ({String name, List<String> players});
 
 class PlayerGroupsNotifier extends Notifier<List<PlayerGroup>> {
+  late Future<void> _ready;
+  Future<void> _pending = Future<void>.value();
+  String? _defaultGroupName;
+  bool _disposed = false;
+
+  Future<void> get ready => _ready;
+
+  String? get defaultGroupName =>
+      state.any((group) => group.name == _defaultGroupName)
+      ? _defaultGroupName
+      : null;
+
   @override
   List<PlayerGroup> build() {
-    _load();
+    ref.onDispose(() => _disposed = true);
+    _ready = _load();
     return const [];
   }
 
@@ -18,34 +32,57 @@ class PlayerGroupsNotifier extends Notifier<List<PlayerGroup>> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(playerGroupsPrefsKey);
-      if (raw == null) return;
-      state = [
-        for (final item in jsonDecode(raw) as List)
+      final groups = <PlayerGroup>[
+        for (final item in raw == null ? [] : jsonDecode(raw) as List)
           (
             name: (item as Map)['name'].toString(),
             players: [for (final name in item['players'] as List) '$name'],
           ),
       ];
+      if (_disposed) return;
+      _defaultGroupName = prefs.getString(defaultPlayerGroupPrefsKey);
+      state = groups;
+      if (defaultGroupName == null) {
+        _defaultGroupName = null;
+        await prefs.remove(defaultPlayerGroupPrefsKey);
+      }
     } catch (_) {
       // 分组读取失败时按没有分组处理，不影响审核。
     }
   }
 
-  Future<void> save(String name, List<String> players) async {
+  Future<void> save(String name, List<String> players) => _change(() {
+    name = name.trim();
+    if (name.isEmpty) throw const PlayerGroupException('分组名不能为空');
     state = [
       for (final group in state)
         if (group.name != name) group,
-      (name: name, players: players),
+      (name: name, players: List<String>.unmodifiable(players)),
     ];
-    await _persist();
-  }
+  });
 
-  Future<void> delete(String name) async {
+  Future<void> setDefault(String? name) => _change(() {
+    _defaultGroupName = state.any((group) => group.name == name) ? name : null;
+    state = [...state];
+  });
+
+  Future<void> delete(String name) => _change(() {
+    if (_defaultGroupName == name) _defaultGroupName = null;
     state = [
       for (final group in state)
         if (group.name != name) group,
     ];
-    await _persist();
+  });
+
+  Future<void> _change(void Function() change) {
+    final operation = _pending.then((_) async {
+      await ready;
+      if (_disposed) return;
+      change();
+      await _persist();
+    });
+    _pending = operation.catchError((Object _) {});
+    return operation;
   }
 
   Future<void> _persist() async {
@@ -58,10 +95,24 @@ class PlayerGroupsNotifier extends Notifier<List<PlayerGroup>> {
             {'name': group.name, 'players': group.players},
         ]),
       );
+      final defaultName = defaultGroupName;
+      if (defaultName == null) {
+        await prefs.remove(defaultPlayerGroupPrefsKey);
+      } else {
+        await prefs.setString(defaultPlayerGroupPrefsKey, defaultName);
+      }
     } catch (_) {
       // 持久化失败时本次运行仍可使用分组。
     }
   }
+}
+
+class PlayerGroupException implements Exception {
+  const PlayerGroupException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
 }
 
 final NotifierProvider<PlayerGroupsNotifier, List<PlayerGroup>>
@@ -69,3 +120,8 @@ playerGroupsProvider =
     NotifierProvider<PlayerGroupsNotifier, List<PlayerGroup>>(
       PlayerGroupsNotifier.new,
     );
+
+final defaultPlayerGroupProvider = Provider<String?>((ref) {
+  ref.watch(playerGroupsProvider);
+  return ref.read(playerGroupsProvider.notifier).defaultGroupName;
+});
