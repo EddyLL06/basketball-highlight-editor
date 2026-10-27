@@ -20,6 +20,14 @@ def log_diagnostic(message: str) -> None:
     print(f"[bhe] {message}", file=sys.stderr, flush=True)
 
 
+def log_failed_command(label, command, returncode=None):
+    argv = json.dumps(command, ensure_ascii=False, separators=(",", ":"))
+    if len(argv) > 1500:
+        suffix = f" [truncated original_chars={len(argv)} limit=1500]"
+        argv = argv[:1500 - len(suffix)] + suffix
+    log_diagnostic(f"{label} exit={returncode if returncode is not None else 'unavailable'} argv={argv}")
+
+
 def folder_summary(path: Path) -> str:
     """建目录失败时，记下路径上每一级是否存在，到第一个已存在的上级为止。
 

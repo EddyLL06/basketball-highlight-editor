@@ -14,7 +14,7 @@ from typing import Any, Dict
 from uuid import uuid4
 
 from .analysis import PipelineCancelled, terminate_process
-from ..diagnostics import log_diagnostic
+from ..diagnostics import log_diagnostic, log_failed_command
 from ..media_tools import resolve_media_tool
 
 
@@ -521,6 +521,9 @@ def run_atomic_ffmpeg(
                 stderr_stream.close()
         validate_media_file(temporary)
         temporary.replace(output_path)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        log_failed_command("media command failed", atomic_command, getattr(exc, "returncode", None))
+        raise
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -639,7 +642,8 @@ def export_goal_clips(
                     cancel_check=cancel_check,
                     process_callback=process_callback,
                 )
-            except (OSError, subprocess.CalledProcessError):
+            except (OSError, subprocess.CalledProcessError) as exc:
+                log_diagnostic(f"merge copy failed, re-encoding: {exc}")
                 # Separate clips use a common encoder, so stream-copy is the
                 # fast path. Re-encode only when timestamps/codecs prevent a
                 # valid concat output.

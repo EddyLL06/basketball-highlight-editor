@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Sequence
 from uuid import uuid5, NAMESPACE_URL
 
+from ..diagnostics import log_failed_command
+
 # The desktop runtime puts the engine and the shared analysis package in
 # sibling directories under the bundled runtime root.
 _RUNTIME_ROOT = Path(__file__).resolve().parents[4]
@@ -447,7 +449,11 @@ def run_pipeline(
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             popen_kwargs["start_new_session"] = True
-        process = subprocess.Popen(command, **popen_kwargs)
+        try:
+            process = subprocess.Popen(command, **popen_kwargs)
+        except (OSError, ValueError):
+            log_failed_command(f"pipeline command failed stage={stage}", command)
+            raise
         if process_callback:
             process_callback(process)
         try:
@@ -502,6 +508,7 @@ def run_pipeline(
             if cancel_check and cancel_check():
                 raise PipelineCancelled("JOB_CANCELLED")
             if process.returncode != 0:
+                log_failed_command(f"pipeline command failed stage={stage}", command, process.returncode)
                 details = (stderr or stdout or "").strip()
                 if is_runtime_failure(details):
                     from .runtime_preflight import runtime_error
