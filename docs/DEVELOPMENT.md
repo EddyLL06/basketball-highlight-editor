@@ -275,42 +275,52 @@ DML 必须单张推理（`BACKEND_MAX_BATCH["dml"]=1`），批量喂反而更慢
 排查时先确认三件事：`ffprobe` 的 `rotation`、库里存的宽高、UI 实际渲染的框
 比例。三者不一致时按上面这条链依次核对。
 
-### 9.7 `import torch` 报 WinError 1114（c10.dll 初始化失败）
+### 9.7 分析引擎运行库初始化失败（torch / ONNX Runtime）
 
-现象是分析在 `coarse_scan` 阶段必失败，日志里：
+Windows 上 `torch` 的 `c10.dll` 或 ONNX Runtime（ORT，另一条模型推理路径）的
+`onnxruntime_pybind11_state` 可能报 `ImportError` / `OSError`、DLL 加载失败或
+WinError 1114。torch 不可用时 CPU 会尝试已有的 ONNX 模型；**ORT 也无法加载时，
+兜底不能解决问题**。DLL 文本不能单独证明是 CPU、VC++ 运行库还是安全软件导致。
+
+分析现在先进入 `engine_preflight`（检查分析引擎），在独立子进程中使用真正分析的
+解释器与 `select_device → load_detector` 路径验证加载，明确失败才阻止生成代理视频。
+错误码为 `ENGINE_RUNTIME_UNAVAILABLE`，界面首行提示 Windows 用户安装最新的
+[VC++ x64 运行库](https://aka.ms/vs/17/release/vc_redist.x64.exe)并重启，仍失败时提供
+CPU 型号和 BHE 诊断信息；macOS/Linux 使用不含 VC++ 的通用提示。原始异常链保留
+在后续行及日志，自动 ROI 检测使用同样的检查与错误提示。
+
+自检成功按“请求设备 + 主模型真实路径 + 大小 + 修改时间”缓存在当前引擎会话中，
+自动 ROI 和分析可复用；不跨重启保存。**自检 300 秒超时、无诊断的崩溃、无法解析
+输出或无法启动检查子进程均只记 warning、放行且不缓存**，让真正分析继续判断。
+取消仍然取消任务。自检只证明模型可加载，不保证后续显存、驱动及真实输入都正常。
+
+Windows 的 `[bhe] environment ...` 行新增：
 
 ```text
-OSError: [WinError 1114] 动态链接库(DLL)初始化例程失败。
-Error loading "...\runtime\python\Lib\site-packages\torch\lib\c10.dll" or one of its dependencies.
+avx=true avx2=true avx512f=false msvcp140=14.42.34433.1
 ```
 
-`1114` 不是「找不到依赖」（那是 126），而是 **DLL 已找到但 `DllMain` 自己失败**。
-v0.1.11 及更早版本里 torch 起不来 = 整个分析起不来，自动 ROI 检测会先报
-`ROI_DETECTION_FAILED`。现在 `inference.py` 把这个 `OSError` 当作「没有 CUDA」，
-CPU 后端加载 `ultralytics` 失败时，只要运行时里有 `models/bball_model.onnx` 就改走
-ONNX Runtime CPU（日志里会有 `torch unavailable ...; using onnxruntime cpu`），
-有显卡时照常走 DirectML。只有缺 `.onnx` 时才会报这个错。
+- `avx` / `avx2` / `avx512f`：Windows 报告的 CPU 指令能力；`unknown` 表示无法读取，
+  不是“不支持”。[微软文档](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-isprocessorfeaturepresent)
+  和 [SDK 头文件](https://github.com/microsoft/win32metadata/blob/main/generation/WinSDK/RecompiledIdlHeaders/um/winnt.h)
+  的常量分别为 39、40、41；这些探测项从 Windows 10 2004 / build 19041 起支持，
+  更早系统记录 unknown。不能仅凭 false 判定裸硬件一定缺少该指令，也不因此禁用分析。
+- `msvcp140`：通过系统目录 API 定位 System32 中的 `msvcp140.dll`，读取其四段文件
+  版本；unknown 表示文件/API 不可读。此字段不代表程序实际加载的 DLL 路径，也不
+  代表已确定根因。依据版本查询的 [GetFileVersionInfoW](https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-getfileversioninfow)
+  与 [VerQueryValueW](https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-verqueryvaluew)。
+- 这些字段仅在 Windows 出现，单项探测失败不影响其它字段，更不影响引擎启动。
 
-常见诱因，按排查顺序：
+排查顺序：保留错误原文与整条 environment 行；核对 CPU 型号、系统版本、上述能力
+和系统运行库版本；安装/修复 VC++ 后重启再试；仍失败时检查安全软件是否拦截，或
+用英文短路径重新安装。不要把某个字段直接当作唯一根因。
 
-1. **打包机的 CPU 指令集**。torch wheel 要求 AVX2；在只有 SSE 的机器（部分老 Xeon /
-   虚拟机 / 开了某些 BIOS 兼容选项）上加载 `c10.dll` 就是这个错误。用
-   `python -c "import torch"` 确认是**运行时环境**的问题还是**目标机**的问题。
-2. **杀毒软件拦截**。安装包放在 `下载` 目录、路径带中文时，360/Defender 的实时
-   防护拦 `c10.dll` 的加载时也会报 1114。把整个目录加白名单、或换到纯英文短路径试。
-3. **Visual C++ 运行库缺失或被替换**。装最新
-   [VC++ 2015-2022 x64 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)。
-4. **Python 运行时与 torch 版本不匹配**。python-build-standalone 的 3.x 与 torch
-   支持的 3.x 小版本错开时也会在这里失败。
-
-验证命令（用发布包自带的解释器）：
+可用发布包自带解释器分别验证，避免误用系统 Python：
 
 ```powershell
-& "<runtime>\python\python.exe" -c "import torch; print(torch.__version__, torch.rand(2,2).sum())"
+& "<runtime>\python\python.exe" -c "import torch; print(torch.__version__)"
+& "<runtime>\python\python.exe" -c "import onnxruntime as ort; print(ort.__version__)"
 ```
-
-能打印就是环境正常；报 1114 就是上面 1–4 之一。分析能靠 ONNX 跑起来，但 torch 本身
-还是坏的，仍然要按上面排查。
 
 ## 10. 提交前检查
 

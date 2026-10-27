@@ -95,6 +95,82 @@ def _ffmpeg_version(ffmpeg: str) -> str:
     return lines[0] if lines else f"unknown (exit={completed.returncode})"
 
 
+def _windows_cpu_features():
+    features = {"avx": "unknown", "avx2": "unknown", "avx512f": "unknown"}
+    try:
+        import ctypes
+
+        if sys.getwindowsversion().build < 19041:
+            return features
+        probe = ctypes.windll.kernel32.IsProcessorFeaturePresent
+        probe.argtypes = [ctypes.c_uint32]
+        probe.restype = ctypes.c_int
+        for name, feature in (("avx", 39), ("avx2", 40), ("avx512f", 41)):
+            try:
+                features[name] = "true" if probe(feature) else "false"
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return features
+
+
+def _windows_msvcp_version():
+    try:
+        import ctypes
+
+        class FixedFileInfo(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_uint32) for name in (
+                "signature", "struct_version", "file_version_ms", "file_version_ls",
+                "product_version_ms", "product_version_ls", "flags_mask", "flags",
+                "os", "type", "subtype", "date_ms", "date_ls",
+            )]
+
+        kernel = ctypes.windll.kernel32
+        kernel.GetSystemDirectoryW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32]
+        kernel.GetSystemDirectoryW.restype = ctypes.c_uint32
+        directory = ctypes.create_unicode_buffer(32768)
+        length = kernel.GetSystemDirectoryW(directory, len(directory))
+        if not 0 < length < len(directory):
+            return "unknown"
+        path = directory.value + "\\msvcp140.dll"
+        version = ctypes.windll.version
+        version.GetFileVersionInfoSizeW.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_uint32)]
+        version.GetFileVersionInfoSizeW.restype = ctypes.c_uint32
+        size = version.GetFileVersionInfoSizeW(path, None)
+        if not size:
+            return "unknown"
+        version.GetFileVersionInfoW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+        version.GetFileVersionInfoW.restype = ctypes.c_int
+        data = ctypes.create_string_buffer(size)
+        if not version.GetFileVersionInfoW(path, 0, size, data):
+            return "unknown"
+        version.VerQueryValueW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p,
+                                         ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_uint32)]
+        version.VerQueryValueW.restype = ctypes.c_int
+        block = ctypes.c_void_p()
+        block_length = ctypes.c_uint32()
+        if not version.VerQueryValueW(data, "\\", ctypes.byref(block), ctypes.byref(block_length)):
+            return "unknown"
+        if not block.value or block_length.value < ctypes.sizeof(FixedFileInfo):
+            return "unknown"
+        info = ctypes.cast(block, ctypes.POINTER(FixedFileInfo)).contents
+        if info.signature != 0xFEEF04BD:
+            return "unknown"
+        return ".".join(str(value) for value in (
+            info.file_version_ms >> 16, info.file_version_ms & 0xffff,
+            info.file_version_ls >> 16, info.file_version_ls & 0xffff,
+        ))
+    except Exception:
+        return "unknown"
+
+
+def _windows_environment():
+    return " " + " ".join(f"{key}={value}" for key, value in {
+        **_windows_cpu_features(), "msvcp140": _windows_msvcp_version(),
+    }.items())
+
+
 def environment_summary() -> str:
     memory = _total_memory_bytes()
     ffmpeg = resolve_media_tool("ffmpeg")
@@ -103,4 +179,5 @@ def environment_summary() -> str:
         f"os={platform.platform()} machine={platform.machine()} cpu={os.cpu_count()} "
         f"memory={f'{memory / 1024 ** 3:.1f}GB' if memory else 'unknown'} "
         f"ffmpeg={ffmpeg} ({_ffmpeg_version(ffmpeg)})"
+        f"{_windows_environment() if platform.system() == 'Windows' else ''}"
     )
