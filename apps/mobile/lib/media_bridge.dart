@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'features/diagnostics/friendly_error.dart';
 import 'features/diagnostics/mobile_diagnostics.dart';
 import 'features/export/native_export_result.dart';
+import 'features/operation_status/task_stop_status.dart';
 
 String clipFileName(int index, Candidate candidate) {
   final name =
@@ -24,6 +25,7 @@ class _ExportRun {
   bool admitted = false;
   String? mergeId;
   String? nativeId;
+  int nativeGeneration = 0;
   final Completer<void> cancelledSignal = Completer<void>();
 }
 
@@ -119,6 +121,7 @@ class NativeMediaExportEngine implements MobileExportEngine {
         final outputPath = '$outputDirectory/${clipFileName(index, candidate)}';
         try {
           run.nativeId = candidate.id;
+          run.nativeGeneration++;
           final raw = await _channel.invokeMethod<Object?>('exportClip', {
             'exportId': candidate.id,
             'inputPath': video.path,
@@ -190,6 +193,7 @@ class NativeMediaExportEngine implements MobileExportEngine {
       }
       await _waitForTurn(ticket, run);
       run.nativeId = exportId;
+      run.nativeGeneration++;
       try {
         reserved =
             await _channel.invokeMethod<bool>('registerMergeExport', {
@@ -270,11 +274,17 @@ class NativeMediaExportEngine implements MobileExportEngine {
 
   /// A status response is authoritative only after the native channel has
   /// processed the original request and its worker has released its path.
-  Future<bool> checkPreviousExport({bool stopFirst = false}) async {
+  Future<TaskStopStatus> checkPreviousExport({bool stopFirst = false}) async {
     final owner = _ExportGate.owner;
-    if (owner == null) return true;
+    if (owner == null) return TaskStopStatus.stopped;
+    // Freeze the entire batch synchronously before any query can yield.
+    owner.run.cancelled = true;
+    if (!owner.run.cancelledSignal.isCompleted) {
+      owner.run.cancelledSignal.complete();
+    }
     final id = owner.run.nativeId;
-    if (id == null) return false;
+    final generation = owner.run.nativeGeneration;
+    if (id == null) return TaskStopStatus.unknown;
     if (stopFirst) {
       await _channel
           .invokeMethod<void>('cancelExport', {'exportId': id})
@@ -283,16 +293,15 @@ class NativeMediaExportEngine implements MobileExportEngine {
     final active = await _channel
         .invokeMethod<bool>('isExportActive', {'exportId': id})
         .timeout(const Duration(seconds: 5));
-    if (active == null) throw const MobileExportException('无法确认上次导出是否停止。');
-    if (!active && identical(_ExportGate.owner, owner)) {
-      owner.run.cancelled = true;
-      if (!owner.run.cancelledSignal.isCompleted) {
-        owner.run.cancelledSignal.complete();
-      }
-      owner.ticket.finish();
-      return true;
+    if (!identical(_ExportGate.owner, owner) ||
+        owner.run.nativeId != id ||
+        owner.run.nativeGeneration != generation ||
+        active == null) {
+      return TaskStopStatus.unknown;
     }
-    return false;
+    if (active) return TaskStopStatus.running;
+    owner.ticket.finish();
+    return TaskStopStatus.stopped;
   }
 
   @override

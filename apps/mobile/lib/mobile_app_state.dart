@@ -27,6 +27,8 @@ import 'features/video_source/video_source_failure.dart';
 import 'media_bridge.dart';
 import 'features/diagnostics/diagnostic_state.dart';
 import 'features/diagnostics/mobile_diagnostics.dart';
+import 'features/operation_status/task_stop_status.dart';
+export 'features/operation_status/task_stop_status.dart';
 import 'native_analysis_engine.dart';
 
 class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
@@ -245,23 +247,27 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     });
   }
 
-  Future<bool> checkUncertainExport({bool stopFirst = false}) async {
+  Future<TaskStopStatus> checkUncertainExport({bool stopFirst = false}) async {
     final drain = _uncertainExportDrain;
     final engine = exportEngine;
-    if (drain == null) return true;
+    if (drain == null) return TaskStopStatus.stopped;
     if (_disposed ||
         engine is! NativeMediaExportEngine ||
         checkingUncertainExport) {
-      return false;
+      return TaskStopStatus.unknown;
     }
     checkingUncertainExport = true;
     notifyListeners();
     try {
-      final stopped = await engine.checkPreviousExport(stopFirst: stopFirst);
+      final outcome = await engine.checkPreviousExport(stopFirst: stopFirst);
       if (identical(_uncertainExportDrain, drain)) {
-        uncertainExportStatus = stopped ? null : '上次任务仍在运行，请稍候或再次尝试停止。';
+        uncertainExportStatus = switch (outcome) {
+          TaskStopStatus.stopped => null,
+          TaskStopStatus.running => '上次任务仍在运行，请稍候或再次尝试停止。',
+          TaskStopStatus.unknown => '无法确认上次任务是否停止。',
+        };
       }
-      return stopped;
+      return outcome;
     } on Object catch (error, stack) {
       if (identical(_uncertainExportDrain, drain)) {
         uncertainExportStatus = '无法确认上次任务是否停止。';
@@ -271,7 +277,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           operation: 'export',
         );
       }
-      return false;
+      return TaskStopStatus.unknown;
     } finally {
       checkingUncertainExport = false;
       if (!_disposed) notifyListeners();
@@ -2247,9 +2253,20 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     } on Object catch (error, stack) {
       if (error is ExportDrainTimeout) _markExportUncertain(error, stack);
       if (current()) {
-        if (!_mergeCommitted) exportMergedOverlapCount = null;
-        recordDiagnosticFailure(error, stack, operation: 'export');
-        notifyListeners();
+        if (error is ExportDrainTimeout && _mergeCommitted) {
+          final duration = stopwatch.elapsedMilliseconds;
+          if (await _submitProjectChange(
+            (current) => current.copyWith(lastExportDurationMs: duration),
+            inverse: (before) => _restoreOperationFields(before, {'export'}),
+            operation: 'export',
+          )) {
+            MobileDiagnostics.instance.event('operation.completed');
+          }
+        } else {
+          if (!_mergeCommitted) exportMergedOverlapCount = null;
+          recordDiagnosticFailure(error, stack, operation: 'export');
+          notifyListeners();
+        }
       } else {
         MobileDiagnostics.instance.error(error, stack, operation: 'export');
       }

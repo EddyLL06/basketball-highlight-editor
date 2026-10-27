@@ -13,8 +13,8 @@ class _UncertainTaskNotice extends StatelessWidget {
   final bool busy;
   final String? status;
   final DiagnosticErrorRecord? error;
-  final Future<bool> Function() onStop;
-  final Future<bool> Function() onCheck;
+  final Future<TaskStopStatus> Function() onStop;
+  final Future<TaskStopStatus> Function() onCheck;
 
   @override
   Widget build(BuildContext context) => Card(
