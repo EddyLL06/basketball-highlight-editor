@@ -37,6 +37,7 @@ part 'features/player_tags/player_tag_sheet.dart';
 part 'features/project_rename/project_rename_dialog.dart';
 part 'features/player_roster/roster_confirmation.dart';
 part 'features/player_groups/player_groups_sheet.dart';
+part 'features/player_groups/player_group_editor.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 

@@ -1786,8 +1786,9 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   Future<bool> editPlayerGroup(
     String original,
     String name,
-    List<String> players,
-  ) {
+    List<String> players, {
+    List<String>? expectedPlayers,
+  }) {
     final value = name.trim();
     final cleaned = players.map((player) => player.trim()).toList();
     if (value.isEmpty ||
@@ -1795,11 +1796,24 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         cleaned.toSet().length != cleaned.length) {
       return Future.value(false);
     }
+    final expected = expectedPlayers == null
+        ? null
+        : List<String>.of(expectedPlayers);
     return _groupStore.change((groups, currentDefault) {
-      if (!groups.any((group) => group.name == original) ||
+      final matches = groups.where((group) => group.name == original);
+      if (matches.isEmpty ||
           groups.any(
             (group) => group.name == value && group.name != original,
           )) {
+        return null;
+      }
+      final current = matches.first.players;
+      if (expected != null &&
+          (expected.length != current.length ||
+              List.generate(
+                expected.length,
+                (i) => i,
+              ).any((i) => expected[i] != current[i]))) {
         return null;
       }
       return (

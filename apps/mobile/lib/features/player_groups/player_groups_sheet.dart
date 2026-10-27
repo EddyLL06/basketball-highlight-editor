@@ -80,7 +80,13 @@ class _PlayerGroupsSheetState extends State<_PlayerGroupsSheet> {
     ({String name, List<String> players}) group,
     String action,
   ) async {
-    if (action == 'delete') {
+    if (action == 'edit') {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _PlayerGroupEditor(state: widget.state, group: group),
+        ),
+      );
+    } else if (action == 'delete') {
       if (!await _confirm('确认删除分组？', '删除') || !mounted) return;
       await _run(() => widget.state.deletePlayerGroup(group.name));
     } else if (action == 'rename') {
@@ -164,6 +170,10 @@ class _PlayerGroupsSheetState extends State<_PlayerGroupsSheet> {
                       tooltip: context.bheText('更多操作'),
                       onSelected: (action) => _manage(group, action),
                       itemBuilder: (context) => [
+                        PopupMenuItem(
+                          value: 'edit',
+                          child: Text(context.bheText('编辑')),
+                        ),
                         PopupMenuItem(
                           value: 'rename',
                           child: Text(context.bheText('重命名')),
