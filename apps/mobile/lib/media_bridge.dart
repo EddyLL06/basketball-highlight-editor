@@ -132,7 +132,8 @@ class NativeMediaExportEngine implements MobileExportEngine {
             {'startMs': candidate.startMs, 'endMs': candidate.endMs},
         ],
       });
-      if (_cancelled) throw const MobileExportException('导出已取消');
+      final committed = raw is Map && raw['committed'] == true;
+      if (_cancelled && !committed) throw const MobileExportException('导出已取消');
       final result = NativeExportResult.decode(raw, outputPath);
       yield ExportProgress(
         progress: 1,

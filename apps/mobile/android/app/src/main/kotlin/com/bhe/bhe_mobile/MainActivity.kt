@@ -62,6 +62,7 @@ class MainActivity : FlutterActivity() {
     private val updateChannelName = "com.bhe.bhe/mobile_update"
     private val mainHandler = Handler(Looper.getMainLooper())
     private val exportCancelled = ConcurrentHashMap<String, AtomicBoolean>()
+    private val mergeTransactions = ConcurrentHashMap<String, MergeOutputTransaction>()
     private var progressSink: EventChannel.EventSink? = null
     private var analysisTaskListener: AnalysisTaskManager.Listener? = null
 
@@ -771,12 +772,26 @@ class MainActivity : FlutterActivity() {
         Thread {
             var muxer: MediaMuxer? = null
             var muxerStarted = false
+            var transaction: MergeOutputTransaction? = null
             try {
-                File(outputPath).parentFile?.mkdirs()
-                File(outputPath).delete()
+                val destination = File(outputPath).absoluteFile
+                val parent = destination.parentFile ?: throw IllegalArgumentException("无效的输出目录")
+                if (!parent.exists() && !parent.mkdirs() && !parent.isDirectory) throw IllegalStateException("无法创建输出目录")
+                val temporary = File.createTempFile(".bhe-merge-", ".mp4", parent)
+                val currentTransaction = MergeOutputTransaction(temporary, destination, cancelled) { from, to ->
+                    android.system.Os.rename(from.absolutePath, to.absolutePath)
+                }
+                transaction = currentTransaction
+                mergeTransactions[exportId] = currentTransaction
+                if (cancelled.get()) throw InterruptedException("合并导出已取消")
                 val firstExtractor = MediaExtractor()
-                firstExtractor.setDataSource(inputPath)
-                val currentMuxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+                val currentMuxer = try {
+                    firstExtractor.setDataSource(inputPath)
+                    MediaMuxer(temporary.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+                } catch (error: Exception) {
+                    firstExtractor.release()
+                    throw error
+                }
                 muxer = currentMuxer
                 val selection: ExportTrackSelection
                 try {
@@ -831,14 +846,15 @@ class MainActivity : FlutterActivity() {
                 }
                 currentMuxer.stop()
                 muxerStarted = false
+                currentMuxer.release()
+                muxer = null
+                currentTransaction.publish()
                 AppDiagnostics.event("export.completed")
-                mainHandler.post { result.success(exportResult(outputPath, selection) + ("mergedOverlapCount" to plan.mergedOverlapCount)) }
+                mainHandler.post { result.success(exportResult(outputPath, selection) + mapOf("mergedOverlapCount" to plan.mergedOverlapCount, "committed" to true)) }
             } catch (_: InterruptedException) {
-                File(outputPath).delete()
                 AppDiagnostics.event("export.cancelled")
                 mainHandler.post { result.error("EXPORT_CANCELLED", "合并导出已取消", null) }
             } catch (error: Exception) {
-                File(outputPath).delete()
                 AppDiagnostics.event("export.failed", error = error)
                 mainHandler.post { result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error)) }
             } finally {
@@ -848,8 +864,18 @@ class MainActivity : FlutterActivity() {
                     } catch (_: Exception) {
                     }
                 }
-                muxer?.release()
-                exportCancelled.remove(exportId)
+                try {
+                    muxer?.release()
+                } catch (error: Exception) {
+                    AppDiagnostics.event("export.cleanup.failed", error = error)
+                }
+                try {
+                    transaction?.cleanup()
+                } catch (error: Exception) {
+                    AppDiagnostics.event("export.cleanup.failed", error = error)
+                }
+                transaction?.let { mergeTransactions.remove(exportId, it) }
+                exportCancelled.remove(exportId, cancelled)
             }
         }.start()
     }
@@ -859,10 +885,14 @@ class MainActivity : FlutterActivity() {
 
     private fun cancelExport(call: MethodCall, result: MethodChannel.Result) {
         val exportId = call.argument<String>("exportId")
+        fun cancelOne(id: String, flag: AtomicBoolean) {
+            val transaction = mergeTransactions[id]
+            if (transaction != null) transaction.cancel() else flag.set(true)
+        }
         if (exportId != null) {
-            exportCancelled[exportId]?.set(true)
+            exportCancelled[exportId]?.let { cancelOne(exportId, it) }
         } else {
-            exportCancelled.values.forEach { it.set(true) }
+            exportCancelled.forEach { (id, flag) -> cancelOne(id, flag) }
         }
         result.success(null)
     }
