@@ -35,6 +35,7 @@ part 'features/roi_editor/roi_editor_sheet.dart';
 part 'features/review_undo/review_notice.dart';
 part 'features/player_tags/player_tag_sheet.dart';
 part 'features/project_rename/project_rename_dialog.dart';
+part 'features/player_roster/roster_confirmation.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 
@@ -882,50 +883,28 @@ Future<void> _confirmAndStartAnalysis(
   BuildContext context,
   MobileAppState state,
 ) async {
-  final confirmed = await showDialog<bool>(
+  final projectId = state.project.id;
+  final session = state.projectSession;
+  final videoGeneration = state.videoPreparationGeneration;
+  final confirmed = await showModalBottomSheet<bool>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text(
-        Localizations.of<BheLocalizations>(
-              context,
-              BheLocalizations,
-            )?.startAnalysisTitle ??
-            '开始分析',
-      ),
-      content: Text(
-        Localizations.of<BheLocalizations>(
-              context,
-              BheLocalizations,
-            )?.foregroundAnalysisWarning ??
-            '分析期间请保持 BHE 在前台并保持屏幕亮起。锁屏或切到后台可能导致分析变慢或暂停。',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: Text(
-            Localizations.of<BheLocalizations>(
-                  context,
-                  BheLocalizations,
-                )?.cancel ??
-                '取消',
-          ),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: Text(
-            Localizations.of<BheLocalizations>(
-                  context,
-                  BheLocalizations,
-                )?.start ??
-                '开始',
-          ),
-        ),
-      ],
-    ),
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (_) => _RosterConfirmation(state: state),
   );
-  if (confirmed == true && context.mounted) {
-    await state.startAnalysis();
+  if (confirmed != true || !context.mounted || state.project.id != projectId ||
+      state.projectSession != session || state.videoPreparationGeneration != videoGeneration) {
+    return;
   }
+  final selection = state.rosterSelection;
+  if (selection.groupChanged) return;
+  await state.startAnalysis(
+    rosterPlayers: selection.orderedPlayers,
+    expectedRosterGroup: selection.groupName,
+    expectedProjectId: projectId,
+    expectedSession: session,
+    expectedVideoGeneration: videoGeneration,
+  );
 }
 
 class _RangeEditorSlider extends StatelessWidget {

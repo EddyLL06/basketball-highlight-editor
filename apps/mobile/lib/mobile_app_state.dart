@@ -15,6 +15,7 @@ import 'package:video_player/video_player.dart';
 
 import 'features/review_undo/review_history.dart';
 import 'features/review_undo/review_action_result.dart';
+import 'features/player_roster/roster_selection.dart';
 
 export 'features/review_undo/review_action_result.dart';
 import 'features/project_mutation/project_mutation_queue.dart';
@@ -50,6 +51,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       );
 
   static const playerGroupsPrefsKey = 'bhe.player_groups';
+  static const defaultPlayerGroupPrefsKey = 'bhe.default_player_group';
 
   final MobileAnalysisEngine analysisEngine;
   final MobileExportEngine exportEngine = NativeMediaExportEngine();
@@ -61,6 +63,26 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   );
   List<ProjectSnapshot> recentProjects = const [];
   List<({String name, List<String> players})> playerGroups = const [];
+  String? defaultPlayerGroupName;
+  RosterSelection? _rosterSelection;
+  int get videoPreparationGeneration => _videoPreparationGeneration;
+
+  RosterSelection get rosterSelection {
+    final existing = _rosterSelection;
+    if (existing != null) {
+      existing.reconcile(playerGroups, hasPlayers: project.players.isNotEmpty);
+      return existing;
+    }
+    final draft = RosterSelection();
+    final matches = playerGroups.where(
+      (group) => group.name == defaultPlayerGroupName,
+    );
+    if (project.players.isEmpty && matches.isNotEmpty) {
+      final group = matches.first;
+      draft.choose(group.name, group.players, automatic: true);
+    }
+    return _rosterSelection = draft;
+  }
 
   /// Cover image per project id, taken from a shot frame after analysis.
   Map<String, String> coverPaths = const {};
@@ -1250,6 +1272,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   void _resetTransientState() {
     _projectSession++;
+    _rosterSelection = null;
     _analysisGeneration++;
     reviewHistory.clear();
     reviewDiagnosticError = null;
@@ -1678,7 +1701,11 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(playerGroupsPrefsKey);
-      if (raw == null) return;
+      final defaultName = prefs.getString(defaultPlayerGroupPrefsKey);
+      if (raw == null) {
+        defaultPlayerGroupName = null;
+        return;
+      }
       playerGroups = [
         for (final item in jsonDecode(raw) as List)
           (
@@ -1686,6 +1713,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
             players: [for (final name in item['players'] as List) '$name'],
           ),
       ];
+      defaultPlayerGroupName =
+          playerGroups.any((group) => group.name == defaultName)
+          ? defaultName
+          : null;
       notifyListeners();
     } on Object catch (error, stack) {
       MobileDiagnostics.instance.error(error, stack, operation: 'project');
@@ -1724,6 +1755,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   Future<bool> importPlayers(List<String> players) {
     final requested = List<String>.of(players);
+    if (requested.isEmpty) return Future.value(true);
     return _submitProjectChange((current) {
       final all = [...current.players];
       for (final name in requested) {
@@ -1986,8 +2018,20 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     }
   }
 
-  Future<void> startAnalysis() async {
-    if (analysing) return;
+  Future<void> startAnalysis({
+    List<String>? rosterPlayers,
+    String? expectedRosterGroup,
+    String? expectedProjectId,
+    int? expectedSession,
+    int? expectedVideoGeneration,
+  }) async {
+    bool rosterCurrent() =>
+        (expectedProjectId == null || project.id == expectedProjectId) &&
+        (expectedSession == null || projectSession == expectedSession) &&
+        (expectedVideoGeneration == null ||
+            videoPreparationGeneration == expectedVideoGeneration) &&
+        !projectTransitioning;
+    if (analysing || !rosterCurrent()) return;
     if (!hasVideo || project.hoopRoi == null || project.netRoi == null) {
       errorMessage = '请先选择视频并设置投篮分析区、篮网检测区。';
       notifyListeners();
@@ -2020,6 +2064,26 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       if (generation != _analysisGeneration) return;
       if (!videoMatches) {
         throw const MobileAnalysisException('视频检查未通过或耗时过长，请重新选择可正常播放的原视频。');
+      }
+      if (!rosterCurrent()) return;
+      if (expectedRosterGroup != null) {
+        final matches = playerGroups.where(
+          (group) => group.name == expectedRosterGroup,
+        );
+        if (matches.isEmpty) {
+          errorMessage = '球员分组已不存在，请重新选择';
+          notifyListeners();
+          return;
+        }
+        final selected = (rosterPlayers ?? const <String>[]).toSet();
+        rosterPlayers = [
+          for (final player in matches.first.players)
+            if (selected.contains(player)) player,
+        ];
+      }
+      if (rosterPlayers != null && rosterPlayers.isNotEmpty) {
+        if (!await importPlayers(rosterPlayers)) return;
+        if (generation != _analysisGeneration || !rosterCurrent()) return;
       }
       final initialMessage = progressMessage;
       if (!await _submitProjectChange(
