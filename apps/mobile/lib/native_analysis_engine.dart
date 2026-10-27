@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'features/diagnostics/friendly_error.dart';
 import 'features/diagnostics/mobile_diagnostics.dart';
+import 'features/operation_status/task_stop_status.dart';
 
 class PreparedNativeAnalysis {
   PreparedNativeAnalysis._(this.modelPath);
@@ -403,6 +404,22 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       }
     }
     return file.path;
+  }
+
+  /// Only the native task manager can confirm that its worker has exited.
+  Future<TaskStopStatus> nativeAnalysisStatus() async {
+    final value = await _channel
+        .invokeMethod<bool>('isAnalysisActive')
+        .timeout(cancelTimeout);
+    return switch (value) {
+      true => TaskStopStatus.running,
+      false => TaskStopStatus.stopped,
+      null => TaskStopStatus.unknown,
+    };
+  }
+
+  Future<void> requestNativeStop() async {
+    await _channel.invokeMethod<void>('cancelAnalysis').timeout(cancelTimeout);
   }
 
   Future<void> cancelPrepared(PreparedNativeAnalysis run) async {

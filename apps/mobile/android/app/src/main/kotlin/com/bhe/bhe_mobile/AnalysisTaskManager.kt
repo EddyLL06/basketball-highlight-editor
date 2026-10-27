@@ -62,7 +62,7 @@ object AnalysisTaskManager {
     }
 
     @Synchronized
-    fun isRunning(): Boolean = thread?.isAlive == true || state.optString("status") == "running"
+    fun isRunning(): Boolean = AnalysisWorkerLiveness.isRunning(thread, state.optString("status"))
 
     @Synchronized
     fun hasWorkerThread(): Boolean = thread?.isAlive == true
@@ -170,7 +170,8 @@ object AnalysisTaskManager {
             fail("ANALYSIS_FAILED", error.message ?: "移动端分析失败", cancelled = false)
         } finally {
             wakeLock.release()
-            synchronized(this) { thread = null }
+            // Keep the reference until the thread has actually exited: a
+            // cancellation acknowledgement can precede worker cleanup.
             appContext.stopService(Intent(appContext, AnalysisForegroundService::class.java).apply {
                 action = AnalysisForegroundService.ACTION_STOP
             })

@@ -498,15 +498,74 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   Future<void>? _analysisCancelPending;
   PreparedNativeAnalysis? _waitingNativeRun;
   PreparedNativeAnalysis? _uncertainNativeRun;
+  DiagnosticErrorRecord? uncertainAnalysisDiagnostic;
+  bool checkingUncertainAnalysis = false;
+  String? uncertainAnalysisStatus;
+  bool get hasUncertainAnalysis => _uncertainNativeRun != null;
 
   void _markNativeUncertain(PreparedNativeAnalysis run) {
     _uncertainNativeRun = run;
-    run.settled.then((_) {
-      if (identical(_uncertainNativeRun, run)) {
-        _uncertainNativeRun = null;
-        if (!_disposed) notifyListeners();
+    uncertainAnalysisStatus = null;
+    uncertainAnalysisDiagnostic = MobileDiagnostics.instance.error(
+      TimeoutException('上次分析尚未确认停止'),
+      StackTrace.current,
+      operation: 'analysis',
+    );
+    run.settled.then((_) async {
+      // The result can precede Android worker cleanup, so verify native state.
+      var attempt = 0;
+      while (!_disposed && identical(_uncertainNativeRun, run)) {
+        if (await checkUncertainAnalysis() == TaskStopStatus.stopped) return;
+        final delay = attempt++ < 6
+            ? const Duration(milliseconds: 500)
+            : const Duration(seconds: 5);
+        await Future<void>.delayed(delay);
       }
     });
+  }
+
+  Future<TaskStopStatus> checkUncertainAnalysis({
+    bool stopFirst = false,
+  }) async {
+    final run = _uncertainNativeRun;
+    final engine = analysisEngine;
+    if (run == null) return TaskStopStatus.stopped;
+    if (_disposed) return TaskStopStatus.unknown;
+    if (engine is! NativeAnalysisEngine || checkingUncertainAnalysis) {
+      return TaskStopStatus.unknown;
+    }
+    checkingUncertainAnalysis = true;
+    if (!_disposed) notifyListeners();
+    try {
+      if (stopFirst) await engine.requestNativeStop();
+      final outcome = await engine.nativeAnalysisStatus();
+      if (outcome == TaskStopStatus.stopped &&
+          identical(_uncertainNativeRun, run)) {
+        _uncertainNativeRun = null;
+        uncertainAnalysisDiagnostic = null;
+        uncertainAnalysisStatus = null;
+        return TaskStopStatus.stopped;
+      }
+      if (!identical(_uncertainNativeRun, run)) return TaskStopStatus.unknown;
+      uncertainAnalysisStatus = outcome == TaskStopStatus.running
+          ? '上次任务仍在运行，请稍候或再次尝试停止。'
+          : '无法确认上次任务是否停止。';
+      return outcome;
+    } on Object catch (error, stack) {
+      final diagnostic = MobileDiagnostics.instance.error(
+        error,
+        stack,
+        operation: 'analysis',
+      );
+      if (identical(_uncertainNativeRun, run)) {
+        uncertainAnalysisStatus = '无法确认上次任务是否停止。';
+        uncertainAnalysisDiagnostic = diagnostic;
+      }
+      return TaskStopStatus.unknown;
+    } finally {
+      checkingUncertainAnalysis = false;
+      if (!_disposed) notifyListeners();
+    }
   }
 
   int _videoPreparationGeneration = 0;

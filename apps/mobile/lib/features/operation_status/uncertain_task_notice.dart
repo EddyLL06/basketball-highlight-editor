@@ -3,6 +3,9 @@ part of '../../mobile_ui.dart';
 class _UncertainTaskNotice extends StatelessWidget {
   const _UncertainTaskNotice({
     required this.keyName,
+    required this.operation,
+    required this.explanation,
+    required this.guidance,
     required this.busy,
     required this.status,
     required this.error,
@@ -10,6 +13,9 @@ class _UncertainTaskNotice extends StatelessWidget {
     required this.onCheck,
   });
   final String keyName;
+  final String operation;
+  final String explanation;
+  final String guidance;
   final bool busy;
   final String? status;
   final DiagnosticErrorRecord? error;
@@ -24,11 +30,14 @@ class _UncertainTaskNotice extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(context.bheText('上次任务尚未确认结束，暂时不能开始新的同类任务。')),
-          const SizedBox(height: 8),
           Text(
-            context.bheText('请先复制诊断信息；若仍无法确认，请在系统设置中强制停止 BHE，重新打开后检查项目和已导出文件。'),
+            context.bheText(operation),
+            style: Theme.of(context).textTheme.titleSmall,
           ),
+          const SizedBox(height: 8),
+          Text(context.bheText(explanation)),
+          const SizedBox(height: 8),
+          Text(context.bheText(guidance)),
           if (status case final message?) ...[
             const SizedBox(height: 8),
             Text(context.bheText(message)),
@@ -68,10 +77,30 @@ class _UncertainExportNotice extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _UncertainTaskNotice(
     keyName: 'uncertain-export-notice',
+    operation: '导出',
+    explanation: '上次任务尚未确认结束，暂时不能开始新的同类任务。',
+    guidance: '请先复制诊断信息；若仍无法确认，请在系统设置中强制停止 BHE，重新打开后检查项目和已导出文件。',
     busy: state.checkingUncertainExport,
     status: state.uncertainExportStatus,
     error: state.uncertainExportDiagnostic,
     onStop: () => state.checkUncertainExport(stopFirst: true),
     onCheck: () => state.checkUncertainExport(),
+  );
+}
+
+class _UncertainAnalysisNotice extends StatelessWidget {
+  const _UncertainAnalysisNotice({required this.state});
+  final MobileAppState state;
+  @override
+  Widget build(BuildContext context) => _UncertainTaskNotice(
+    keyName: 'uncertain-analysis-notice',
+    operation: '分析',
+    explanation: '上次分析尚未确认停止，暂时不能开始新分析。',
+    guidance: '请先复制诊断信息；若仍无法确认，请在系统设置中强制停止 BHE，重新打开后检查项目。',
+    busy: state.checkingUncertainAnalysis,
+    status: state.uncertainAnalysisStatus,
+    error: state.uncertainAnalysisDiagnostic,
+    onStop: () => state.checkUncertainAnalysis(stopFirst: true),
+    onCheck: () => state.checkUncertainAnalysis(),
   );
 }

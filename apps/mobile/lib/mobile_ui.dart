@@ -639,6 +639,8 @@ class _ProjectView extends StatelessWidget {
             ),
             VideoSourceNotice(state: state),
             if (state.hasUncertainExport) _UncertainExportNotice(state: state),
+            if (state.hasUncertainAnalysis && state.project.video == null)
+              _UncertainAnalysisNotice(state: state),
             if (state.preparingVideo)
               _VideoPreparationCard(message: state.preparingVideoMessage, onCancel: state.cancelVideoPreparation)
             else if (state.project.video == null)
@@ -841,6 +843,7 @@ class _ProjectSetup extends StatelessWidget {
             message: l10n?.analysisInterrupted ?? '上次分析未完成，可以重新开始。',
           ),
         ],
+        if (state.hasUncertainAnalysis) _UncertainAnalysisNotice(state: state),
         const SizedBox(height: 18),
         Row(
           children: [

@@ -98,6 +98,7 @@ class MainActivity : FlutterActivity() {
                     "suggestRoi" -> suggestRoi(call, result)
                     "extractCover" -> extractCover(call, result)
                     "getAnalysisState" -> getAnalysisState(result)
+                    "isAnalysisActive" -> result.success(AnalysisTaskManager.isRunning())
                     "cancelAnalysis" -> {
                         AnalysisTaskManager.cancel()
                         result.success(null)

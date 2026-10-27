@@ -129,6 +129,7 @@ void main() {
               cancels++;
               throw PlatformException(code: 'CANCEL_FAIL');
             }
+            if (call.method == 'isAnalysisActive') return false;
             return null;
           });
       final analysis = f.state.startAnalysis();
