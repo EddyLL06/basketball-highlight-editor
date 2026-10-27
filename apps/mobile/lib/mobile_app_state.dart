@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 
+import 'features/review_undo/review_history.dart';
 import 'features/video_source/project_paths.dart';
 import 'features/video_source/project_file_commit.dart';
 import 'features/video_source/video_source_store.dart';
@@ -136,6 +137,83 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   bool exportAudioSkipped = false;
   List<String> exportedPaths = const [];
   Future<void> _saveChain = Future<void>.value();
+  final ReviewHistory reviewHistory = ReviewHistory();
+  String? undoFocusId;
+  int undoRevision = 0;
+  int reviewRevision = 0;
+  String? reviewNotice;
+  DateTime? reviewNoticeAt;
+
+  void _setReviewNotice(String? notice) {
+    reviewNotice = notice;
+    reviewNoticeAt = notice == null ? null : DateTime.now();
+    reviewRevision++;
+  }
+
+  bool get canUndoReview => reviewHistory.canUndo;
+
+  void _recordReview(
+    ReviewChange kind,
+    Iterable<Candidate> previous,
+    String focusId,
+    String notice,
+  ) {
+    final before = {for (final candidate in previous) candidate.id: candidate};
+    if (before.isEmpty) return;
+    reviewHistory.add(ReviewEntry(kind, before, focusId));
+    _setReviewNotice(notice);
+  }
+
+  Future<void> undoReview() async {
+    final entry = reviewHistory.pop();
+    if (entry == null) return;
+    final id = project.id;
+    final previous = {for (final c in project.candidates) c.id: c};
+    project = project.copyWith(
+      candidates: [
+        for (final candidate in project.candidates)
+          if (entry.before[candidate.id] case final before?)
+            restoreReviewFields(candidate, before, entry.kind)
+          else
+            candidate,
+      ],
+    );
+    final stateAfterUndo = project;
+    undoFocusId = entry.focusId;
+    undoRevision++;
+    _setReviewNotice(null);
+    final revision = reviewRevision;
+    final pending = _queueSave();
+    notifyListeners();
+    try {
+      await pending;
+      final belongsToSession = reviewHistory.complete(entry);
+      if (belongsToSession &&
+          !_disposed &&
+          project.id == id &&
+          reviewRevision == revision) {
+        _setReviewNotice('已撤销');
+        notifyListeners();
+      }
+    } catch (_) {
+      if (!_disposed && project.id == id && reviewHistory.restore(entry)) {
+        if (identical(project, stateAfterUndo)) {
+          project = project.copyWith(
+            candidates: [
+              for (final c in project.candidates)
+                if (entry.before.containsKey(c.id))
+                  restoreReviewFields(c, previous[c.id]!, entry.kind)
+                else
+                  c,
+            ],
+          );
+        }
+        _setReviewNotice('保存失败，请重试');
+        notifyListeners();
+      }
+    }
+  }
+
   int _analysisGeneration = 0;
   int _videoPreparationGeneration = 0;
   DateTime? analysisStartedAt;
@@ -253,6 +331,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
             await _writeProject(snapshot);
             throw const VideoSourceCancelled();
           }
+          if (replace) reviewHistory.clear();
           project = next;
           videoSourceRevision++;
         });
@@ -751,6 +830,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   void _resetTransientState() {
+    reviewHistory.clear();
+    _setReviewNotice(null);
     videoSourceFailure = null;
     diagnosticError = null;
     errorMessage = null;
@@ -930,6 +1011,15 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   void toggleCandidate(String id, CandidateSelection selection) {
+    final old = project.candidates.where(
+      (c) => c.id == id && (c.selection != selection || !c.reviewed),
+    );
+    _recordReview(
+      ReviewChange.selection,
+      old,
+      id,
+      selection == CandidateSelection.included ? '已保留' : '已排除',
+    );
     project = project.copyWith(
       candidates: project.candidates
           .map(
@@ -962,6 +1052,12 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   void setCandidatePlayer(String id, String? player) {
+    _recordReview(
+      ReviewChange.player,
+      project.candidates.where((c) => c.id == id && c.player != player),
+      id,
+      '已设标签',
+    );
     project = project.copyWith(
       candidates: project.candidates
           .map(
@@ -1284,6 +1380,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       if (!videoMatches) {
         throw const MobileAnalysisException('视频检查未通过或耗时过长，请重新选择可正常播放的原视频。');
       }
+      reviewHistory.clear();
       project = project.copyWith(
         candidates: const [],
         lastAnalysisStatus: 'running',
@@ -1397,6 +1494,18 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   void updateCandidate(Candidate candidate) {
+    _recordReview(
+      ReviewChange.range,
+      project.candidates.where(
+        (c) =>
+            c.id == candidate.id &&
+            (c.startMs != candidate.startMs ||
+                c.endMs != candidate.endMs ||
+                c.rangeEdited != candidate.rangeEdited),
+      ),
+      candidate.id,
+      '已改时长',
+    );
     project = project.copyWith(
       candidates: project.candidates
           .map((item) => item.id == candidate.id ? candidate : item)
@@ -1412,6 +1521,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     required int beforeSeconds,
     required int afterSeconds,
     Iterable<String>? candidateIds,
+    String? focusId,
     bool overwriteManual = false,
   }) {
     final video = project.video;
@@ -1434,6 +1544,25 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       return candidate.copyWith(startMs: start, endMs: end, rangeEdited: false);
     }).toList();
     if (updated == 0) return 0;
+    final changed = project.candidates
+        .where(
+          (old) => candidates.any(
+            (next) =>
+                next.id == old.id &&
+                (next.startMs != old.startMs ||
+                    next.endMs != old.endMs ||
+                    next.rangeEdited != old.rangeEdited),
+          ),
+        )
+        .toList();
+    if (changed.isNotEmpty) {
+      _recordReview(
+        ReviewChange.range,
+        changed,
+        changed.any((c) => c.id == focusId) ? focusId! : changed.first.id,
+        '已改时长',
+      );
+    }
     project = project.copyWith(candidates: candidates);
     unawaited(_queueSave());
     notifyListeners();
@@ -1441,6 +1570,13 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   void updateCandidateNote(String id, String? note) {
+    final normalized = note == null || note.trim().isEmpty ? null : note;
+    _recordReview(
+      ReviewChange.note,
+      project.candidates.where((c) => c.id == id && c.note != normalized),
+      id,
+      '已改备注',
+    );
     project = project.copyWith(
       candidates: project.candidates
           .map(

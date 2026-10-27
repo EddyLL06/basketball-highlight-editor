@@ -32,6 +32,7 @@ part 'features/video_source/video_preview.dart';
 part 'features/video_source/review_controls.dart';
 part 'features/export/export_audio_notice.dart';
 part 'features/roi_editor/roi_editor_sheet.dart';
+part 'features/review_undo/review_notice.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 
@@ -495,6 +496,9 @@ class _TopBar extends StatelessWidget {
                 case 'delete':
                   await _confirmDelete(context, state);
                   break;
+                case 'undo':
+                  await state.undoReview();
+                  break;
                 case 'update':
                   onCheckUpdate();
                   break;
@@ -530,6 +534,8 @@ class _TopBar extends StatelessWidget {
                 value: 'diagnostics',
                 child: Text(context.bheText('反馈与诊断')),
               ),
+              if (section == _WorkspaceSection.review)
+                PopupMenuItem(value: 'undo', enabled: state.canUndoReview, child: Text(context.bheText('撤销上一步'))),
             ],
           ),
         ],
@@ -1254,6 +1260,8 @@ class _ReviewViewState extends State<_ReviewView> {
   bool _stoppingAtCandidateEnd = false;
   bool _seeking = false;
   bool _completionPromptShown = false;
+  bool _fullscreen = false;
+  int _undoRevision = 0;
   DateTime _lastVideoPaint = DateTime.fromMillisecondsSinceEpoch(0);
   String statusFilter = 'all';
   String rimFilter = 'all';
@@ -1305,7 +1313,21 @@ class _ReviewViewState extends State<_ReviewView> {
         DeviceOrientation.portraitDown,
       ]),
     );
+    _undoRevision = state.undoRevision;
+    state.addListener(_onUndo);
     _openVideo();
+  }
+
+  void _onUndo() {
+    if (!mounted || _undoRevision == state.undoRevision) return;
+    _undoRevision = state.undoRevision;
+    final id = state.undoFocusId;
+    if (!candidates.any((item) => item.id == id)) {
+      setState(() { statusFilter = 'all'; rimFilter = 'all'; playerFilter = 'all'; });
+    }
+    _completionPromptShown = false;
+    final index = candidates.indexWhere((item) => item.id == id);
+    if (index >= 0) unawaited(_select(index));
   }
 
   String? _openedVideoPath;
@@ -1376,6 +1398,7 @@ class _ReviewViewState extends State<_ReviewView> {
       await queue;
       await player?.dispose();
     }());
+    state.removeListener(_onUndo);
     _railController.dispose();
     super.dispose();
   }
@@ -1461,12 +1484,14 @@ class _ReviewViewState extends State<_ReviewView> {
     ]);
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     if (!mounted) return;
+    setState(() => _fullscreen = true);
     try {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           fullscreenDialog: true,
           builder: (pageContext) => _FullscreenReviewPage(
             controller: player,
+            state: state,
             candidates: candidates,
             index: selectedIndex + 1,
             selectedIndex: selectedIndex,
@@ -1496,6 +1521,7 @@ class _ReviewViewState extends State<_ReviewView> {
         ),
       );
     } finally {
+      if (mounted) setState(() => _fullscreen = false);
       await SystemChrome.setPreferredOrientations(const [
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
@@ -1648,6 +1674,7 @@ class _ReviewViewState extends State<_ReviewView> {
             ? candidates.map((candidate) => candidate.id)
             : null,
         overwriteManual: overwriteManual,
+        focusId: selected?.id,
       );
       if (updated > 0) setState(() {});
     }
@@ -1655,6 +1682,7 @@ class _ReviewViewState extends State<_ReviewView> {
 
   @override
   Widget build(BuildContext context) {
+    if (_fullscreen) return const SizedBox.shrink();
     final candidate = selected;
     if (candidate == null && allCandidates.isEmpty) {
       return _ReviewEmpty(
@@ -1685,13 +1713,16 @@ class _ReviewViewState extends State<_ReviewView> {
       onAdd: () => _addManualCandidate(context),
       onBatchRange: () => _showBatchRangeSheet(context),
     );
-    if (candidate == null) return rail;
+    if (candidate == null) {
+      return Column(children: [Expanded(child: rail), _ReviewUndoNotice(state: state)]);
+    }
     final video = state.project.video!;
     return LayoutBuilder(
       builder: (context, constraints) => Column(
         children: [
           Expanded(
-            child: _ReviewSourceBody(
+            child: Stack(children: [
+              Positioned.fill(child: _ReviewSourceBody(
               rail: rail,
               video: _ReviewVideoStage(
                 controller: controller,
@@ -1710,7 +1741,9 @@ class _ReviewViewState extends State<_ReviewView> {
                   velocity < 0 ? selectedIndex + 1 : selectedIndex - 1,
                 ),
               ),
-            ),
+              )),
+              Positioned(left: 0, bottom: 0, width: math.min(300, constraints.maxWidth), child: _ReviewUndoNotice(state: state)),
+            ]),
           ),
           _ReviewActionBar(
             candidate: candidate,
@@ -1870,7 +1903,10 @@ class _ReviewViewState extends State<_ReviewView> {
         return next;
       } else if (!_completionPromptShown) {
         _completionPromptShown = true;
-        unawaited(_showReviewCompletePrompt(context));
+        final revision = state.reviewRevision;
+        Future<void>.delayed(const Duration(seconds: 5), () {
+          if (mounted && revision == state.reviewRevision) unawaited(_showReviewCompletePrompt(context));
+        });
       }
     }
     return index;
@@ -2227,6 +2263,7 @@ double videoAspectRatio(VideoInfo? video) {
 
 class _FullscreenReviewPage extends StatefulWidget {
   const _FullscreenReviewPage({
+    required this.state,
     required this.controller,
     required this.candidates,
     required this.selectedIndex,
@@ -2251,6 +2288,7 @@ class _FullscreenReviewPage extends StatefulWidget {
     required this.onSpeed,
   });
 
+  final MobileAppState state;
   final VideoPlayerController controller;
   final List<Candidate> candidates;
   final int selectedIndex;
@@ -2285,6 +2323,7 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
   late bool _autoReplay;
   late double _speed;
   bool _railVisible = true;
+  int _undoRevision = 0;
 
   Candidate get _candidate =>
       _candidates[_selectedIndex.clamp(0, math.max(0, _candidates.length - 1))];
@@ -2301,12 +2340,27 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
     _autoReplay = widget.autoReplay;
     _speed = widget.speed;
     widget.controller.addListener(_refresh);
+    _undoRevision = widget.state.undoRevision;
+    widget.state.addListener(_onState);
   }
 
   @override
   void dispose() {
+    widget.state.removeListener(_onState);
     widget.controller.removeListener(_refresh);
     super.dispose();
+  }
+
+  void _onState() {
+    if (!mounted || _undoRevision == widget.state.undoRevision) return;
+    _undoRevision = widget.state.undoRevision;
+    final next = widget.currentCandidates();
+    final focus = widget.state.undoFocusId;
+    setState(() {
+      _candidates = next;
+      final index = next.indexWhere((item) => item.id == focus);
+      if (index >= 0) _selectedIndex = index;
+    });
   }
 
   void _refresh() {
@@ -2354,13 +2408,16 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Expanded(
-                    child: _buildVideoPanel(
-                      context,
-                      position: position.round(),
-                      lower: lower,
-                      upper: upper,
-                      maxValue: maxValue,
-                    ),
+                    child: Stack(children: [
+                      Positioned.fill(child: _buildVideoPanel(
+                        context,
+                        position: position.round(),
+                        lower: lower,
+                        upper: upper,
+                        maxValue: maxValue,
+                      )),
+                      Positioned(left: 0, bottom: 0, width: math.min(300, size.width - (_railVisible ? railWidth : 0)), child: _ReviewUndoNotice(state: widget.state)),
+                    ]),
                   ),
                   if (_railVisible) ...[
                     const SizedBox(width: 1),
@@ -2512,15 +2569,16 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
             child: Row(
               children: [
-                Text(
+                Expanded(child: Text(
                   context.bheText('候选片段'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                   ),
-                ),
-                const Spacer(),
+                )),
                 Text(
                   '$included/${_candidates.length}',
                   style: TextStyle(
