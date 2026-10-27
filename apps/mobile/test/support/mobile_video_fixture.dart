@@ -35,6 +35,9 @@ class MobileVideoFixture {
   Future<void> init({
     Future<VideoInfo> Function(File)? probe,
     MobileAnalysisEngine? engine,
+    MobileExportEngine? exportEngine,
+    Duration exportCancelTimeout = const Duration(seconds: 5),
+    Duration exportDrainTimeout = const Duration(seconds: 30),
   }) async {
     root = await Directory.systemTemp.createTemp('bhe_state_');
     SharedPreferences.setMockInitialValues({});
@@ -46,6 +49,9 @@ class MobileVideoFixture {
     FilePicker.platform = picker;
     state = MobileAppState(
       analysisEngine: engine ?? const MobileAnalysisEngineUnavailable(),
+      exportEngine: exportEngine,
+      exportCancelTimeout: exportCancelTimeout,
+      exportDrainTimeout: exportDrainTimeout,
       videoProbe: probe ?? inspect,
     );
     await state.ready;

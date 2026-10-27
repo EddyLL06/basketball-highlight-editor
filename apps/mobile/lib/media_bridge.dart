@@ -21,11 +21,43 @@ String clipFileName(int index, Candidate candidate) {
 
 class _ExportRun {
   bool cancelled = false;
+  bool admitted = false;
   String? mergeId;
+  final Completer<void> cancelledSignal = Completer<void>();
+}
+
+class _ExportTicket {
+  _ExportTicket(this.previous, this.release, this.waiting);
+  final Future<void> previous;
+  final Completer<void> release;
+  final bool waiting;
+  void finish() {
+    // A timed-out or cancelled waiter must not release its predecessor.
+    previous.then((_) {
+      if (!release.isCompleted) release.complete();
+    });
+  }
+}
+
+class _ExportGate {
+  static Future<void> _tail = Future.value();
+  static int _pending = 0;
+  static _ExportTicket enter() {
+    final previous = _tail;
+    final release = Completer<void>();
+    final ticket = _ExportTicket(previous, release, _pending > 0);
+    _pending++;
+    _tail = release.future;
+    release.future.then((_) {
+      _pending--;
+    });
+    return ticket;
+  }
 }
 
 class NativeMediaExportEngine implements MobileExportEngine {
-  NativeMediaExportEngine();
+  NativeMediaExportEngine({this.drainTimeout = const Duration(seconds: 30)});
+  final Duration drainTimeout;
 
   static const _channel = MethodChannel('com.bhe.bhe/mobile_media');
   _ExportRun? _activeRun;
@@ -55,13 +87,14 @@ class NativeMediaExportEngine implements MobileExportEngine {
     if (candidates.isEmpty) return;
     final run = _ExportRun();
     _activeRun = run;
+    final ticket = _ExportGate.enter();
     try {
-      // Parallel export: MediaExtractor/MediaMuxer on Android runs on
-      // background threads; exporting 4+ clips concurrently reduces total
-      // wall time from sum(N) to ~max(N) + small overhead.
-      // Keep concurrency bounded to avoid thread/memory pressure on
-      // low-end devices.
-      const maxConcurrent = 3;
+      if (ticket.waiting) {
+        yield const ExportProgress(progress: 0, message: '正在结束上一次导出');
+      }
+      await _waitForTurn(ticket, run);
+      // One native call at a time, including across project switches.
+      const maxConcurrent = 1;
       final outputs = <String>[];
       final skipped = <String, List<SkippedAudioTrack>>{};
       var completed = 0;
@@ -118,6 +151,7 @@ class NativeMediaExportEngine implements MobileExportEngine {
         }
       }
     } finally {
+      ticket.finish();
       if (identical(_activeRun, run)) _activeRun = null;
     }
   }
@@ -134,11 +168,17 @@ class NativeMediaExportEngine implements MobileExportEngine {
     final exportId = 'merge-${DateTime.now().microsecondsSinceEpoch}';
     run.mergeId = exportId;
     var reserved = false;
+    final ticket = _ExportGate.enter();
     try {
+      if (ticket.waiting) {
+        yield const ExportProgress(progress: 0, message: '正在结束上一次导出');
+      }
+      await _waitForTurn(ticket, run);
       try {
         reserved =
             await _channel.invokeMethod<bool>('registerMergeExport', {
               'exportId': exportId,
+              'outputPath': outputPath,
             }) ??
             false;
       } on MissingPluginException {
@@ -189,8 +229,23 @@ class NativeMediaExportEngine implements MobileExportEngine {
           );
         }
       }
+      ticket.finish();
       if (identical(_activeRun, run)) _activeRun = null;
     }
+  }
+
+  Future<void> _waitForTurn(_ExportTicket ticket, _ExportRun run) async {
+    final available =
+        await Future.any([
+          ticket.previous.then((_) => true),
+          run.cancelledSignal.future.then((_) => false),
+        ]).timeout(
+          drainTimeout,
+          onTimeout: () =>
+              throw const MobileExportException('上一次导出尚未结束，请稍后重试。'),
+        );
+    if (!available || run.cancelled) throw const MobileExportException('导出已取消');
+    run.admitted = true;
   }
 
   @override
@@ -198,6 +253,8 @@ class NativeMediaExportEngine implements MobileExportEngine {
     final run = _activeRun;
     if (run == null) return;
     run.cancelled = true;
+    if (!run.cancelledSignal.isCompleted) run.cancelledSignal.complete();
+    if (!run.admitted) return;
     final exportId = run.mergeId;
     try {
       await _channel.invokeMethod<void>(

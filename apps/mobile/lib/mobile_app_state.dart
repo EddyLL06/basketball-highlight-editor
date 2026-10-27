@@ -32,9 +32,13 @@ import 'native_analysis_engine.dart';
 class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   MobileAppState({
     MobileAnalysisEngine? analysisEngine,
+    MobileExportEngine? exportEngine,
     VideoSourceStore? videoSourceStore,
     this.videoProbe,
+    this.exportCancelTimeout = const Duration(seconds: 5),
+    this.exportDrainTimeout = const Duration(seconds: 30),
   }) : analysisEngine = analysisEngine ?? NativeAnalysisEngine(),
+       exportEngine = exportEngine ?? NativeMediaExportEngine(),
        _providedVideoStore = videoSourceStore {
     ready = Future.wait([loadSavedProject(), _loadPlayerGroups()]).then((_) {});
   }
@@ -42,6 +46,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   late final Future<void> ready;
   final VideoSourceStore? _providedVideoStore;
   final Future<VideoInfo> Function(File)? videoProbe;
+  final Duration exportCancelTimeout;
+  final Duration exportDrainTimeout;
   late final VideoSourceStore _videoStore =
       _providedVideoStore ??
       VideoSourceStore(
@@ -54,7 +60,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   static const defaultPlayerGroupPrefsKey = 'bhe.default_player_group';
 
   final MobileAnalysisEngine analysisEngine;
-  final MobileExportEngine exportEngine = NativeMediaExportEngine();
+  final MobileExportEngine exportEngine;
 
   ProjectSnapshot project = ProjectSnapshot(
     id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -181,6 +187,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   @override
   void dispose() {
     _disposed = true;
+    _exportDrainTimer?.cancel();
     _videoPreparationGeneration++;
     super.dispose();
   }
@@ -193,6 +200,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   bool exportCancelled = false;
   int _exportRun = 0;
   bool _exportPreflight = false;
+  Timer? _exportDrainTimer;
   bool _mergeCommitted = false;
   bool exportAudioSkipped = false;
   int? exportMergedOverlapCount;
@@ -1346,6 +1354,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   void _resetTransientState() {
+    _exportDrainTimer?.cancel();
     if (exporting && !_exportPreflight && !_mergeCommitted) {
       unawaited(
         exportEngine.cancel().catchError((Object error, StackTrace stack) {
@@ -1984,8 +1993,11 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   int? _beginExport() {
     if (exporting) return null;
+    _exportDrainTimer?.cancel();
     final run = ++_exportRun;
     exporting = true;
+    progress = 0;
+    progressMessage = '正在检查视频';
     _exportPreflight = true;
     _mergeCommitted = false;
     exportCancelled = false;
@@ -2070,6 +2082,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     } finally {
       stopwatch.stop();
       if (current()) {
+        _exportDrainTimer?.cancel();
         exporting = false;
         _exportPreflight = false;
         notifyListeners();
@@ -2163,6 +2176,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     } finally {
       stopwatch.stop();
       if (current()) {
+        _exportDrainTimer?.cancel();
         exporting = false;
         _exportPreflight = false;
         notifyListeners();
@@ -2171,7 +2185,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   Future<void> cancelExport() async {
-    if (!exporting || _mergeCommitted) return;
+    if (!exporting || _mergeCommitted || exportCancelled) return;
     final run = _exportRun;
     exportCancelled = true;
     exportMergedOverlapCount = null;
@@ -2184,8 +2198,22 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       return;
     }
     notifyListeners();
+    _exportDrainTimer?.cancel();
+    _exportDrainTimer = Timer(exportDrainTimeout, () {
+      if (_disposed || run != _exportRun || !exporting || _mergeCommitted) {
+        return;
+      }
+      _exportRun++;
+      exporting = false;
+      _exportPreflight = false;
+      final error = TimeoutException('上一次导出尚未结束，请稍后重试。');
+      recordDiagnosticFailure(error, StackTrace.current, operation: 'export');
+      errorMessage = '上一次导出尚未结束，请稍后重试。';
+      progressMessage = errorMessage!;
+      notifyListeners();
+    });
     try {
-      await exportEngine.cancel();
+      await exportEngine.cancel().timeout(exportCancelTimeout);
       if (!_disposed && run == _exportRun && !_mergeCommitted) {
         progressMessage = '导出已取消';
       }

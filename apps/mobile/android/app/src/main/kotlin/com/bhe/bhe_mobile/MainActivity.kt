@@ -70,7 +70,7 @@ class MainActivity : FlutterActivity() {
         setAnalysisScreenOn(false)
         analysisTaskListener?.let(AnalysisTaskManager::detach)
         analysisTaskListener = null
-        exportCancelled.values.forEach { it.set(true) }
+        exportCancelled.forEach { (id, flag) -> flag.set(true); ExportPathRegistry.releaseIdle(id) }
         super.onDestroy()
     }
 
@@ -674,9 +674,15 @@ class MainActivity : FlutterActivity() {
             result.error("INVALID_ARGUMENT", "视频片段参数无效", null)
             return
         }
+        val reserved = try { ExportPathRegistry.reserve(exportId, outputPath) && ExportPathRegistry.start(exportId, outputPath) } catch (error: Exception) { false }
+        if (!reserved) {
+            result.error("EXPORT_BUSY", "这个输出文件正在导出，请稍后重试。", null)
+            return
+        }
         val cancelled = AtomicBoolean(false)
         exportCancelled[exportId] = cancelled
         Thread {
+            var completion: (() -> Unit)? = null
             var extractor: MediaExtractor? = null
             var muxer: MediaMuxer? = null
             var muxerStarted = false
@@ -726,15 +732,15 @@ class MainActivity : FlutterActivity() {
                     muxerStarted = false
                 }
                 AppDiagnostics.event("export.completed")
-                mainHandler.post { result.success(exportResult(outputPath, selection)) }
+                completion = { result.success(exportResult(outputPath, selection)) }
             } catch (_: InterruptedException) {
                 File(outputPath).delete()
                 AppDiagnostics.event("export.cancelled")
-                mainHandler.post { result.error("EXPORT_CANCELLED", "导出已取消", null) }
+                completion = { result.error("EXPORT_CANCELLED", "导出已取消", null) }
             } catch (error: Exception) {
                 File(outputPath).delete()
                 AppDiagnostics.event("export.failed", error = error)
-                mainHandler.post { result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error)) }
+                completion = { result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error)) }
             } finally {
                 if (muxerStarted) {
                     try {
@@ -742,16 +748,29 @@ class MainActivity : FlutterActivity() {
                     } catch (_: Exception) {
                     }
                 }
-                muxer?.release()
-                extractor?.release()
-                exportCancelled.remove(exportId)
+                try { muxer?.release() } catch (error: Exception) { AppDiagnostics.event("export.cleanup.failed", error = error) }
+                try { extractor?.release() } catch (error: Exception) { AppDiagnostics.event("export.cleanup.failed", error = error) }
+                exportCancelled.remove(exportId, cancelled)
+                ExportPathRegistry.finish(exportId)
+                mainHandler.post { completion?.invoke() }
             }
         }.start()
     }
 
     private fun registerMergeExport(call: MethodCall, result: MethodChannel.Result) {
         val id = call.argument<String>("exportId")
-        if (id.isNullOrBlank() || exportCancelled.putIfAbsent(id, AtomicBoolean(false)) != null) {
+        val outputPath = call.argument<String>("outputPath")
+        if (id.isNullOrBlank() || outputPath.isNullOrBlank()) {
+            result.error("INVALID_ARGUMENT", "合并导出任务无效", null)
+            return
+        }
+        val reserved = try { ExportPathRegistry.reserve(id, outputPath) } catch (error: Exception) { false }
+        if (!reserved) {
+            result.error("EXPORT_BUSY", "这个输出文件正在导出，请稍后重试。", null)
+            return
+        }
+        if (exportCancelled.putIfAbsent(id, AtomicBoolean(false)) != null) {
+            ExportPathRegistry.releaseIdle(id)
             result.error("INVALID_ARGUMENT", "合并导出任务无效", null)
             return
         }
@@ -760,7 +779,9 @@ class MainActivity : FlutterActivity() {
 
     private fun releaseMergeExport(call: MethodCall, result: MethodChannel.Result) {
         val id = call.argument<String>("exportId")
-        if (id != null && !mergeTransactions.containsKey(id)) exportCancelled.remove(id)
+        if (id != null) {
+            if (ExportPathRegistry.releaseIdle(id)) exportCancelled.remove(id)
+        }
         result.success(null)
     }
 
@@ -794,7 +815,16 @@ class MainActivity : FlutterActivity() {
             val flag = AtomicBoolean(false)
             exportCancelled.putIfAbsent(exportId, flag) ?: flag
         }
+        val started = try {
+            (reserved || ExportPathRegistry.reserve(exportId, outputPath)) && ExportPathRegistry.start(exportId, outputPath)
+        } catch (error: Exception) { false }
+        if (!started) {
+            if (!reserved) exportCancelled.remove(exportId, cancelled)
+            result.error("EXPORT_BUSY", "这个输出文件正在导出，请稍后重试。", null)
+            return
+        }
         Thread {
+            var completion: (() -> Unit)? = null
             var muxer: MediaMuxer? = null
             var muxerStarted = false
             var transaction: MergeOutputTransaction? = null
@@ -886,16 +916,16 @@ class MainActivity : FlutterActivity() {
                     inspect = { file -> AndroidMergeMediaInspector.inspect(file, cancelled) },
                 )
                 AppDiagnostics.event("export.completed")
-                mainHandler.post { result.success(exportResult(outputPath, selection) + mapOf("mergedOverlapCount" to plan.mergedOverlapCount, "committed" to true)) }
+                completion = { result.success(exportResult(outputPath, selection) + mapOf("mergedOverlapCount" to plan.mergedOverlapCount, "committed" to true)) }
             } catch (_: InterruptedException) {
                 AppDiagnostics.event("export.cancelled")
-                mainHandler.post { result.error("EXPORT_CANCELLED", "合并导出已取消", null) }
+                completion = { result.error("EXPORT_CANCELLED", "合并导出已取消", null) }
             } catch (error: MergeRangeUnavailable) {
                 AppDiagnostics.event("export.failed", error = error)
-                mainHandler.post { result.error("EXPORT_RANGE_UNREADABLE", error.message, NativeFailureDetails.from(error)) }
+                completion = { result.error("EXPORT_RANGE_UNREADABLE", error.message, NativeFailureDetails.from(error)) }
             } catch (error: Exception) {
                 AppDiagnostics.event("export.failed", error = error)
-                mainHandler.post { result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error)) }
+                completion = { result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error)) }
             } finally {
                 if (muxerStarted) {
                     try {
@@ -915,6 +945,8 @@ class MainActivity : FlutterActivity() {
                 }
                 transaction?.let { mergeTransactions.remove(exportId, it) }
                 exportCancelled.remove(exportId, cancelled)
+                ExportPathRegistry.finish(exportId)
+                mainHandler.post { completion?.invoke() }
             }
         }.start()
     }

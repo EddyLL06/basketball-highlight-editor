@@ -37,7 +37,11 @@ void main() {
               if (call.method == 'exportClip') clips++;
               return null;
             });
+        f.state.progress = .9;
+        f.state.progressMessage = 'OLD PROGRESS';
         final first = f.state.mergeClips();
+        expect(f.state.progress, 0);
+        expect(f.state.progressMessage, '正在检查视频');
         await entered.future;
         expect(f.state.exporting, isTrue);
         await (mixed ? f.state.exportClips() : f.state.mergeClips());
@@ -180,9 +184,12 @@ void main() {
       await entered.future;
       await f.state.createNewProject();
       f.state.project = f.project(file.path, id: 'B');
-      await f.state.mergeClips();
+      final next = f.state.mergeClips();
+      await pumpEventQueue();
+      expect(calls, 1);
       finishOld.completeError(PlatformException(code: 'EXPORT_CANCELLED'));
       await old;
+      await next;
       expect(calls, 2);
       expect(cancellations, [ids.first]);
       expect(ids.first, isNot(ids.last));

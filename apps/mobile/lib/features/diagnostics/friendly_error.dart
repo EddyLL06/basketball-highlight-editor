@@ -35,6 +35,9 @@ FriendlyMobileError friendlyMobileError(
       raw.contains('分析已取消')) {
     return const FriendlyMobileError(null, cancelled: true);
   }
+  if (raw.contains('上一次导出尚未结束')) {
+    return const FriendlyMobileError('上一次导出尚未结束，请稍后重试。');
+  }
   if (errno == 28 ||
       raw.contains('enospc') ||
       raw.contains('no space left') ||
@@ -63,6 +66,9 @@ FriendlyMobileError friendlyMobileError(
   if (error is SocketException ||
       operation.startsWith('update') && raw.contains('network')) {
     return const FriendlyMobileError('连不上更新服务器，请检查网络');
+  }
+  if (code == 'EXPORT_BUSY') {
+    return const FriendlyMobileError('这个输出文件正在导出，请稍后重试。');
   }
   if (code == 'INVALID_ARGUMENT') {
     return const FriendlyMobileError('设置无效，请检查视频范围后重试。');
