@@ -372,39 +372,39 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       isCurrent: current,
       validate: (file) =>
           _inspectVideo(file, expected: replace ? null : snapshot.video),
+      commit: (action) => _mutations.run(action),
       persist: (localPath, info) async {
+        if (!current()) throw const VideoSourceCancelled();
+        final before = project;
         final video = VideoInfo(
           path: localPath,
-          name: name ?? snapshot.video?.name ?? info.name,
+          name: name ?? before.video?.name ?? info.name,
           sizeBytes: info.sizeBytes,
           durationMs: info.durationMs,
           width: info.width,
           height: info.height,
           sha256: info.sha256,
         );
-        final next = snapshot.copyWith(
+        final next = before.copyWith(
           video: video,
           name: replace
               ? video.name.replaceFirst(RegExp(r'\.[^.]+$'), '')
-              : snapshot.name,
+              : before.name,
           clearHoopRoi: replace,
           clearRimRoi: replace,
           clearNetRoi: replace,
-          candidates: replace ? const [] : snapshot.candidates,
+          candidates: replace ? const [] : before.candidates,
           clearLastAnalysis: replace,
         );
-        final task = _mutations.run(() async {
-          if (!current()) throw const VideoSourceCancelled();
-          await _writeProject(next);
-          if (!current()) {
-            await _writeProject(snapshot);
-            throw const VideoSourceCancelled();
-          }
-          if (replace) reviewHistory.clear();
-          project = next;
-          videoSourceRevision++;
-        });
-        await task;
+        await _writeProject(next);
+        if (!current()) {
+          await _writeProject(before);
+          throw const VideoSourceCancelled();
+        }
+        project = next;
+        reviewHistory.clear();
+        _setReviewNotice(null);
+        videoSourceRevision++;
       },
     );
   }

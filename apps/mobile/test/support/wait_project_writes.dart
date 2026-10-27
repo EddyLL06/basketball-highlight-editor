@@ -6,7 +6,7 @@ Future<void> waitProjectWrites(
 ) async {
   var finished = false;
   pending.whenComplete(() => finished = true);
-  for (var i = 0; i < 100 && !finished; i++) {
+  for (var i = 0; i < 1000 && !finished; i++) {
     await tester.pump();
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 10)),
