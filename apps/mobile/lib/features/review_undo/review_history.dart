@@ -29,6 +29,19 @@ class ReviewHistory {
     if (_entries.length > 20) _entries.removeAt(0);
   }
 
+  void remapPlayer(String oldName, String? newName) {
+    for (final entry in allEntries) {
+      for (final item in entry.before.entries.toList()) {
+        if (item.value.player == oldName) {
+          entry.before[item.key] = item.value.copyWith(
+            player: newName,
+            clearPlayer: newName == null,
+          );
+        }
+      }
+    }
+  }
+
   ReviewEntry? pop() {
     if (_entries.isEmpty) return null;
     final entry = _entries.removeLast();
@@ -42,6 +55,8 @@ class ReviewHistory {
     add(entry);
     return true;
   }
+
+
 }
 
 Candidate restoreReviewFields(

@@ -1082,7 +1082,31 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     notifyListeners();
   }
 
+  bool renamePlayer(String oldName, String newName) {
+    final value = newName.trim();
+    if (!project.players.contains(oldName) ||
+        value.isEmpty ||
+        (value != oldName && project.players.contains(value))) {
+      return false;
+    }
+    if (value == oldName) return true;
+    reviewHistory.remapPlayer(oldName, value);
+    project = project.copyWith(
+      players: [
+        for (final name in project.players) name == oldName ? value : name,
+      ],
+      candidates: [
+        for (final c in project.candidates)
+          c.player == oldName ? c.copyWith(player: value) : c,
+      ],
+    );
+    unawaited(_queueSave());
+    notifyListeners();
+    return true;
+  }
+
   void removePlayer(String player) {
+    reviewHistory.remapPlayer(player, null);
     project = project.copyWith(
       players: project.players.where((item) => item != player).toList(),
       candidates: project.candidates

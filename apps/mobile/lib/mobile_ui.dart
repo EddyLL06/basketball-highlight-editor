@@ -33,6 +33,7 @@ part 'features/video_source/review_controls.dart';
 part 'features/export/export_audio_notice.dart';
 part 'features/roi_editor/roi_editor_sheet.dart';
 part 'features/review_undo/review_notice.dart';
+part 'features/player_tags/player_tag_sheet.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 
@@ -3821,12 +3822,10 @@ class _PlayerChoiceChip extends StatelessWidget {
     required this.player,
     required this.selected,
     required this.onSelected,
-    this.onDeleted,
   });
   final String player;
   final bool selected;
   final ValueChanged<bool> onSelected;
-  final VoidCallback? onDeleted;
 
   @override
   Widget build(BuildContext context) {
@@ -3835,10 +3834,6 @@ class _PlayerChoiceChip extends StatelessWidget {
       label: Text(player),
       selected: selected,
       onSelected: onSelected,
-      onDeleted: onDeleted,
-      deleteIcon: onDeleted == null
-          ? null
-          : const Icon(LucideIcons.x, size: 15),
       side: BorderSide(color: color.withValues(alpha: .65)),
       backgroundColor: color.withValues(alpha: .10),
       selectedColor: color.withValues(alpha: .28),
@@ -3884,7 +3879,6 @@ Future<void> _showPlayerPicker(
       state: state,
       players: state.project.players,
       initialPlayer: candidate.player,
-      onRemovePlayer: state.removePlayer,
     ),
   );
   if (value == null || !context.mounted) return;
@@ -3895,178 +3889,6 @@ Future<void> _showPlayerPicker(
     state.addPlayer(normalized);
     state.setCandidatePlayer(candidate.id, normalized);
   }
-}
-
-class _PlayerTagSheet extends StatefulWidget {
-  const _PlayerTagSheet({
-    required this.state,
-    required this.players,
-    required this.onRemovePlayer,
-    this.initialPlayer,
-  });
-  final MobileAppState state;
-  final List<String> players;
-  final String? initialPlayer;
-  final ValueChanged<String> onRemovePlayer;
-
-  @override
-  State<_PlayerTagSheet> createState() => _PlayerTagSheetState();
-}
-
-class _PlayerTagSheetState extends State<_PlayerTagSheet> {
-  late final TextEditingController _input;
-  late List<String> _players;
-  String? _selected;
-  bool _creating = false;
-  bool _managing = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _selected = widget.initialPlayer;
-    _players = [...widget.players];
-    _input = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _input.dispose();
-    super.dispose();
-  }
-
-  void _close(String value) {
-    if (mounted) Navigator.of(context).pop(value);
-  }
-
-  void _removePlayer(String player) {
-    setState(() {
-      _players = _players.where((item) => item != player).toList();
-      if (_selected == player) _selected = null;
-    });
-    widget.onRemovePlayer(player);
-  }
-
-  Future<void> _openGroups() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => _PlayerGroupsSheet(state: widget.state),
-    );
-    if (mounted) setState(() => _players = [...widget.state.project.players]);
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedPadding(
-    duration: const Duration(milliseconds: 180),
-    curve: Curves.easeOut,
-    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-    child: _SheetFrame(
-      title: context.bheText('球员标签'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_players.isEmpty)
-            Text(
-              context.bheText('还没有球员标签。'),
-              style: Theme.of(context).textTheme.bodySmall,
-            )
-          else ...[
-            Row(
-              children: [
-                Text(
-                  context.bheText('选择球员'),
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: () => setState(() => _managing = !_managing),
-                  icon: Icon(
-                    _managing ? LucideIcons.check : LucideIcons.settings2,
-                    size: 15,
-                  ),
-                  label: Text(context.bheText(_managing ? '完成管理' : '管理')),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final player in _players)
-                  _PlayerChoiceChip(
-                    player: player,
-                    selected: _selected == player,
-                    onDeleted: _managing ? () => _removePlayer(player) : null,
-                    onSelected: (value) {
-                      if (!mounted) return;
-                      setState(() {
-                        _selected = value ? player : null;
-                        _input.clear();
-                      });
-                    },
-                  ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 14),
-          if (_creating)
-            TextField(
-              controller: _input,
-              autofocus: true,
-              textInputAction: TextInputAction.done,
-              decoration: InputDecoration(
-                labelText: context.bheText('新建球员标签'),
-                hintText: context.bheText('例如 #10 Kobe'),
-                prefixIcon: Icon(LucideIcons.tag, size: 18),
-              ),
-              onChanged: (value) {
-                final next = value.trim().isEmpty ? null : value.trim();
-                if (_selected != next) setState(() => _selected = next);
-              },
-              onSubmitted: (value) => _close(value.trim()),
-            )
-          else
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => setState(() => _creating = true),
-                    icon: const Icon(LucideIcons.plus, size: 17),
-                    label: Text(context.bheText('新建球员标签')),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                OutlinedButton.icon(
-                  onPressed: _openGroups,
-                  icon: const Icon(LucideIcons.users, size: 17),
-                  label: Text(context.bheText('球员分组')),
-                ),
-              ],
-            ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _close(''),
-                  child: Text(context.bheText('清除标签')),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton(
-                  onPressed: () => _close(_selected ?? _input.text.trim()),
-                  child: Text(context.bheText('应用标签')),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    ),
-  );
 }
 
 class _PlayerGroupsSheet extends StatelessWidget {
