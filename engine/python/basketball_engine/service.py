@@ -35,6 +35,7 @@ from .adapters.export import (
     available_output_path,
     ensure_writable_directory,
     export_goal_clips,
+    merge_overlapping_candidates,
     normalize_output_path,
     safe_file_stem,
     trajectory_points,
@@ -2393,7 +2394,11 @@ class EngineService:
             "processing_ms": result["processing_ms"],
             "export_ms": result["processing_ms"],
             "algorithm_version": ANALYSIS_ALGORITHM_VERSION,
-            "metadata": {"files": result["files"], "clip_files": result["clip_files"]},
+            "metadata": {
+                "files": result["files"],
+                "clip_files": result["clip_files"],
+                "merged_overlap_count": result["merged_overlap_count"],
+            },
         })
         return {"export": export, "files": result["files"]}
 
@@ -2418,6 +2423,8 @@ class EngineService:
         clip_files: list[str] = []
         duration_ms = 0
         processing_ms = 0
+        merged_overlap_count = 0
+        sizes = [len(merge_overlapping_candidates(group)) if effect == "none" else len(group) for group in groups.values()]
         done = 0
         try:
             for index, (name, group) in enumerate(groups.items()):
@@ -2429,9 +2436,9 @@ class EngineService:
                         {"source_path": str(merged.resolve())},
                     )
 
-                def on_progress(stage: str, fraction: float, offset: int = done, size: int = len(group)) -> None:
+                def on_progress(stage: str, fraction: float, offset: int = done, size: int = sizes[index]) -> None:
                     if progress_callback:
-                        progress_callback(stage, (offset + fraction * size) / len(candidates))
+                        progress_callback(stage, (offset + fraction * size) / sum(sizes))
 
                 result = export_goal_clips(
                     group,
@@ -2447,15 +2454,18 @@ class EngineService:
                 clip_files.extend(result["clip_files"])
                 duration_ms += result["duration_ms"]
                 processing_ms += result["processing_ms"]
-                done += len(group)
+                merged_overlap_count += result["merged_overlap_count"]
+                done += sizes[index]
         except Exception:
             for path in files:
                 Path(path).unlink(missing_ok=True)
+            shutil.rmtree(work_root, ignore_errors=True)
             raise
         return {
             "files": files,
             "clip_files": clip_files,
             "duration_ms": duration_ms,
+            "merged_overlap_count": merged_overlap_count,
             "processing_ms": processing_ms,
         }
 
