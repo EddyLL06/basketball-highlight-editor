@@ -30,6 +30,11 @@ on:
         required: true
         type: boolean
         default: true
+      dry_run:
+        description: "Rehearse update channel without publishing"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -581,6 +586,7 @@ jobs:
           find dist -maxdepth 1 -type f -print -exec sha256sum {} \;
 
       - name: Publish GitHub Release
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
@@ -611,6 +617,7 @@ jobs:
       OSSUTIL_VERSION: v1.7.19
       TAG_NAME: ${{ needs.release-plan.outputs.tag }}
       RELEASE_PLATFORM: ${{ needs.release-plan.outputs.platform }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
     steps:
       - name: Check out publishing tools
         uses: actions/checkout@v4
@@ -638,6 +645,7 @@ jobs:
           go install "github.com/aliyun/ossutil@${OSSUTIL_VERSION}"
           echo "$go_bin" >> "$GITHUB_PATH"
       - name: Download exact release assets
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -654,6 +662,13 @@ jobs:
           esac
           for pattern in "${patterns[@]}"; do args+=(--pattern "$pattern"); done
           gh release download "${args[@]}"
+      - name: Download built assets for rehearsal
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: BHE-*
+          path: ${{ runner.temp }}/bhe-release-assets
+          merge-multiple: true
       - name: Publish verified update channel
         shell: bash
         env:
@@ -670,6 +685,8 @@ jobs:
             --access-key-id "$ALIBABA_CLOUD_ACCESS_KEY_ID" \
             --access-key-secret "$ALIBABA_CLOUD_ACCESS_KEY_SECRET" \
             --sts-token "$ALIBABA_CLOUD_SECURITY_TOKEN"
+          dry_run_arg=
+          if [[ "$DRY_RUN" == "true" ]]; then dry_run_arg=--dry-run; fi
           python3 publisher/scripts/publish_release_update.py \
             --tag "$TAG_NAME" --platform "$RELEASE_PLATFORM" \
             --assets-dir "$RUNNER_TEMP/bhe-release-assets" \
@@ -679,7 +696,7 @@ jobs:
             --android-base-url "https://oss.shengshengniannian.com/$OSS_PREFIX" \
             --android-alias-url "https://oss.shengshengniannian.com/$OSS_ANDROID_KEY" \
             --readme-zh source/README.md --readme-en source/README.en.md \
-            --signing-key "$key" --work-dir "$RUNNER_TEMP/bhe-update-channel"
+            --signing-key "$key" --work-dir "$RUNNER_TEMP/bhe-update-channel" ${dry_run_arg:+--dry-run}
       - name: Preserve publication outcome and trusted manifest backups
         if: always()
         uses: actions/upload-artifact@v4
@@ -699,5 +716,10 @@ jobs:
       - name: Summarize publication and queue cancellation
         env:
           OUTCOME: ${{ needs.oss-upload.result }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: |
-          printf '### 生产更新通道结果\n\nOSS job: **%s**\n\n只有 success 表示发布完成；cancelled 包括排队被替换，不能视为已发布。\n' "$OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$DRY_RUN" == "true" ]]; then
+            printf '### 更新通道演练\n\n演练，未写入任何对象。OSS job: **%s**\n' "$OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '### 生产更新通道结果\n\nOSS job: **%s**\n\n只有 success 表示发布完成；cancelled 包括排队被替换，不能视为已发布。\n' "$OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          fi

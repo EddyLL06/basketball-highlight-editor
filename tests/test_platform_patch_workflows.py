@@ -63,3 +63,41 @@ def test_legacy_local_uploader_cannot_bypass_production_lock():
     assert result.returncode == 2
     assert 'GitHub Actions' in result.stderr
     assert 'ossutil cp' not in (ROOT / 'scripts/upload_release_assets_oss.sh').read_text()
+
+
+def test_dry_run_workflow_inputs_and_tag_guards(tmp_path):
+    primary = yaml.safe_load((ROOT / '.github/workflows/release-packages.yml').read_text())
+    manual = yaml.safe_load((ROOT / '.github/workflows/upload-release-assets-oss.yml').read_text())
+    # PyYAML treats the YAML 1.1 key "on" as the boolean True.
+    for workflow, job_name in [(primary, 'oss-upload'), (manual, 'upload')]:
+        input_def = workflow[True]['workflow_dispatch']['inputs']['dry_run']
+        assert input_def['type'] == 'boolean' and input_def['default'] is False
+        job = workflow['jobs'][job_name]
+        assert job['concurrency'] == {'group': 'bhe-production-update-channel-v1', 'cancel-in-progress': False}
+        assert any(s.get('uses', '').startswith('actions/upload-artifact@') and s.get('if') == 'always()'
+                   for s in job['steps'])
+        assert '演练，未写入任何对象' in workflow['jobs']['publication-status']['steps'][0]['run']
+        script = next(s['run'] for s in job['steps'] if s.get('name') == 'Publish verified update channel')
+        # Run the real shell step against fake executables: no credentials or network.
+        bindir = tmp_path / job_name
+        bindir.mkdir()
+        for binary, body in [('ossutil', 'exit 0'), ('python3', 'printf "%s\\n" "$@" > "$ARG_LOG"')]:
+            path = bindir / binary
+            path.write_text('#!/bin/bash\n' + body + '\n')
+            path.chmod(0o755)
+        for dry in ('true', 'false'):
+            arglog = bindir / ('args-' + dry)
+            env = dict(os.environ, PATH=str(bindir) + ':' + os.environ['PATH'], RUNNER_TEMP=str(bindir),
+                       UPDATE_SIGNING_KEY='fake', ALIBABA_CLOUD_ACCESS_KEY_ID='fake',
+                       ALIBABA_CLOUD_ACCESS_KEY_SECRET='fake', ALIBABA_CLOUD_SECURITY_TOKEN='fake',
+                       OSS_ENDPOINT='fake', TAG_NAME='v0.1.13', RELEASE_PLATFORM='all', OSS_BUCKET='oss://fake',
+                       OSS_PREFIX='releases', OSS_ANDROID_KEY='android/latest.apk', DRY_RUN=dry, ARG_LOG=str(arglog))
+            subprocess.run(['bash', '-euo', 'pipefail', '-c', script], env=env, check=True)
+            assert ('--dry-run' in arglog.read_text().splitlines()) == (dry == 'true')
+    job = primary['jobs']['oss-upload']
+    assert job['env']['DRY_RUN'] == "${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}"
+    assert primary[True]['push']['tags'] == ['v*']
+    release_step = next(s for s in primary['jobs']['release']['steps'] if s.get('name') == 'Publish GitHub Release')
+    assert release_step['if'] == "${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}"
+    assert any(s.get('name') == 'Download built assets for rehearsal' and
+               s.get('if') == "${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}" for s in job['steps'])

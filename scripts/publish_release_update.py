@@ -164,6 +164,20 @@ def publish(args, store, summary):
                 raise ValueError(f'已发布的同名资产内容不同：{source.name}')
         else:
             absent.append((source, key))
+    if args.dry_run:
+        objects = [key for _, key in absent]
+        for platform in targets:
+            source = args.assets_dir / Path(candidate['packages'][platform]['url']).name
+            alias = f'BHE-{platform}-latest{source.suffix}'
+            key = args.android_key if platform.startswith('android-') else args.prefix + '/' + alias
+            objects.extend([key, key + '.sha256'])
+        objects.extend([manifest_key + '.sig', manifest_key])
+        summary.data.update(status='dry-run-ok', version=candidate['version'],
+                            packages={p: candidate['packages'][p] for p in targets},
+                            manifest_sha256=digest(candidate_path), unchanged=candidate == previous,
+                            would_upload=objects)
+        summary.stage('dry-run-complete')
+        return
     for source, key in absent:
         summary.stage('upload-versioned', key)
         store.upload(source, key)
@@ -213,10 +227,13 @@ def main(argv=None):
     parser.add_argument('--public-key', type=Path, default=PUBLIC_KEY)
     parser.add_argument('--signing-key', type=Path, required=True)
     parser.add_argument('--work-dir', type=Path, required=True)
+    parser.add_argument('--dry-run', action='store_true', help='验证发布并列出将上传的对象，不写入存储')
     args = parser.parse_args(argv)
     args.prefix = safe_key(args.prefix)
     args.android_key = safe_key(args.android_key)
     args.android_base_url = args.android_base_url or args.base_url
+    if args.dry_run and args.store_dir is not None and args.work_dir.resolve().is_relative_to(args.store_dir.resolve()):
+        parser.error('演练工作目录不能位于模拟存储目录内')
     args.work_dir.mkdir(parents=True, exist_ok=True)
     summary = Summary(args.work_dir / 'publish-summary.json', args.tag, args.platform)
     def cancel(_signal, _frame):
@@ -238,6 +255,10 @@ def main(argv=None):
         if step_summary:
             with open(step_summary, 'a', encoding='utf-8') as output:
                 output.write(f'\n### 更新通道发布 {args.tag}\n\n状态：**{summary.data["status"]}**；最后阶段：`{summary.data["stage"]}`。\n\n')
+                if args.dry_run:
+                    output.write('**演练，未写入任何对象**。\n\n')
+                    for key in summary.data.get('would_upload', []):
+                        output.write(f'- `{key}`\n')
                 output.write('同组只保留一个运行项和一个排队项，新的排队项可能取消旧排队项；只有 success 才代表发布完成。\n')
 
 

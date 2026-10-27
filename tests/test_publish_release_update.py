@@ -60,6 +60,85 @@ def snapshot(store):
     return {str(p.relative_to(store.root)): p.read_bytes() for p in store.root.rglob('*') if p.is_file()}
 
 
+def tree_snapshot(store):
+    return {str(p.relative_to(store.root)): p.read_bytes() if p.is_file() else None
+            for p in store.root.rglob('*')}
+
+
+@pytest.mark.parametrize('tag', ['v0.1.14', 'v0.1.13-android.1', 'v0.1.13-macos.1'])
+def test_dry_run_verifies_and_lists_exact_writes_without_touching_store(offline, tag, monkeypatch):
+    release, store = offline
+    seed(release, store)
+    args, work = command(release, store, tag)
+    assets = Path(args[args.index('--assets-dir') + 1])
+    # Existing identical immutable files are checked but will not be uploaded.
+    existing = next(p for p in assets.iterdir() if p.suffix != '.sha256')
+    store.upload(existing, 'releases/' + existing.name)
+    before = tree_snapshot(store)
+    step_summary = release.root / 'step-summary.md'
+    monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(step_summary))
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError('dry-run must not upload')
+    monkeypatch.setattr(publisher.DirectoryStore, 'upload', forbidden)
+    assert publisher.main([*args, '--dry-run']) == 0
+    assert tree_snapshot(store) == before
+    summary = json.loads((work / 'publish-summary.json').read_text())
+    assert summary['status'] == 'dry-run-ok'
+    assert summary['stage'] == 'dry-run-complete'
+    candidate = manifest.read_signed_manifest(work / 'candidate.json', work / 'candidate.json.sig', release.public)
+    assert candidate['version'] == summary['version']
+    expected = {f'releases/{p.name}' for p in assets.iterdir() if p.name != existing.name}
+    for platform, entry in summary['packages'].items():
+        name = Path(entry['url']).name
+        alias = ('android/latest.apk' if platform.startswith('android-') else
+                 f'releases/BHE-{platform}-latest{Path(name).suffix}')
+        expected.update((alias, alias + '.sha256'))
+    expected.update(('releases/latest.json.sig', 'releases/latest.json'))
+    assert len(summary['would_upload']) == len(expected)
+    assert set(summary['would_upload']) == expected
+    assert '演练，未写入任何对象' in step_summary.read_text()
+    assert all(key in step_summary.read_text() for key in expected)
+
+
+@pytest.mark.parametrize('fault', ['missing-body', 'missing-signature', 'signature', 'signing-key',
+                                   'immutable-conflict', 'downgrade'])
+def test_dry_run_has_same_preflight_failures_as_publish(offline, fault, monkeypatch):
+    release, store = offline
+    seed(release, store)
+    tag = 'v0.1.12' if fault == 'downgrade' else 'v0.1.13-android.1'
+    args, work = command(release, store, tag)
+    if fault == 'missing-body': store.path('releases/latest.json').unlink()
+    elif fault == 'missing-signature': store.path('releases/latest.json.sig').unlink()
+    elif fault == 'signature': store.path('releases/latest.json.sig').write_bytes(b'bad')
+    elif fault == 'signing-key':
+        other = ReleaseFixture(release.root / 'other')
+        args[args.index('--signing-key') + 1] = str(other.key)
+    elif fault == 'immutable-conflict':
+        name = next(Path(args[args.index('--assets-dir') + 1]).glob('*.apk')).name
+        store.path('releases/' + name).write_bytes(b'conflict')
+    before = tree_snapshot(store)
+    def forbidden(*_args, **_kwargs): raise AssertionError('preflight must never upload')
+    monkeypatch.setattr(publisher.DirectoryStore, 'upload', forbidden)
+    assert publisher.main(args) == 1
+    normal = json.loads((work / 'publish-summary.json').read_text())
+    assert tree_snapshot(store) == before
+    assert publisher.main([*args, '--dry-run']) == 1
+    rehearsal = json.loads((work / 'publish-summary.json').read_text())
+    assert (rehearsal['status'], rehearsal['stage'], rehearsal['error']) == (normal['status'], normal['stage'], normal['error'])
+    assert tree_snapshot(store) == before
+
+
+def test_dry_run_rejects_work_dir_inside_store_before_writing(offline):
+    release, store = offline
+    seed(release, store)
+    args, _ = command(release, store, 'v0.1.13-android.1')
+    args[args.index('--work-dir') + 1] = str(store.root / 'work')
+    before = tree_snapshot(store)
+    with pytest.raises(SystemExit):
+        publisher.main([*args, '--dry-run'])
+    assert tree_snapshot(store) == before
+
+
 def test_full_013_publish_keeps_four_platforms_notes_signature_and_website_aliases(offline):
     release, store = offline
     old = copy.deepcopy(release.previous)
