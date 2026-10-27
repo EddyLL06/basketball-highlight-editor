@@ -866,6 +866,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                       .toDouble();
                   final queue = _CandidatePanel(
                     candidates: candidates,
+                    overlappingIds: _overlappingCandidateIds(allCandidates),
                     selectedId: selected?['id']?.toString(),
                     includedCount: includedCount,
                     reviewedCount: allCandidates.where(_isReviewed).length,
@@ -4717,6 +4718,7 @@ class _ClipTimeField extends StatelessWidget {
 class _CandidatePanel extends StatelessWidget {
   const _CandidatePanel({
     required this.candidates,
+    required this.overlappingIds,
     required this.selectedId,
     required this.includedCount,
     required this.reviewedCount,
@@ -4761,6 +4763,7 @@ class _CandidatePanel extends StatelessWidget {
   });
 
   final List<Map<String, dynamic>> candidates;
+  final Set<String> overlappingIds;
   final String? selectedId;
   final int includedCount;
   final int reviewedCount;
@@ -5049,6 +5052,7 @@ class _CandidatePanel extends StatelessWidget {
                         contexts: candidateRowContexts,
                         child: _CandidateRow(
                         candidate: candidate,
+                        overlapsPrevious: overlappingIds.contains(id),
                         index: index,
                         selected: id == selectedId,
                         excluded: _isExcluded(candidate),
@@ -5886,6 +5890,7 @@ class _EmptyCandidates extends StatelessWidget {
 class _CandidateRow extends StatelessWidget {
   const _CandidateRow({
     required this.candidate,
+    required this.overlapsPrevious,
     required this.index,
     required this.selected,
     required this.excluded,
@@ -5904,6 +5909,7 @@ class _CandidateRow extends StatelessWidget {
   final Map<String, dynamic> candidate;
   final int index;
   final bool selected;
+  final bool overlapsPrevious;
   final bool excluded;
   final bool busy;
   final VoidCallback onTap;
@@ -6048,36 +6054,76 @@ class _CandidateRow extends StatelessWidget {
                                             ),
                                       ),
                                     ),
+                                    if (_hasAdjustedRange(candidate)) ...[
+                                      const SizedBox(width: 4),
+                                      Tooltip(
+                                        key: ValueKey(
+                                          'adjusted-range-${candidate['id']}',
+                                        ),
+                                        message: context.bheText('已调整时长'),
+                                        child: Icon(
+                                          Icons.tune_rounded,
+                                          size: 13,
+                                          color: c.textTertiary,
+                                        ),
+                                      ),
+                                    ],
+                                    if (overlapsPrevious) ...[
+                                      const SizedBox(width: 4),
+                                      Tooltip(
+                                        key: ValueKey(
+                                          'overlapping-${candidate['id']}',
+                                        ),
+                                        message: context.bheText('与上一段重叠'),
+                                        child: Icon(
+                                          Icons.join_inner_rounded,
+                                          size: 13,
+                                          color: c.textTertiary,
+                                        ),
+                                      ),
+                                    ],
                                     if (excluded) ...[
                                       const SizedBox(width: Spacing.xs),
-                                      Text(
-                                        context.bheText(
-                                          _isAutoExcluded(candidate)
-                                              ? '自动排除'
-                                              : '已排除',
+                                      Flexible(
+                                        child: Text(
+                                          context.bheText(
+                                            _isAutoExcluded(candidate)
+                                                ? '自动排除'
+                                                : '已排除',
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.labelSmall
+                                              ?.copyWith(color: c.error),
                                         ),
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(color: c.error),
                                       ),
                                     ],
                                     if (!excluded &&
                                         _rimCheckStatus(candidate) ==
                                             'made') ...[
                                       const SizedBox(width: Spacing.xs),
-                                      Text(
-                                        context.bheText('通过'),
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(color: c.success),
+                                      Flexible(
+                                        child: Text(
+                                          context.bheText('通过'),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.labelSmall
+                                              ?.copyWith(color: c.success),
+                                        ),
                                       ),
                                     ],
                                     if (!excluded &&
                                         _rimCheckStatus(candidate) ==
                                             'unsure') ...[
                                       const SizedBox(width: Spacing.xs),
-                                      Text(
-                                        context.bheText('未确认'),
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(color: c.warning),
+                                      Flexible(
+                                        child: Text(
+                                          context.bheText('未确认'),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.labelSmall
+                                              ?.copyWith(color: c.warning),
+                                        ),
                                       ),
                                     ],
                                   ],
@@ -6822,6 +6868,30 @@ int _clipStart(Map<String, dynamic> candidate) {
 int _clipEnd(Map<String, dynamic> candidate) {
   final value = candidate['review_end_ms'] ?? candidate['default_end_ms'];
   return value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+}
+
+bool _hasAdjustedRange(Map<String, dynamic> candidate) {
+  return (candidate['default_start_ms'] != null &&
+          _clipStart(candidate) != _number(candidate['default_start_ms']).round()) ||
+      (candidate['default_end_ms'] != null &&
+          _clipEnd(candidate) != _number(candidate['default_end_ms']).round());
+}
+
+Set<String> _overlappingCandidateIds(List<Map<String, dynamic>> candidates) {
+  final previousByVideo = <Object?, Map<String, dynamic>>{};
+  final overlapping = <String>{};
+  for (final candidate in candidates) {
+    if (_isExcluded(candidate)) continue;
+    final source = candidate['video_id'] ?? candidate['source_path'];
+    final previous = previousByVideo[source];
+    if (previous != null &&
+        _clipStart(candidate) < _clipEnd(previous) &&
+        _clipEnd(candidate) > _clipStart(previous)) {
+      overlapping.add(candidate['id'].toString());
+    }
+    previousByVideo[source] = candidate;
+  }
+  return overlapping;
 }
 
 String _candidateSignature(Map<String, dynamic>? candidate) {

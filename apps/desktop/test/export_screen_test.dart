@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:bhe_l10n/bhe_l10n.dart';
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +13,48 @@ import 'package:desktop/providers/export_output_picker.dart';
 import 'package:desktop/theme/app_theme.dart';
 
 void main() {
+  for (final locale in ['zh', 'en']) {
+    for (final count in [0, 2]) {
+      testWidgets('overlap export notice $locale count=$count', (tester) async {
+        tester.view.physicalSize = const Size(760, 1000);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              projectProvider.overrideWith(
+                () => _ExportNotifier(
+                  ProjectState(
+                    exportHistory: [
+                      {
+                        'mode': 'merge',
+                        'candidate_count': 3,
+                        'output_path': '/tmp/highlights.mp4',
+                        'metadata': {'merged_overlap_count': count},
+                      },
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            child: MaterialApp(
+              locale: Locale(locale),
+              localizationsDelegates: BheLocalizations.localizationsDelegates,
+              supportedLocales: BheLocalizations.supportedLocales,
+              home: const Scaffold(body: ExportScreen()),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final message = locale == 'en'
+            ? '$count overlapping clips merged into continuous segments'
+            : '有 $count 个重叠片段已合并为一段';
+        expect(find.text(message), count > 0 ? findsOneWidget : findsNothing);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   testWidgets('the goal effect picks one option and the total follows it', (

@@ -71,6 +71,10 @@ extension BheBuildContextText on BuildContext {
 }
 
 String? _translateDynamic(String source) {
+  final mergedOverlap = RegExp(r'^有 (\d+) 个重叠片段已合并为一段$').firstMatch(source);
+  if (mergedOverlap != null) {
+    return '${mergedOverlap.group(1)} overlapping clips merged into continuous segments';
+  }
   final minutes = RegExp(r'^(?:第 (\d+) 段 )?(\d+)–(\d+) 分钟$').firstMatch(source);
   if (minutes != null) {
     final range = '${minutes.group(2)}–${minutes.group(3)} min';
@@ -367,6 +371,8 @@ String _englishDuration(String value) => value
     .trim();
 
 const _englishText = <String, String>{
+  '已调整时长': 'Duration adjusted',
+  '与上一段重叠': 'Overlaps the previous kept clip',
   '视频不可用': 'Video unavailable',
   '正在读取视频信息，大文件可能需要几秒。': 'Reading video information. Large files may take a few seconds.',
   '正在保存视频到本机，大文件可能需要几秒。': 'Saving the video locally. Large files may take a few seconds.',
