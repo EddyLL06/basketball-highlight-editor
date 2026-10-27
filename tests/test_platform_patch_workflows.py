@@ -21,7 +21,7 @@ def test_production_writers_share_one_lock_and_one_publishing_script():
         assert 'Publish signed update manifest' not in scripts
     for workflow in [primary, manual]:
         assert workflow['jobs']['publication-status']['if'] == 'always()'
-    assert 'publish_oss=false ;;' not in (ROOT / '.github/workflows/release-packages.yml').read_text()
+    assert "github.event_name == 'workflow_dispatch'" in primary['jobs']['oss-upload']['if']
 
 
 def test_release_plan_platform_and_oss_controls(tmp_path):
@@ -29,9 +29,11 @@ def test_release_plan_platform_and_oss_controls(tmp_path):
     script = workflow['jobs']['release-plan']['steps'][0]['run']
     subprocess.run(['bash', '-n'], input=script, text=True, check=True)
     for event, tag, platform, publish, oss, expected in [
-        ('push', 'v0.1.13-android.1', '', '', '', 'true'),
-        ('push', 'v0.1.13-macos.1', '', '', '', 'true'),
-        ('push', 'v0.1.13-windows.1', '', '', '', 'true'),
+        ('push', 'v0.1.13', '', '', '', 'false'),
+        ('push', 'v0.1.13-android.1', '', '', '', 'false'),
+        ('push', 'v0.1.13-macos.1', '', '', '', 'false'),
+        ('push', 'v0.1.13-windows.1', '', '', '', 'false'),
+        ('push', 'v0.1.13-dryrun', '', '', '', 'false'),
         ('workflow_dispatch', 'v0.1.13-android.1', 'android', 'true', 'false', 'false'),
         ('workflow_dispatch', 'v0.1.13', 'all', 'false', 'true', 'false'),
     ]:
@@ -43,6 +45,7 @@ def test_release_plan_platform_and_oss_controls(tmp_path):
         subprocess.run(['bash', '-euo', 'pipefail', '-c', script], env=env, check=True)
         fields = dict(line.split('=', 1) for line in output.read_text().splitlines())
         assert fields['publish_oss'] == expected
+        if event == 'push': assert fields['publish'] == 'true'
         if '-android.' in tag:
             assert fields['build_macos'] == fields['build_windows'] == 'false'
             assert fields['build_android'] == 'true'
@@ -127,7 +130,8 @@ def test_release_plan_dry_run_input_matrix(tmp_path):
                         continue
                     fields = dict(line.split('=', 1) for line in output.read_text().splitlines())
                     assert fields['build_android'] == 'true' and fields['build_macos'] == fields['build_windows'] == 'false'
-                    assert fields['publish_oss'] == ('true' if event == 'push' or (publish == oss == 'true') else 'false')
+                    assert fields['publish_oss'] == ('true' if event == 'workflow_dispatch' and publish == oss == 'true' else 'false')
+                    assert fields['publish'] == ('true' if event == 'push' or publish == 'true' else 'false')
     assert "inputs.dry_run && 'dryrun' || 'production'" in workflow['concurrency']['group']
     assert workflow['jobs']['oss-upload']['concurrency']['group'] == "${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'bhe-dryrun-update-channel-v1' || 'bhe-production-update-channel-v1' }}"
 
@@ -235,3 +239,39 @@ def test_report_identifies_failed_build_and_publish_stage(tmp_path):
                PUBLISH='failure', BACKUP='success', GITHUB_OUTPUT=str(output))
     subprocess.run(['bash', '-euo', 'pipefail', '-c', stage_script], env=env, check=True)
     assert output.read_text().strip() == 'stage=publish'
+
+
+def test_tag_push_cannot_enter_oss_job_and_still_uploads_release():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/release-packages.yml').read_text())
+    assert workflow['jobs']['oss-upload']['if'].strip() == "${{ always() && github.event_name == 'workflow_dispatch' && needs.release.result == 'success' && needs.release-plan.outputs.publish_oss == 'true' }}"
+    release = workflow['jobs']['release']
+    assert "needs.release-plan.outputs.publish == 'true'" in release['if']
+    upload = next(step for step in release['steps'] if step.get('name') == 'Publish GitHub Release')
+    assert upload['if'] == "${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}"
+
+
+def test_manual_release_asset_download_patterns_and_lock(tmp_path):
+    workflow = yaml.safe_load((ROOT / '.github/workflows/upload-release-assets-oss.yml').read_text())
+    inputs = workflow[True]['workflow_dispatch']['inputs']
+    assert inputs['dry_run']['type'] == 'boolean' and inputs['dry_run']['default'] is False
+    assert inputs['platform']['options'] == ['all', 'macos', 'windows', 'android']
+    job = workflow['jobs']['upload']
+    assert job['concurrency']['group'] == "${{ inputs.dry_run && 'bhe-dryrun-update-channel-v1' || 'bhe-production-update-channel-v1' }}"
+    download = next(step for step in job['steps'] if step.get('name') == 'Download exact release assets')['run']
+    fake_gh = tmp_path / 'gh'
+    fake_gh.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$ARG_LOG"\n')
+    fake_gh.chmod(0o755)
+    for platform, tag, patterns in [
+        ('all', 'v0.1.13', ['BHE-*.dmg', 'BHE-*.dmg.sha256', 'BHE-*.zip', 'BHE-*.zip.sha256', 'BHE-*.apk', 'BHE-*.apk.sha256']),
+        ('macos', 'v0.1.13-macos.1', ['BHE-macos-*.dmg', 'BHE-macos-*.dmg.sha256']),
+        ('windows', 'v0.1.13-windows.1', ['BHE-windows-*.zip', 'BHE-windows-*.zip.sha256']),
+        ('android', 'v0.1.13-android.1', ['BHE-android-*.apk', 'BHE-android-*.apk.sha256']),
+    ]:
+        arglog = tmp_path / (platform + '.args')
+        env = dict(os.environ, PATH=str(tmp_path)+':'+os.environ['PATH'], RUNNER_TEMP=str(tmp_path),
+                   TAG_NAME=tag, RELEASE_PLATFORM=platform, GITHUB_REPOSITORY='test/repo', ARG_LOG=str(arglog))
+        subprocess.run(['bash', '-euo', 'pipefail', '-c', download], env=env, check=True)
+        args = arglog.read_text().splitlines()
+        assert args[:3] == ['release', 'download', tag]
+        assert args[args.index('--repo') + 1] == 'test/repo'
+        assert [args[i+1] for i, arg in enumerate(args) if arg == '--pattern'] == patterns

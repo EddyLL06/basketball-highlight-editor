@@ -96,7 +96,7 @@ jobs:
             tag="$REF_NAME"
             source_ref="$SHA"
             publish=true
-            publish_oss=true
+            publish_oss=false
             case "$tag" in
               *-macos.*) platform=macos ;;
               *-windows.*) platform=windows ;;
@@ -134,6 +134,7 @@ jobs:
           {
             echo "### 更新通道计划：$tag"
             echo "平台 ${platform}；publish=${publish}；publish_oss=${publish_oss}。"
+            echo '标签推送只发布 GitHub Release；核验后通过手动工作流先演练，再正式发布 OSS。'
             echo '此处只是计划，只有 OSS 发布 job success 才表示官网与 App 通道发布完成。'
             echo '同组最多一个运行项和一个排队项；新排队项会取消旧排队项，cancel-in-progress=false 也不会保留所有排队项。'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -607,7 +608,7 @@ jobs:
     name: Upload release assets to OSS
     needs: [release-plan, release]
     if: >-
-      ${{ always() && needs.release.result == 'success' && needs.release-plan.outputs.publish_oss == 'true' }}
+      ${{ always() && github.event_name == 'workflow_dispatch' && needs.release.result == 'success' && needs.release-plan.outputs.publish_oss == 'true' }}
     concurrency:
       group: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'bhe-dryrun-update-channel-v1' || 'bhe-production-update-channel-v1' }}
       cancel-in-progress: false

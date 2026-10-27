@@ -8,7 +8,7 @@
 2. **桌面二进制版**：额外携带 Python、依赖、FFmpeg/FFprobe、模型和 Flutter 应用。
 3. **Android 侧载测试版**：额外携带 ONNX 模型、Rust Runtime 和 ONNX Runtime Android 库。
 
-推送普通 `v*` tag 后，GitHub Actions 会自动构建 macOS Intel、macOS Apple Silicon、Windows x64 和 Android `arm64-v8a` 包；带平台后缀的热修复 tag 只构建该平台，规则见第 4 节。产物上传到对应 GitHub Release。桌面包会携带便携 Python、依赖、FFmpeg/FFprobe 和 `models/bball_model.pt`；Android 包在 CI 中导出 ONNX 模型、编译 Rust Runtime，并下载官方 ONNX Runtime Android（QNN 版）和高通 QNN Runtime 库；预编译 NPU 模型随源码提交。
+推送普通 `v*` tag 后，GitHub Actions 会自动构建 macOS Intel、macOS Apple Silicon、Windows x64 和 Android `arm64-v8a` 包；带平台后缀的热修复 tag 只构建该平台，规则见第 4 节。产物上传到对应 GitHub Release，**不会自动写入 OSS**；核验产物并手动演练后，另行手动发布生产通道。桌面包会携带便携 Python、依赖、FFmpeg/FFprobe 和 `models/bball_model.pt`；Android 包在 CI 中导出 ONNX 模型、编译 Rust Runtime，并下载官方 ONNX Runtime Android（QNN 版）和高通 QNN Runtime 库；预编译 NPU 模型随源码提交。
 
 ## 1. 源码公开前检查
 
@@ -190,7 +190,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows_release.ps1 `
   -Zip
 ```
 
-脚本会生成 `dist\BHE-windows-x64-v0.1.0-alpha.3.zip` 和对应的 `.sha256` 校验文件。推送 `v*` tag 后，GitHub Actions 会在 Windows x64、macOS Intel 和 macOS Apple Silicon runner 上自动构建并把这些产物上传到 Release；本地没有 Intel Mac 也不影响 Intel 包构建。
+脚本会生成 `dist\BHE-windows-x64-v0.1.0-alpha.3.zip` 和对应的 `.sha256` 校验文件。推送完整版本 tag 后，GitHub Actions 会为各平台构建并上传到 Release；平台补丁 tag 只构建对应平台。本地没有 Intel Mac 也不影响 Intel 包构建。
 
 Windows 当前属于兼容路径，仍需验证 Flutter 工具链、Python/Torch/OpenCV/Ultralytics、FFmpeg DLL 和安装流程；它不能替代正式安装器、签名和用户验收。
 
@@ -222,7 +222,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test_windows_patch_i
 
 Windows 发布包采用不含 `libx264` 的 LGPL FFmpeg。导出依次尝试硬件编码 `h264_nvenc`（NVIDIA）、`h264_qsv`（Intel）、`h264_amf`（AMD）、`h264_mf`（Media Foundation），再尝试 `libx264`、`libopenh264` 和 `mpeg4`，仅在前一种编码失败时切换；第一个成功的编码器用于同一次导出的后续片段。最后一种使用高质量 MPEG-4 Part 2，仍封装为 MP4，但不保证所有仅支持 H.264 的播放器都能播放。逐片导出与合并失败后的重新编码采用同一规则。代理视频在 Windows 上先用 D3D11VA 显卡解码，失败时回退纯软件解码。打包前运行 `scripts/check_media_pipeline.py --root <runtime>`，实际生成代理、片段和合并视频；检查失败时停止打包。常规 Python CI 也会在 Windows 上用发布包同款 LGPL FFmpeg 执行该检查。
 
-### 自动发布模式与分平台补丁（从 0.1.13 起）
+### 人工确认发布与分平台补丁（从 0.1.13 起）
 
 `.github/workflows/release-packages.yml` 按标签选择构建平台。数字完整版本和已批准的平台补丁都可覆盖官网下载与 App 内检查更新：
 
@@ -234,6 +234,15 @@ Windows 发布包采用不含 `libx264` 的 LGPL FFmpeg。导出依次尝试硬�
 | `v0.1.13-android.1` | Android arm64-v8a；只替换 Android 条目及独立 `app/android/bhe/latest.apk` 别名 |
 
 补丁在 GitHub 仍标记为 pre-release（预发布），但这里的、已经批准进入生产通道的平台补丁会更新本平台的官网下载和 App 更新清单。不能仅凭 GitHub 的预发布标记判断是否上传 OSS。`v0.1.12-android.1` 那次仅供测试的历史发布不受此新规则追溯影响。
+
+完整版本和 macOS、Windows、Android 补丁都遵循同一顺序：
+
+1. 确认标签所指提交包含本门禁，再推送 `v*` 标签。Actions 构建并创建 GitHub Release；标签触发的 OSS job 会跳过，不修改官网或更新清单。
+2. 检查 GitHub Release 的目标平台安装包、配套 SHA-256 校验文件、版本和内容；完整版本核验全部四个平台，macOS 补丁核验两个架构。标签本身与 GitHub Release 会公开，请按发布授权处理。
+3. 在 **Upload existing release assets to OSS** 手动选择标签、对应平台和 `dry_run=true`。完整版本选 `all`，补丁选 `macos`、`windows` 或 `android`。此工作流下载该 Release 的资产并进行只读演练；核对 `publish-summary.json` 的 `status=dry-run-ok`、验签状态、候选版本和拟上传对象，以及 Actions 产物。
+4. 演练通过并经人工检查和批准后，使用同一手动工作流、相同标签和平台，显式选择 `dry_run=false` 正式发布。检查 job 结果和 `publish-summary.json` 的 `status=success` / `stage=complete`，再核对官网与更新清单。
+
+**这是人工操作门，不是自动审批或演练证明门禁。** 手动工作流的 `dry_run` 默认是 `false`，执行前必须主动检查；正式运行不会自动验证先前演练或锁定演练时的 Release 文件。两次运行分别下载 Release 资产，期间若资产被覆盖、通道变化或有并行发布，先重新核验摘要并重新演练。`BHE release packages` 的手动 `publish_oss` 仍可作为特殊入口，操作人员应避免绕过上述核验流程。
 
 **首次真实使用仍须 Claude 与老大另行批准。开发验收只使用临时目录和测试密钥，不执行真实上传或读取真实私钥。**
 
@@ -253,7 +262,7 @@ macOS 继续手动替换安装包，不传严格版本请求；Android 继续仅
 
 #### 共同发布入口与串行保护
 
-自动发布的 `oss-upload` job 与 **Upload existing release assets to OSS** 的手动 job 都调用 `scripts/publish_release_update.py`。正式发布共用 job 级锁 `bhe-production-update-channel-v1`，覆盖读取、验签、合并和全部通道写入；演练使用独立组 `bhe-dryrun-update-channel-v1`，主工作流同标签演练也使用独立并发组，避免挤掉排队中的正式发布。构建可并行，生产通道写入串行。
+`BHE release packages` 的手动 `oss-upload` job 与 **Upload existing release assets to OSS** 的手动 job 都调用 `scripts/publish_release_update.py`；标签推送不进入 OSS job。正式发布共用 job 级锁 `bhe-production-update-channel-v1`，覆盖读取、验签、合并和全部通道写入；演练使用独立组 `bhe-dryrun-update-channel-v1`，主工作流同标签演练也使用独立并发组，避免挤掉排队中的正式发布。构建可并行，生产通道写入串行。
 
 手动选择 `dry_run=true` 会读取、验签、合并、签名并预检同名对象，但不会写入 OSS 发布对象；Actions 会保存已生成的演练文件。主工作流还须同时启用 `publish` 和 `publish_oss`，否则计划阶段报错。`dry-run-ok` 不代表正式发布成功。检查备份中的 `publish-summary.json`：`previous_verified` 或 `candidate_verified` 为 false 时，对应文件只是待验证输入或未通过验签的候选；脚本未启动时可能没有备份，恢复前始终重新验签。
 
@@ -291,7 +300,7 @@ python -m pytest -q tests/test_platform_patch_manifest.py tests/test_publish_rel
 
 `test_full_013_publish_keeps_four_platforms_notes_signature_and_website_aliases` 覆盖从旧完整清单发布完整 0.1.13，验证四个条目、顶层版本/双语说明、官网别名和真实测试密钥签名。其余用例覆盖不同平台依次合并、macOS 双架构、防降级、旧 Windows 不兼容 ZIP、缺失/失效签名、错误密钥、同名资产冲突、各上传阶段和读回故障、取消摘要。
 
-`--store-dir <临时目录>` 是发布器明确的离线传输模式，没有网络回退。生产模式需要显式 `--oss-root`、凭据配置及 GitHub Actions 环境，并由调用 job 持锁；开发测试不要调用该模式。公钥固定在 `scripts/update_public_key.pem`，测试校验它与客户端内置公钥一致，不能从待验证文件里获取信任根。
+`--store-dir <临时目录>` 是发布器明确的离线传输模式，没有网络回退。真实通道模式需要显式 `--oss-root` 和 GitHub Actions 环境；正式发布还需要凭据配置并使用生产组，演练使用独立组和签名私钥，不获取 OSS 写入凭据。开发测试不要调用真实通道。公钥固定在 `scripts/update_public_key.pem`，测试校验它与客户端内置公钥一致，不能从待验证文件里获取信任根。
 
 ## 5. 移动端发布边界
 
