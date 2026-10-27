@@ -504,14 +504,21 @@ def run_pipeline(
                 details = (stderr or stdout or "").strip()
                 if len(details) > 1200:
                     details = details[-1200:]
+                    # 从整行开始：硬切会让第一行只剩半个词，界面只显示第一行。
+                    if "\n" in details:
+                        details = details.split("\n", 1)[1]
                 script_name = (
                     Path(command[1]).name
                     if len(command) > 1 and command[1].endswith(".py")
                     else "pipeline step"
                 )
                 message = f"{script_name} 执行失败"
-                if details:
-                    message = f"{message}: {details}"
+                lines = [line.strip() for line in details.splitlines() if line.strip()]
+                if lines:
+                    # 第一行放最后一行输出（异常通常在回溯的末尾），完整输出跟在后面。
+                    message = f"{message}: {lines[-1][:300]}"
+                    if len(lines) > 1:
+                        message = f"{message}\n{details}"
                 raise RuntimeError(message)
             completed_stdout = stdout or ""
             completed_stderr = stderr or ""
