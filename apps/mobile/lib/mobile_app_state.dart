@@ -191,6 +191,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   bool analysing = false;
   bool exporting = false;
   bool exportCancelled = false;
+  int _exportRun = 0;
+  bool _mergeCommitted = false;
   bool exportAudioSkipped = false;
   int? exportMergedOverlapCount;
   List<String> exportedPaths = const [];
@@ -1344,6 +1346,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   void _resetTransientState() {
     _analysisLaunchBarrier = null;
+    _exportRun++;
+    _mergeCommitted = false;
     _projectSession++;
     _rosterSelection = null;
     _analysisGeneration++;
@@ -1991,6 +1995,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       return;
     }
     exporting = true;
+    _exportRun++;
+    _mergeCommitted = false;
     MobileDiagnostics.instance.event('export.start');
     exportCancelled = false;
     exportedPaths = const [];
@@ -2068,6 +2074,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       return;
     }
     exporting = true;
+    _exportRun++;
+    _mergeCommitted = false;
     MobileDiagnostics.instance.event('export.start');
     exportCancelled = false;
     exportedPaths = const [];
@@ -2086,6 +2094,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         outputPath: outputPath,
       )) {
         if (!current()) return;
+        if (update.committed) {
+          _mergeCommitted = true;
+          exportCancelled = false;
+        }
         exportAudioSkipped |= update.skippedAudioTracks.isNotEmpty;
         exportMergedOverlapCount = update.mergedOverlapCount;
         progress = update.progress;
@@ -2124,16 +2136,24 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   Future<void> cancelExport() async {
-    if (!exporting) return;
+    if (!exporting || _mergeCommitted) return;
+    final run = _exportRun;
     exportCancelled = true;
     exportMergedOverlapCount = null;
+    notifyListeners();
     try {
       await exportEngine.cancel();
-      progressMessage = '导出已取消';
+      if (!_disposed && run == _exportRun && !_mergeCommitted) {
+        progressMessage = '导出已取消';
+      }
     } on Object catch (error, stack) {
-      recordDiagnosticFailure(error, stack, operation: 'export');
+      if (!_disposed && run == _exportRun && !_mergeCommitted) {
+        recordDiagnosticFailure(error, stack, operation: 'export');
+      } else {
+        MobileDiagnostics.instance.error(error, stack, operation: 'export');
+      }
     }
-    notifyListeners();
+    if (!_disposed && run == _exportRun) notifyListeners();
   }
 
   Future<void> shareExportedFiles() async {
@@ -2150,6 +2170,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   Future<void> saveExportedFiles() async {
     if (exportedPaths.isEmpty) return;
+    _exportRun++;
+    _mergeCommitted = false;
     exporting = true;
     diagnosticError = null;
     errorMessage = null;

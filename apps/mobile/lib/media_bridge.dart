@@ -157,6 +157,7 @@ class NativeMediaExportEngine implements MobileExportEngine {
         outputPath: result.path,
         skippedAudioTracks: result.skippedAudioTracks,
         mergedOverlapCount: result.mergedOverlapCount,
+        committed: committed,
       );
     } on MissingPluginException {
       throw const MobileExportException('当前平台尚未注册合并导出模块。');

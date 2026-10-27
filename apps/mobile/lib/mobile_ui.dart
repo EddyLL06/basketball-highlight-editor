@@ -174,14 +174,16 @@ class _BheMobileAppState extends State<BheMobileApp> {
   }
 
   Future<void> _showStarPrompt() async {
-    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
+    final dialogRoot = _navigatorKey.currentContext;
+    if (dialogRoot == null || !dialogRoot.mounted) return;
+    final l10n = Localizations.of<BheLocalizations>(dialogRoot, BheLocalizations);
     await showDialog<void>(
-      context: context,
+      context: dialogRoot,
       builder: (dialogContext) => AlertDialog(
         icon: const Icon(LucideIcons.heart, color: BhePalette.orange),
-        title: Text(context.bheText('如果 BHE 对你有帮助')),
+        title: Text(dialogRoot.bheText('如果 BHE 对你有帮助')),
         content: Text(
-          context.bheText(
+          dialogRoot.bheText(
             '如果 BHE 帮你省下了一些剪辑时间，欢迎在 GitHub 点个 Star，也可以分享给球友，让更多人知道这个项目。谢谢支持！',
           ),
         ),
@@ -195,7 +197,7 @@ class _BheMobileAppState extends State<BheMobileApp> {
               Navigator.pop(dialogContext);
               await SharePlus.instance.share(
                 ShareParams(
-                  text: context.bheText('我在用 BHE 整理篮球比赛集锦，推荐你看看：'),
+                  text: dialogRoot.bheText('我在用 BHE 整理篮球比赛集锦，推荐你看看：'),
                   uri: Uri.parse(
                     'https://github.com/fly7632785/basketball-highlight-editor',
                   ),
