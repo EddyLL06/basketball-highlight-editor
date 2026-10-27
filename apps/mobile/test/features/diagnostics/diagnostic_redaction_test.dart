@@ -3,16 +3,13 @@ import 'package:bhe_core/bhe_core.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test(
-    'temporary redaction boundary fails closed without the shared migration',
-    () {
-      expect(
-        redactDiagnosticText('/storage/emulated/0/private/game.mp4'),
-        '[diagnostic details temporarily withheld]',
-      );
-      expect(redactDiagnosticText(''), '');
-    },
-  );
+  test('mobile boundary delegates directory hiding to the shared redactor', () {
+    expect(
+      redactDiagnosticText('/storage/emulated/0/private/game.mp4'),
+      '<path>/game.mp4',
+    );
+    expect(redactDiagnosticText(''), '');
+  });
   test(
     'mobile uses the exact shared contact destinations and bilingual template',
     () {

@@ -119,6 +119,8 @@ void main() {
             findsOneWidget,
           );
           expect(copied, contains('0.1.13+android.1'));
+          expect(copied, contains('raw failure <path>/game.mp4'));
+          expect(copied, contains('native event 299'));
           expect(copied, isNot(contains('/private/person')));
           await tester.pump(const Duration(seconds: 2));
           expect(
@@ -222,6 +224,10 @@ void main() {
       expect(
         tester.widget<SelectableText>(find.byType(SelectableText)).data,
         contains('当前错误'),
+      );
+      expect(
+        tester.widget<SelectableText>(find.byType(SelectableText)).data,
+        contains('RAW_TECHNICAL_DETAIL'),
       );
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());

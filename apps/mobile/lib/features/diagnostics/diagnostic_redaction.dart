@@ -1,4 +1,5 @@
-/// Fail closed until the reviewed shared redactor can be migrated after diag merges.
-/// All raw diagnostic text enters through this one boundary, including stack traces.
+import 'package:bhe_core/bhe_core.dart' show redactUserPaths;
+
+/// The same shared redactor protects writes, previews and clipboard reports.
 String redactDiagnosticText(String text) =>
-    text.isEmpty ? '' : '[diagnostic details temporarily withheld]';
+    redactUserPaths(text, const {}, hideDirectories: true);

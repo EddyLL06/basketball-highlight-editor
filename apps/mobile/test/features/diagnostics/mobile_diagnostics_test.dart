@@ -53,6 +53,8 @@ void main() {
       expect(backend.version, '0.1.13+android.1');
       expect(backend.messages.first, startsWith('app error:'));
       expect(backend.messages.first.split('\n'), hasLength(31));
+      expect(backend.messages.first, contains('Bad state: <path>/game.mp4'));
+      expect(backend.messages.first, contains('frame0 <path>/path.dart'));
       expect(backend.messages.join(), isNot(contains('/storage')));
       expect(backend.keys[0], backend.keys[1]);
       expect(backend.messages.last, contains('available=false'));
