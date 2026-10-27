@@ -897,6 +897,8 @@ Future<void> _confirmAndStartAnalysis(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
+    enableDrag: false,
+    isDismissible: false,
     builder: (_) => _RosterConfirmation(state: state),
   );
   if (confirmed != true || !context.mounted || state.project.id != projectId ||

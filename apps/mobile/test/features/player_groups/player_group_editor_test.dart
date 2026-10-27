@@ -106,6 +106,33 @@ void main() {
         );
         await tester.tap(find.byKey(const ValueKey('group-editor-add')));
         await tester.pump();
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pumpAndSettle();
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.byKey(const ValueKey('group-editor-handle-1'))),
+        );
+        await tester.pump(const Duration(milliseconds: 600));
+        await tester.pump();
+        await gesture.moveBy(const Offset(0, -150));
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .getTopLeft(find.byKey(const ValueKey('group-editor-row-1')))
+              .dy,
+          lessThan(
+            tester
+                .getTopLeft(find.byKey(const ValueKey('group-editor-row-0')))
+                .dy,
+          ),
+        );
+        tester
+            .widget<PopupMenuButton<String>>(
+              find.byKey(const ValueKey('group-editor-menu-1')),
+            )
+            .onSelected!('down');
+        await tester.pump();
         tester
             .widget<PopupMenuButton<String>>(
               find.byKey(const ValueKey('group-editor-menu-1')),

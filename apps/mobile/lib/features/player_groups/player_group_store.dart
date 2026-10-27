@@ -54,6 +54,15 @@ class PlayerGroupStore {
         }
       }
       defaultName = groups.any((group) => group.name == wanted) ? wanted : null;
+      if (wanted != null && defaultName == null && !_loadFailed) {
+        try {
+          if (!await prefs.remove(defaultKey)) {
+            throw StateError('Preference write failed: $defaultKey');
+          }
+        } on Object catch (error, stack) {
+          onFailure(error, stack);
+        }
+      }
       onChanged();
     } on Object catch (error, stack) {
       _loadFailed = true;

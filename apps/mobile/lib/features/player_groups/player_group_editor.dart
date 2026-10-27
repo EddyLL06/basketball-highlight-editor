@@ -182,8 +182,8 @@ class _PlayerGroupEditorState extends State<_PlayerGroupEditor> {
                                 ),
                                 width: 48,
                                 height: 48,
-                                child: Tooltip(
-                                  message: context.bheText('拖动调整顺序'),
+                                child: Semantics(
+                                  label: context.bheText('拖动调整顺序'),
                                   child: const Icon(Icons.drag_handle),
                                 ),
                               ),

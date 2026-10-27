@@ -155,4 +155,51 @@ void main() {
       expect(state.playerGroups.last.players, ['Alice']);
     },
   );
+  test('stale default is removed without rewriting saved groups', () async {
+    SharedPreferences.setMockInitialValues({
+      'bhe.player_groups': raw,
+      'bhe.default_player_group': 'Missing',
+    });
+    final second = MobileAppState(
+      analysisEngine: const MobileAnalysisEngineUnavailable(),
+    );
+    await second.ready;
+    final prefs = await SharedPreferences.getInstance();
+    expect(second.defaultPlayerGroupName, isNull);
+    expect(prefs.containsKey('bhe.default_player_group'), isFalse);
+    expect(prefs.getString('bhe.player_groups'), raw);
+    second.dispose();
+  });
+  test('delete and recreate does not revive an old roster selection', () async {
+    state.project = state.project.copyWith(players: []);
+    final draft = state.rosterSelection;
+    expect(draft.groupName, 'Old');
+    expect(await state.deletePlayerGroup('Old'), isTrue);
+    state.project = state.project.copyWith(players: ['New']);
+    expect(await state.savePlayerGroup('Old'), isTrue);
+    expect(draft.groupChanged, isTrue);
+    expect(draft.groupName, isNull);
+    expect(draft.orderedPlayers, isEmpty);
+  });
+  test('failed edits leave preferences and visible groups unchanged', () async {
+    for (final action in <Future<bool> Function()>[
+      () => state.renamePlayerGroup('Old', 'New'),
+      () => state.deletePlayerGroup('Old'),
+      () => state.setDefaultPlayerGroup(null),
+      () => state.editPlayerGroup('Old', 'Old', ['Carol']),
+      () => state.savePlayerGroup('Old'),
+    ]) {
+      backend.failKey = 'flutter.bhe.player_groups';
+      expect(await action(), isFalse);
+      expect(state.playerGroups.single.name, 'Old');
+      expect(state.playerGroups.single.players, ['Alice', 'Bob']);
+      expect(state.defaultPlayerGroupName, 'Old');
+      expect((await backend.getAll())['flutter.bhe.player_groups'], raw);
+      expect(
+        (await backend.getAll())['flutter.bhe.default_player_group'],
+        'Old',
+      );
+      expect(state.playerGroupError, isNotNull);
+    }
+  });
 }

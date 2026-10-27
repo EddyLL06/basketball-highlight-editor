@@ -27,9 +27,7 @@ void main() {
           tester.binding.platformDispatcher.localeTestValue = Locale(language);
           tester.binding.platformDispatcher.textScaleFactorTestValue = 1.3;
           try {
-            f.state.project = f
-                .project(videoPath)
-                .copyWith(players: []);
+            f.state.project = f.project(videoPath).copyWith(players: []);
             f.state.playerGroups = [
               (name: 'Team', players: ['Alice', 'Bob', 'Carol']),
             ];
@@ -75,6 +73,10 @@ void main() {
               );
               await tester.pump();
             }
+            await tester.ensureVisible(
+              find.byKey(const ValueKey('roster-player-Bob')),
+            );
+            await tester.pump();
             final bob = tester.widget<CheckboxListTile>(
               find.byKey(const ValueKey('roster-player-Bob')),
             );
@@ -100,4 +102,50 @@ void main() {
       }
     }
   }
+  testWidgets('default can be set and cleared from confirmation', (
+    tester,
+  ) async {
+    final previous = VideoPlayerPlatform.instance;
+    VideoPlayerPlatform.instance = FakeVideoPlatform();
+    tester.binding.platformDispatcher.localeTestValue = const Locale('zh');
+    await tester.binding.setSurfaceSize(const Size(360, 800));
+    try {
+      f.state.project = f.project(videoPath).copyWith(players: []);
+      f.state.playerGroups = [
+        (name: 'Team', players: ['Alice']),
+      ];
+      f.state.rosterSelection.choose('Team', ['Alice']);
+      await tester.pumpWidget(BheMobileApp(appState: f.state));
+      await tester.pump();
+      await tester.ensureVisible(find.byKey(const ValueKey('start-analysis')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('start-analysis')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.ensureVisible(find.byKey(const ValueKey('roster-default')));
+      await tester.tap(find.byKey(const ValueKey('roster-default')));
+      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+      expect(f.state.defaultPlayerGroupName, 'Team');
+      expect(find.text('取消默认'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('roster-default')));
+      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+      expect(f.state.defaultPlayerGroupName, isNull);
+      expect(find.text('设为默认'), findsOneWidget);
+      expect(f.state.project.players, isEmpty);
+    } finally {
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(() => pumpEventQueue());
+      VideoPlayerPlatform.instance = previous;
+      tester.binding.platformDispatcher.clearLocaleTestValue();
+      await tester.binding.setSurfaceSize(null);
+    }
+  });
 }

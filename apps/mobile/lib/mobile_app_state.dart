@@ -64,7 +64,13 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   List<ProjectSnapshot> recentProjects = const [];
   late final PlayerGroupStore _groupStore = PlayerGroupStore(
     onChanged: () {
-      if (!_disposed) notifyListeners();
+      if (!_disposed) {
+        _rosterSelection?.reconcile(
+          playerGroups,
+          hasPlayers: project.players.isNotEmpty,
+        );
+        notifyListeners();
+      }
     },
     onFailure: (error, stack) {
       if (_disposed) {
@@ -2146,7 +2152,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         final matches = playerGroups.where(
           (group) => group.name == expectedRosterGroup,
         );
-        if (matches.isEmpty) {
+        if (matches.isEmpty ||
+            (_rosterSelection != null &&
+                (rosterSelection.groupChanged ||
+                    rosterSelection.groupName != expectedRosterGroup))) {
           errorMessage = '球员分组已不存在，请重新选择';
           notifyListeners();
           return;
