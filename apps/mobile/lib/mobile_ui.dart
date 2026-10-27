@@ -72,7 +72,7 @@ class _BheMobileAppState extends State<BheMobileApp> {
   Future<void> _autoCheckUpdate() async {
     if (!await updater.autoCheck() || !mounted) return;
     final context = _navigatorKey.currentContext;
-    final version = updater.manifest?.version;
+    final version = updater.targetVersion;
     if (context == null || version == null || !context.mounted) return;
     _messengerKey.currentState?.showSnackBar(
       SnackBar(
@@ -4729,7 +4729,7 @@ class _UpdateSheet extends StatelessWidget {
     if (hasUpdate) {
       children.addAll([
         Text(
-          context.bheText('新版本 v${manifest.version}'),
+          context.bheText('新版本 v${updater.targetVersion}'),
           style: theme.textTheme.titleMedium,
         ),
         const SizedBox(height: 2),
@@ -4738,7 +4738,7 @@ class _UpdateSheet extends StatelessWidget {
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 12),
-        for (final line in manifest
+        for (final line in updater
             .notesFor(english: english)
             .split(RegExp('[；;]'))
             .map((line) => line.trim())

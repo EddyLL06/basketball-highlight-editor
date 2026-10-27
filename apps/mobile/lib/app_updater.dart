@@ -15,14 +15,32 @@ const mobileAppVersion = String.fromEnvironment(
 const _lastCheckKey = 'bhe.update-last-check-ms';
 const _skippedVersionKey = 'bhe.update-skipped-version';
 
-enum UpdateStatus { idle, checking, upToDate, available, downloading, ready, failed }
+enum UpdateStatus {
+  idle,
+  checking,
+  upToDate,
+  available,
+  downloading,
+  ready,
+  failed,
+}
 
 class AppUpdater extends ChangeNotifier {
-  AppUpdater({this.currentVersion = mobileAppVersion});
+  AppUpdater({
+    this.currentVersion = mobileAppVersion,
+    Future<UpdateManifest> Function()? fetch,
+    String? platform,
+  }) : _fetch = fetch ?? fetchUpdateManifest,
+       _platform = platform ?? currentUpdatePlatform();
 
   static const _channel = MethodChannel('com.bhe.bhe/mobile_update');
 
   final String currentVersion;
+  final Future<UpdateManifest> Function() _fetch;
+  final String? _platform;
+  String? get targetVersion => manifest?.versionFor(_platform);
+  String notesFor({required bool english}) =>
+      manifest?.notesFor(english: english, platform: _platform) ?? '';
   UpdateStatus status = UpdateStatus.idle;
   UpdateManifest? manifest;
   int received = 0;
@@ -31,7 +49,7 @@ class AppUpdater extends ChangeNotifier {
   HttpClient? _downloadClient;
   bool _cancelled = false;
 
-  UpdatePackage? get package => manifest?.packages[currentUpdatePlatform()];
+  UpdatePackage? get package => manifest?.packages[_platform];
 
   void _set(UpdateStatus next, {String? error}) {
     status = next;
@@ -47,14 +65,15 @@ class AppUpdater extends ChangeNotifier {
     manifest = null;
     _set(UpdateStatus.checking);
     try {
-      final latest = await fetchUpdateManifest();
+      final latest = await _fetch();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(_lastCheckKey, DateTime.now().millisecondsSinceEpoch);
       final skipped =
-          !manual && prefs.getString(_skippedVersionKey) == latest.version;
+          !manual &&
+          prefs.getString(_skippedVersionKey) == latest.versionFor(_platform);
       manifest = latest;
       _set(
-        isNewerVersion(latest.version, currentVersion) &&
+        isNewerVersion(latest.versionFor(_platform), currentVersion) &&
                 package != null &&
                 !skipped
             ? UpdateStatus.available
@@ -77,7 +96,7 @@ class AppUpdater extends ChangeNotifier {
   }
 
   Future<void> skip() async {
-    final version = manifest?.version;
+    final version = targetVersion;
     if (version == null) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_skippedVersionKey, version);
@@ -87,13 +106,16 @@ class AppUpdater extends ChangeNotifier {
   Future<void> download() async {
     final target = package;
     if (target == null) return;
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
     _downloadClient = client;
     _cancelled = false;
     received = 0;
     _set(UpdateStatus.downloading);
     try {
-      final directory = Directory('${(await getTemporaryDirectory()).path}/updates');
+      final directory = Directory(
+        '${(await getTemporaryDirectory()).path}/updates',
+      );
       file = await downloadUpdate(
         target,
         directory,

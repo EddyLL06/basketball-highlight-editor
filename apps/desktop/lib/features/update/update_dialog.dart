@@ -1,3 +1,4 @@
+import 'package:bhe_core/bhe_core.dart';
 import 'package:bhe_l10n/bhe_l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -98,7 +99,7 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
     if (hasUpdate) {
       body.addAll([
         Text(
-          context.bheText('新版本 v${manifest.version}'),
+          context.bheText('新版本 v${update.targetVersion}'),
           style: theme.textTheme.titleSmall,
         ),
         const SizedBox(height: 2),
@@ -120,7 +121,10 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 for (final line in _noteLines(
-                  manifest.notesFor(english: english),
+                  manifest.notesFor(
+                    english: english,
+                    platform: currentUpdatePlatform(),
+                  ),
                 ))
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),

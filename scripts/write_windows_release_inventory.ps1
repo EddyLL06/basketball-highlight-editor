@@ -11,9 +11,14 @@ foreach ($item in $items) {
         throw "Release contains a linked file or directory: $($item.FullName)"
     }
 }
+# Preserve the base version expected by already-installed Windows helpers.
+# The archive hash identifies the exact release; keep its tag separately for publishing.
+$releaseVersion = $Version -replace '^v', ''
+$inventoryVersion = $releaseVersion -replace '-windows\.[1-9][0-9]*$', ''
 $inventory = [ordered]@{
     schema = 1
-    version = $Version -replace '^v', ''
+    version = $inventoryVersion
+    release_version = $releaseVersion
     files = @($items | Where-Object { !$_.PSIsContainer -and $_.FullName -ne (Join-Path $Root 'bhe-release.json') } |
         ForEach-Object { $_.FullName.Substring($Root.Length + 1).Replace('\', '/') } | Sort-Object)
     directories = @($items | Where-Object { $_.PSIsContainer } |

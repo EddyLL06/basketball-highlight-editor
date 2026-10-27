@@ -34,11 +34,15 @@ class UpdatePackage {
     required this.url,
     required this.sha256,
     required this.size,
+    this.version,
+    this.notes,
   });
 
   final Uri url;
   final String sha256;
   final int size;
+  final String? version;
+  final Map<String, String>? notes;
 
   String get fileName => url.pathSegments.last;
 }
@@ -56,8 +60,12 @@ class UpdateManifest {
   final Map<String, String> notes;
   final Map<String, UpdatePackage> packages;
 
-  String notesFor({required bool english}) =>
-      notes[english ? 'en' : 'zh'] ?? notes['zh'] ?? '';
+  String versionFor(String? platform) => packages[platform]?.version ?? version;
+
+  String notesFor({required bool english, String? platform}) {
+    final selected = packages[platform]?.notes ?? notes;
+    return selected[english ? 'en' : 'zh'] ?? selected['zh'] ?? '';
+  }
 
   factory UpdateManifest.fromJson(Map<String, dynamic> json) {
     final version = json['version'];
@@ -76,12 +84,20 @@ class UpdateManifest {
       packages: {
         for (final entry in packages.entries)
           if (entry.value is Map)
-            entry.key.toString(): _package((entry.value as Map).cast()),
+            entry.key.toString(): _package(
+              entry.key.toString(),
+              (entry.value as Map).cast(),
+              version,
+            ),
       },
     );
   }
 
-  static UpdatePackage _package(Map<String, dynamic> json) {
+  static UpdatePackage _package(
+    String platform,
+    Map<String, dynamic> json,
+    String manifestVersion,
+  ) {
     final url = Uri.tryParse(json['url']?.toString() ?? '');
     final sha256 = json['sha256'];
     final size = json['size'];
@@ -91,29 +107,93 @@ class UpdateManifest {
     if (sha256 is! String || sha256.length != 64 || size is! int || size <= 0) {
       throw const UpdateException('更新信息里的安装包校验信息无效');
     }
-    return UpdatePackage(url: url, sha256: sha256.toLowerCase(), size: size);
+    final version = json['version'];
+    final notes = json['notes'];
+    if (version != null) {
+      final parsed = version is String ? _UpdateVersion.parse(version) : null;
+      final family = platform.split('-').first;
+      if (parsed == null ||
+          compareVersions(parsed.core, manifestVersion) != 0 ||
+          (parsed.family != null && parsed.family != family)) {
+        throw const UpdateException('更新信息里的版本号无效');
+      }
+    }
+    if (notes != null &&
+        (notes is! Map ||
+            notes.entries.any((e) => e.key is! String || e.value is! String))) {
+      throw const UpdateException('更新信息格式无效');
+    }
+    return UpdatePackage(
+      url: url,
+      sha256: sha256.toLowerCase(),
+      size: size,
+      version: version as String?,
+      notes: notes == null ? null : (notes as Map).cast<String, String>(),
+    );
   }
 }
 
-/// 比较 0.1.10 这类版本号，`+构建号` 不参与比较；不是数字版本（如 dev）返回 null。
-int? compareVersions(String a, String b) {
-  List<int>? parts(String value) {
-    final core = value.trim().replaceFirst(RegExp('^v'), '').split('+').first;
-    final numbers = core.split('.').map(int.tryParse).toList();
-    if (numbers.isEmpty || numbers.contains(null)) return null;
-    return numbers.cast<int>();
-  }
+class _UpdateVersion {
+  _UpdateVersion(this.core, this.numbers, this.family, this.patch);
+  final String core;
+  final List<int> numbers;
+  final String? family;
+  final int patch;
 
-  final left = parts(a);
-  final right = parts(b);
-  if (left == null || right == null) return null;
-  for (var i = 0; i < left.length || i < right.length; i++) {
+  static _UpdateVersion? parse(String value) {
+    final match = RegExp(
+      r'^v?([0-9]+(?:\.[0-9]+)*)(?:\+([0-9A-Za-z.-]+))?$',
+    ).firstMatch(value.trim());
+    if (match == null) return null;
+    final core = match[1]!;
+    final metadata = match[2];
+    String? family;
+    var patch = 0;
+    if (metadata != null) {
+      final reserved = RegExp(
+        r'^(android|macos|windows)(?:\.|$)',
+      ).hasMatch(metadata);
+      final suffix = RegExp(
+        r'^(android|macos|windows)\.([0-9]+)$',
+      ).firstMatch(metadata);
+      if (reserved && suffix == null) return null;
+      if (suffix != null) {
+        family = suffix[1];
+        final number = int.tryParse(suffix[2]!);
+        if (number == null) return null;
+        patch = number;
+      }
+    }
+    final numbers = core.split('.').map(int.tryParse).toList();
+    if (numbers.contains(null)) return null;
+    return _UpdateVersion(core, numbers.cast<int>(), family, patch);
+  }
+}
+
+/// Numeric versions compare first; recognized platform patch numbers compare next.
+/// Other build metadata remains informational. Invalid/cross-family versions return null.
+int? compareVersions(String a, String b) {
+  final left = _UpdateVersion.parse(a);
+  final right = _UpdateVersion.parse(b);
+  if (left == null ||
+      right == null ||
+      (left.family != null &&
+          right.family != null &&
+          left.family != right.family))
+    return null;
+  for (var i = 0; i < left.numbers.length || i < right.numbers.length; i++) {
     final diff =
-        (i < left.length ? left[i] : 0) - (i < right.length ? right[i] : 0);
+        (i < left.numbers.length ? left.numbers[i] : 0) -
+        (i < right.numbers.length ? right.numbers[i] : 0);
     if (diff != 0) return diff.sign;
   }
-  return 0;
+  return (left.patch - right.patch).sign;
 }
+
+/// Old Windows helpers require the full base version in bhe-release.json.
+/// The signed package digest binds the exact patch; release_version records its tag.
+String windowsInstallerVersion(String version) =>
+    version.replaceFirst(RegExp(r'\+windows\.[0-9]+$'), '');
 
 bool isNewerVersion(String latest, String current) =>
     (compareVersions(latest, current) ?? 0) > 0;

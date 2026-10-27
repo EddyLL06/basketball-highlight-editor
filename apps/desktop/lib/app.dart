@@ -47,7 +47,7 @@ class _CourtsideAppState extends ConsumerState<CourtsideApp>
 
   Future<void> _autoCheckUpdate() async {
     final found = await ref.read(updateProvider.notifier).autoCheck();
-    final version = ref.read(updateProvider).manifest?.version;
+    final version = ref.read(updateProvider).targetVersion;
     if (!found || !mounted || version == null) return;
     final id = 'update-$version';
     ref.read(noticeProvider.notifier).push(

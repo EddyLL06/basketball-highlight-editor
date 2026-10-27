@@ -29,7 +29,7 @@ UpdateManifest _manifest(String version) => UpdateManifest(
 class _FakeUpdateService extends UpdateService {
   _FakeUpdateService(this.manifest, {this.installable = false});
 
-  final UpdateManifest manifest;
+  UpdateManifest manifest;
   final bool installable;
   final events = <String>[];
   final session = _FakeInstallSession();
@@ -282,6 +282,46 @@ void main() {
       },
     );
   }
+
+  test(
+    'platform patches use effective version for skip and later patch',
+    () async {
+      UpdateManifest patch(int number) {
+        final platform = currentUpdatePlatform()!;
+        final family = platform.split('-').first;
+        return UpdateManifest(
+          version: '0.1.13',
+          publishedAt: '',
+          notes: const {'zh': 'full'},
+          packages: {
+            platform: UpdatePackage(
+              url: Uri.parse('https://example.invalid/patch.zip'),
+              sha256: 'a' * 64,
+              size: 42,
+              version: '0.1.13+$family.$number',
+              notes: const {'zh': 'patch'},
+            ),
+          },
+        );
+      }
+
+      final service = _FakeUpdateService(patch(1));
+      final container = _container(service, '0.1.13');
+      final notifier = container.read(updateProvider.notifier);
+      await notifier.check();
+      expect(container.read(updateProvider).status, UpdateStatus.available);
+      expect(container.read(updateProvider).targetVersion, contains('.1'));
+      await notifier.skip();
+      await notifier.check();
+      expect(container.read(updateProvider).status, UpdateStatus.upToDate);
+      await notifier.check(manual: true);
+      expect(container.read(updateProvider).status, UpdateStatus.available);
+      service.manifest = patch(2);
+      await notifier.check();
+      expect(container.read(updateProvider).status, UpdateStatus.available);
+      expect(container.read(updateProvider).targetVersion, endsWith('.2'));
+    },
+  );
 
   test('auto check finds a newer version at most once a day', () async {
     final service = _FakeUpdateService(_manifest('0.1.11'));
