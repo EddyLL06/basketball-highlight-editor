@@ -65,7 +65,7 @@ void main() {
         await f.state.undoReview();
         expect(f.state.project.candidates.single.player, isNull);
         expect(f.state.project.players, isEmpty);
-        f.state.addPlayer('unused');
+        await f.state.addPlayer('unused');
         await f.state.removePlayer('unused');
         expect(f.state.project.players, isEmpty);
         await f.state.createNewProject();

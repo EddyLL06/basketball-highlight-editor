@@ -1888,7 +1888,7 @@ class _ReviewViewState extends State<_ReviewView> {
     );
     if (range == null) return;
     final id = 'manual_${DateTime.now().microsecondsSinceEpoch}';
-    state.addCandidate(
+    await state.addCandidate(
       Candidate(
         id: id,
         startMs: range.start,
@@ -3919,6 +3919,7 @@ Future<void> _showPlayerPicker(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
+    enableDrag: false,
     builder: (_) => _PlayerTagSheet(
       state: state,
       players: state.project.players,
@@ -3930,7 +3931,7 @@ Future<void> _showPlayerPicker(
   if (normalized.isEmpty) {
     await state.setCandidatePlayer(candidate.id, null);
   } else {
-    state.addPlayer(normalized);
+    if (!await state.addPlayer(normalized)) return;
     await state.setCandidatePlayer(candidate.id, normalized);
   }
 }
@@ -4336,11 +4337,13 @@ class _SheetFrame extends StatelessWidget {
     required this.child,
     this.padding = const EdgeInsets.fromLTRB(20, 10, 20, 20),
     this.titleStyle,
+    this.canClose = true,
   });
   final String title;
   final Widget child;
   final EdgeInsets padding;
   final TextStyle? titleStyle;
+  final bool canClose;
 
   @override
   Widget build(BuildContext context) => SafeArea(
@@ -4370,7 +4373,7 @@ class _SheetFrame extends StatelessWidget {
                   ),
                 ),
                 IconButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: canClose ? () => Navigator.pop(context) : null,
                   tooltip: context.bheText('返回上一步'),
                   icon: const Icon(LucideIcons.x, size: 19),
                 ),
@@ -4413,7 +4416,7 @@ Future<void> _showQualitySheet(
     ),
   );
   if (value != null) {
-    state.updateSettings(current.copyWith(mode: value, sampleFps: 10));
+    state.updateSettings(current.copyWith(mode: value, sampleFps: 10), fields: {'mode', 'sampleFps'});
   }
 }
 
@@ -4493,7 +4496,7 @@ Future<void> _showClipSheet(BuildContext context, MobileAppState state) async {
     ),
   );
   if (value != null) {
-    state.updateSettings(current.copyWith(clip: value));
+    state.updateSettings(current.copyWith(clip: value), fields: {'clip'});
   }
 }
 
@@ -4595,6 +4598,7 @@ Future<void> _showRangeSheet(BuildContext context, MobileAppState state) async {
   if (value != null) {
     state.updateSettings(
       current.copyWith(startMs: value.start, endMs: value.end),
+      fields: {'startMs', 'endMs'},
     );
   }
 }

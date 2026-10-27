@@ -15,6 +15,7 @@ import 'package:video_player/video_player.dart';
 
 import 'features/review_undo/review_history.dart';
 import 'features/project_mutation/project_mutation_queue.dart';
+import 'features/project_mutation/analysis_candidate_merge.dart';
 import 'features/video_source/project_paths.dart';
 import 'features/video_source/project_file_commit.dart';
 import 'features/video_source/video_source_store.dart';
@@ -138,8 +139,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   bool exportAudioSkipped = false;
   List<String> exportedPaths = const [];
   final ProjectMutationQueue _mutations = ProjectMutationQueue();
-  Future<void> get _saveChain => _mutations.drained;
   Future<void> get pendingProjectWrites => _mutations.drained;
+  int get pendingProjectMutations => _mutations.pending;
   final ReviewHistory reviewHistory = ReviewHistory();
   String? undoFocusId;
   int undoRevision = 0;
@@ -156,6 +157,17 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   bool get canUndoReview => reviewHistory.canUndo;
 
   int _projectSession = 0;
+  int _projectTransitions = 0;
+
+  Future<T> _withProjectTransition<T>(Future<T> Function() action) async {
+    _projectTransitions++;
+    try {
+      return await action();
+    } finally {
+      _projectTransitions--;
+    }
+  }
+
   int playerMutationRevision = 0;
   String? lastPlayerOldName;
   String? lastPlayerNewName;
@@ -166,6 +178,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     required String notice,
     required List<Candidate> Function(List<Candidate>) change,
   }) {
+    if (_projectTransitions != 0) return Future.value(false);
     final projectId = project.id;
     final session = _projectSession;
     return _mutations.run(() async {
@@ -220,6 +233,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           recordDiagnosticFailure(error, stack, operation: 'project');
           _setReviewNotice('保存失败，请重试');
           notifyListeners();
+        } else {
+          MobileDiagnostics.instance.error(error, stack, operation: 'project');
         }
         return false;
       }
@@ -227,6 +242,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   Future<void> undoReview() {
+    if (_projectTransitions != 0) return Future.value();
     final projectId = project.id;
     final session = _projectSession;
     return _mutations.run(() async {
@@ -278,6 +294,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           recordDiagnosticFailure(error, stack, operation: 'project');
           _setReviewNotice('保存失败，请重试');
           notifyListeners();
+        } else {
+          MobileDiagnostics.instance.error(error, stack, operation: 'project');
         }
       }
     });
@@ -398,7 +416,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         );
         await _writeProject(next);
         if (!current()) {
-          await _writeProject(before);
+          await _writeProject(project);
           throw const VideoSourceCancelled();
         }
         project = next;
@@ -541,50 +559,52 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   Future<void> loadSavedProject() async {
     try {
-      final directory = await _dataDirectory();
-      final indexFile = File('${directory.path}/project_index.json');
-      final legacyFile = File('${directory.path}/project.bhe.json');
-      if (await indexFile.exists()) {
-        final ids =
-            (jsonDecode(await indexFile.readAsString()) as List?)
-                ?.whereType<String>()
-                .where(isSafeProjectId)
-                .toSet()
-                .toList() ??
-            const <String>[];
-        final loadedProjects = <ProjectSnapshot>[];
-        for (final id in ids) {
-          final file = await _projectFile(id);
-          if (!await file.exists()) continue;
-          try {
-            loadedProjects.add(
-              const ProjectPackageCodec().decode(await file.readAsString()),
-            );
-          } on Object catch (error, stack) {
-            MobileDiagnostics.instance.error(
-              error,
-              stack,
-              operation: 'project',
-            );
-            developer.log(
-              'skipping invalid project $id: $error',
-              name: 'BHE-Project',
-              error: error,
-              stackTrace: stack,
-            );
+      await _mutations.run(() async {
+        final directory = await _dataDirectory();
+        final indexFile = File('${directory.path}/project_index.json');
+        final legacyFile = File('${directory.path}/project.bhe.json');
+        if (await indexFile.exists()) {
+          final ids =
+              (jsonDecode(await indexFile.readAsString()) as List?)
+                  ?.whereType<String>()
+                  .where(isSafeProjectId)
+                  .toSet()
+                  .toList() ??
+              const <String>[];
+          final loadedProjects = <ProjectSnapshot>[];
+          for (final id in ids) {
+            final file = await _projectFile(id);
+            if (!await file.exists()) continue;
+            try {
+              loadedProjects.add(
+                const ProjectPackageCodec().decode(await file.readAsString()),
+              );
+            } on Object catch (error, stack) {
+              MobileDiagnostics.instance.error(
+                error,
+                stack,
+                operation: 'project',
+              );
+              developer.log(
+                'skipping invalid project $id: $error',
+                name: 'BHE-Project',
+                error: error,
+                stackTrace: stack,
+              );
+            }
           }
+          recentProjects = loadedProjects;
+          if (recentProjects.isNotEmpty) project = recentProjects.first;
+          await _persistProjects();
+          unawaited(_loadCovers());
+        } else if (await legacyFile.exists()) {
+          project = const ProjectPackageCodec().decode(
+            await legacyFile.readAsString(),
+          );
+          recentProjects = [project];
+          await _persistProjects();
         }
-        recentProjects = loadedProjects;
-        if (recentProjects.isNotEmpty) project = recentProjects.first;
-        await _persistProjects();
-        unawaited(_loadCovers());
-      } else if (await legacyFile.exists()) {
-        project = const ProjectPackageCodec().decode(
-          await legacyFile.readAsString(),
-        );
-        recentProjects = [project];
-        await _persistProjects();
-      }
+      });
       if (project.video != null) await _validateImportedVideoIfPresent();
       if (project.lastAnalysisStatus == 'running') {
         unawaited(_recoverRunningAnalysis());
@@ -598,9 +618,13 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   Future<void> _recoverRunningAnalysis() async {
+    final id = project.id, session = _projectSession;
+    bool current() =>
+        !_disposed && project.id == id && _projectSession == session;
     var receivedState = false;
     try {
       await for (final update in analysisEngine.recoverAnalysis()) {
+        if (!current()) return;
         receivedState = true;
         if (stage != update.stage) {
           MobileDiagnostics.instance.event('analysis.${update.stage.name}');
@@ -615,64 +639,95 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
             update.stage != AnalysisStage.cancelled &&
             update.stage != AnalysisStage.failed;
         analysisStartedAt ??= DateTime.now();
-        if (update.stage == AnalysisStage.completed) {
-          project = project.copyWith(
-            candidates: update.candidates,
-            lastAnalysisStatus: 'completed',
-            lastAnalysisProgressPercent: 100,
-            lastAnalysisMessage: '分析完成',
-            lastAnalysisAt: DateTime.now(),
+        final completed = update.stage == AnalysisStage.completed;
+        final stopped =
+            update.stage == AnalysisStage.cancelled ||
+            update.stage == AnalysisStage.failed;
+        if (update.stage == AnalysisStage.failed) {
+          recordDiagnosticFailure(
+            MobileAnalysisException(update.message),
+            null,
+            operation: 'analysis.recover',
           );
+          progressMessage = errorMessage ?? '';
+        }
+        final status = completed
+            ? 'completed'
+            : update.stage == AnalysisStage.cancelled
+            ? 'cancelled'
+            : stopped
+            ? 'failed'
+            : 'running';
+        final message = completed
+            ? '分析完成'
+            : stopped
+            ? errorMessage ?? update.message
+            : update.message;
+        final percent = completed ? 100 : (progress * 100).round();
+        final completedAt = completed ? DateTime.now() : null;
+        final fields = <String>{
+          'status',
+          'message',
+          if (!stopped) 'progress',
+          if (completed) ...{'candidates', 'at'},
+        };
+        if (!await _submitProjectChange(
+          (value) => value.copyWith(
+            candidates: completed
+                ? mergeAnalysisCandidates(value.candidates, update.candidates)
+                : null,
+            lastAnalysisStatus: status,
+            lastAnalysisMessage: message,
+            lastAnalysisProgressPercent: stopped ? null : percent,
+            lastAnalysisAt: completedAt,
+          ),
+          inverse: (before) => _restoreOperationFields(before, fields),
+          operation: 'analysis.recover',
+        )) {
+          return;
+        }
+        if (!current()) return;
+        if (completed || stopped) {
           analysing = false;
           analysisStartedAt = null;
-          await _queueSave();
-          unawaited(_updateCover(project));
-        } else if (update.stage == AnalysisStage.cancelled ||
-            update.stage == AnalysisStage.failed) {
-          if (update.stage == AnalysisStage.failed) {
-            recordDiagnosticFailure(
-              MobileAnalysisException(update.message),
-              null,
-              operation: 'analysis.recover',
-            );
-            progressMessage = errorMessage ?? '';
-          }
-          project = project.copyWith(
-            lastAnalysisStatus: update.stage == AnalysisStage.cancelled
-                ? 'cancelled'
-                : 'failed',
-            lastAnalysisMessage: errorMessage ?? update.message,
-          );
-          analysing = false;
-          analysisStartedAt = null;
-          await _queueSave();
-        } else {
-          project = project.copyWith(
-            lastAnalysisStatus: 'running',
-            lastAnalysisProgressPercent: (progress * 100).round(),
-            lastAnalysisMessage: update.message,
-          );
-          unawaited(_queueSave());
+          if (completed) unawaited(_updateCover(project));
         }
         notifyListeners();
       }
-      if (!receivedState && project.lastAnalysisStatus == 'running') {
-        project = project.copyWith(
-          lastAnalysisStatus: 'interrupted',
-          lastAnalysisMessage: '未找到仍在运行的原生分析任务，可重新分析。',
+      if (current() &&
+          !receivedState &&
+          project.lastAnalysisStatus == 'running') {
+        await _submitProjectChange(
+          (value) => value.copyWith(
+            lastAnalysisStatus: 'interrupted',
+            lastAnalysisMessage: '未找到仍在运行的原生分析任务，可重新分析。',
+          ),
+          inverse: (before) =>
+              _restoreOperationFields(before, {'status', 'message'}),
+          operation: 'analysis.recover',
         );
-        await _queueSave();
-        notifyListeners();
       }
     } on Object catch (error, stack) {
-      MobileDiagnostics.instance.error(error, stack, operation: 'project');
-      project = project.copyWith(
-        lastAnalysisStatus: 'interrupted',
-        lastAnalysisMessage: '出错了：视频分析未完成，请重试。',
-      );
+      if (!current()) {
+        MobileDiagnostics.instance.error(
+          error,
+          stack,
+          operation: 'analysis.recover',
+        );
+        return;
+      }
+      recordDiagnosticFailure(error, stack, operation: 'analysis.recover');
       analysing = false;
       analysisStartedAt = null;
-      unawaited(_queueSave());
+      await _submitProjectChange(
+        (value) => value.copyWith(
+          lastAnalysisStatus: 'interrupted',
+          lastAnalysisMessage: '出错了：视频分析未完成，请重试。',
+        ),
+        inverse: (before) =>
+            _restoreOperationFields(before, {'status', 'message'}),
+        operation: 'analysis.recover',
+      );
       notifyListeners();
     }
   }
@@ -684,17 +739,134 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       ...recentProjects.where((item) => item.id != snapshot.id),
     ].take(12).toList();
     final index = File('${(await _dataDirectory()).path}/project_index.json');
+    final indexContent = jsonEncode(next.map((item) => item.id).toList());
+    // Consecutive edits in the same project keep the index unchanged. Merge
+    // those redundant index writes while still committing each undo step.
+    final indexUnchanged =
+        await index.exists() && await index.readAsString() == indexContent;
     await commitProjectFiles({
       file: const ProjectPackageCodec().encode(snapshot),
-      index: jsonEncode(next.map((item) => item.id).toList()),
+      if (!indexUnchanged) index: indexContent,
     });
-    recentProjects = [
-      for (final item in next)
-        item.id == project.id ? item.copyWith(name: project.name) : item,
-    ];
+    recentProjects = next;
+  }
+
+  Future<bool> _submitProjectChange(
+    ProjectSnapshot Function(ProjectSnapshot) change, {
+    required ProjectSnapshot Function(ProjectSnapshot) Function(ProjectSnapshot)
+    inverse,
+    String operation = 'project',
+    void Function()? onSuccess,
+    bool allowDuringTransition = false,
+  }) {
+    if (_projectTransitions != 0 && !allowDuringTransition) {
+      return Future.value(false);
+    }
+    final id = project.id, session = _projectSession;
+    return _mutations.run(() async {
+      if (_disposed || project.id != id || _projectSession != session) {
+        return false;
+      }
+      final next = change(project);
+      if (identical(next, project)) return true;
+      final rollback = inverse(project);
+      project = next;
+      notifyListeners();
+      try {
+        await _writeProject(project);
+        if (_disposed || project.id != id || _projectSession != session) {
+          return false;
+        }
+        onSuccess?.call();
+        notifyListeners();
+        return true;
+      } on Object catch (error, stack) {
+        if (!_disposed && project.id == id && _projectSession == session) {
+          project = rollback(project);
+          recordDiagnosticFailure(error, stack, operation: operation);
+          notifyListeners();
+        } else {
+          MobileDiagnostics.instance.error(error, stack, operation: operation);
+        }
+        return false;
+      }
+    });
+  }
+
+  ProjectSnapshot Function(ProjectSnapshot) _restoreOperationFields(
+    ProjectSnapshot before,
+    Set<String> fields,
+  ) {
+    final old = <String, Object?>{
+      if (fields.contains('candidates')) 'candidates': before.candidates,
+      if (fields.contains('duration'))
+        'duration': before.lastAnalysisDurationMs,
+      if (fields.contains('at')) 'at': before.lastAnalysisAt,
+      if (fields.contains('status')) 'status': before.lastAnalysisStatus,
+      if (fields.contains('progress'))
+        'progress': before.lastAnalysisProgressPercent,
+      if (fields.contains('message')) 'message': before.lastAnalysisMessage,
+      if (fields.contains('export')) 'export': before.lastExportDurationMs,
+    };
+    return (current) => ProjectSnapshot(
+      id: current.id,
+      name: current.name,
+      video: current.video,
+      hoopRoi: current.hoopRoi,
+      rimRoi: current.rimRoi,
+      netRoi: current.netRoi,
+      settings: current.settings,
+      candidates: old.containsKey('candidates')
+          ? old['candidates'] as List<Candidate>
+          : current.candidates,
+      players: current.players,
+      lastAnalysisDurationMs: old.containsKey('duration')
+          ? old['duration'] as int?
+          : current.lastAnalysisDurationMs,
+      lastAnalysisAt: old.containsKey('at')
+          ? old['at'] as DateTime?
+          : current.lastAnalysisAt,
+      lastAnalysisStatus: old.containsKey('status')
+          ? old['status'] as String?
+          : current.lastAnalysisStatus,
+      lastAnalysisProgressPercent: old.containsKey('progress')
+          ? old['progress'] as int?
+          : current.lastAnalysisProgressPercent,
+      lastAnalysisMessage: old.containsKey('message')
+          ? old['message'] as String?
+          : current.lastAnalysisMessage,
+      lastExportDurationMs: old.containsKey('export')
+          ? old['export'] as int?
+          : current.lastExportDurationMs,
+    );
+  }
+
+  ProjectSnapshot Function(ProjectSnapshot) _restoreRois(
+    ProjectSnapshot before, {
+    bool rim = false,
+  }) {
+    final hoop = before.hoopRoi,
+        net = before.netRoi,
+        oldRim = rim ? before.rimRoi : null;
+    return (current) => current.copyWith(
+      hoopRoi: hoop,
+      clearHoopRoi: hoop == null,
+      netRoi: net,
+      clearNetRoi: net == null,
+      rimRoi: oldRim,
+      clearRimRoi: rim && oldRim == null,
+    );
+  }
+
+  ProjectSnapshot Function(ProjectSnapshot) _restorePlayers(
+    ProjectSnapshot before,
+  ) {
+    final oldPlayers = before.players;
+    return (current) => current.copyWith(players: oldPlayers);
   }
 
   Future<bool> renameProject(String name) {
+    if (_projectTransitions != 0) return Future.value(false);
     final value = name.trim();
     if (value.isEmpty || value.characters.length > 40) {
       return Future.value(false);
@@ -753,39 +925,47 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     );
   }
 
-  Future<void> openProject(String id) async {
+  Future<void> openProject(String id) => _withProjectTransition(() async {
     if (analysing) await cancelAnalysis();
     _invalidateVideoPreparation();
-    await _saveChain;
-    final file = await _projectFile(id);
-    if (!await file.exists()) return;
-    project = const ProjectPackageCodec().decode(await file.readAsString());
-    _resetTransientState();
-    diagnosticError = null;
-    errorMessage = null;
-    exportedPaths = const [];
-    exportAudioSkipped = false;
+    final opened = await _mutations.run(() async {
+      final file = await _projectFile(id);
+      if (!await file.exists()) return false;
+      final loaded = const ProjectPackageCodec().decode(
+        await file.readAsString(),
+      );
+      project = loaded;
+      _resetTransientState();
+      diagnosticError = null;
+      errorMessage = null;
+      exportedPaths = const [];
+      exportAudioSkipped = false;
+      recentProjects = [
+        project,
+        ...recentProjects.where((item) => item.id != project.id),
+      ];
+      await _persistProjects();
+      notifyListeners();
+      return true;
+    });
+    if (!opened) return;
     await _validateImportedVideoIfPresent();
     MobileDiagnostics.instance.event(
       'project.open',
       available: sourceVideoExists,
     );
-    recentProjects = [
-      project,
-      ...recentProjects.where((item) => item.id != project.id),
-    ];
-    await _persistProjects();
     notifyListeners();
-  }
+  });
 
-  Future<void> createNewProject() async {
+  Future<void> createNewProject() => _withProjectTransition(() async {
     if (analysing) await cancelAnalysis();
     _invalidateVideoPreparation();
-    if (project.video != null) await _queueSave();
-    project = _newProject();
-    _resetTransientState();
-    notifyListeners();
-  }
+    await _mutations.run(() async {
+      project = _newProject();
+      _resetTransientState();
+      notifyListeners();
+    });
+  });
 
   ProjectSnapshot _newProject() =>
       ProjectSnapshot(id: _newProjectId(), name: '新项目', video: null);
@@ -807,11 +987,6 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     if (picked == null) return;
     await createNewProject();
     await _prepareVideo(picked.path, name: picked.name);
-  }
-
-  Future<void> _queueSave() {
-    final snapshot = project;
-    return _mutations.run(() => _writeProject(snapshot));
   }
 
   Future<void> pickVideo() async {
@@ -892,12 +1067,14 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
                   right: analysisRoi.right,
                   bottom: (analysisRoi.bottom + .18).clamp(0, 1),
                 );
-          project = project.copyWith(
-            hoopRoi: analysisRoi,
-            rimRoi: rimRoi,
-            netRoi: netRoi,
+          await _submitProjectChange(
+            (current) => current.copyWith(
+              hoopRoi: analysisRoi,
+              rimRoi: rimRoi,
+              netRoi: netRoi,
+            ),
+            inverse: (before) => _restoreRois(before, rim: true),
           );
-          await _queueSave();
         }
       } on Object catch (error, stack) {
         MobileDiagnostics.instance.error(error, stack, operation: 'project');
@@ -919,7 +1096,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         stackTrace: stack,
       );
       if (_isCurrentVideoPreparation(preparationGeneration, projectId)) {
-        _recordVideoFailure(error, path);
+        _recordVideoFailure(error, path, stack);
       }
     } finally {
       if (preparationGeneration == _videoPreparationGeneration) {
@@ -946,6 +1123,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   void _resetTransientState() {
     _projectSession++;
+    _analysisGeneration++;
     reviewHistory.clear();
     _setReviewNotice(null);
     videoSourceFailure = null;
@@ -964,42 +1142,43 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     analysisStartedAt = null;
   }
 
-  Future<void> importProject() async {
+  Future<void> importProject() => _withProjectTransition(() async {
     if (analysing) await cancelAnalysis();
     _invalidateVideoPreparation();
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['bhe', 'json'],
     );
-    final file = result?.files.single;
-    final path = file?.path;
+    final path = result?.files.single.path;
     if (path == null) return;
     try {
-      if (project.video != null) await _queueSave();
       final file = File(path);
       final content = path.toLowerCase().endsWith('.bhe')
           ? _readProjectFromArchive(await file.readAsBytes())
           : await file.readAsString();
-      final imported = const ProjectPackageCodec().decode(
-        content,
-        existingIds: [
-          project.id,
-          ...recentProjects.map((item) => item.id),
-          ...await existingProjectStorageIds(await _dataDirectory()),
-        ],
-      );
-      project = imported;
-      _resetTransientState();
-      diagnosticError = null;
-      errorMessage = null;
+      await _mutations.run(() async {
+        final imported = const ProjectPackageCodec().decode(
+          content,
+          existingIds: [
+            project.id,
+            ...recentProjects.map((item) => item.id),
+            ...await existingProjectStorageIds(await _dataDirectory()),
+          ],
+        );
+        await _writeProject(imported);
+        project = imported;
+        _resetTransientState();
+        diagnosticError = null;
+        errorMessage = null;
+        notifyListeners();
+      });
       await _validateImportedVideoIfPresent();
-      await _queueSave();
       notifyListeners();
     } on Object catch (error, stack) {
       recordDiagnosticFailure(error, stack, operation: 'project.import');
       notifyListeners();
     }
-  }
+  });
 
   Future<void> relinkVideo() async {
     if (relinkingVideo || preparingVideo || exporting) return;
@@ -1039,7 +1218,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       // Switching project, cancelling, or closing never changes the new page.
     } on Object catch (error, stack) {
       MobileDiagnostics.instance.error(error, stack, operation: 'project');
-      if (current()) _recordVideoFailure(error, path);
+      if (current()) _recordVideoFailure(error, path, stack);
     } finally {
       if (!_disposed && operation == _relinkSerial) {
         relinkingVideo = false;
@@ -1049,82 +1228,163 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     }
   }
 
-  void updateSettings(AnalysisSettings settings) {
-    project = project.copyWith(settings: settings);
-    unawaited(_queueSave());
-    notifyListeners();
-  }
-
-  void updateRoi(Roi roi) {
-    updateRois(
-      hoop: roi,
-      net: Roi(
-        left: roi.left,
-        top: (roi.top + .06).clamp(0, 1),
-        right: roi.right,
-        bottom: (roi.bottom + .18).clamp(0, 1),
-      ),
+  Future<bool> updateSettings(
+    AnalysisSettings settings, {
+    Set<String>? fields,
+  }) {
+    final changed = fields == null
+        ? const {
+            'mode',
+            'clip',
+            'startMs',
+            'endMs',
+            'sampleFps',
+            'confidenceThreshold',
+            'modelSize',
+            'inferenceBatchSize',
+          }
+        : Set<String>.of(fields);
+    return _submitProjectChange(
+      (current) {
+        final now = current.settings;
+        return current.copyWith(
+          settings: AnalysisSettings(
+            mode: changed.contains('mode') ? settings.mode : now.mode,
+            clip: changed.contains('clip') ? settings.clip : now.clip,
+            startMs: changed.contains('startMs')
+                ? settings.startMs
+                : now.startMs,
+            endMs: changed.contains('endMs') ? settings.endMs : now.endMs,
+            sampleFps: changed.contains('sampleFps')
+                ? settings.sampleFps
+                : now.sampleFps,
+            confidenceThreshold: changed.contains('confidenceThreshold')
+                ? settings.confidenceThreshold
+                : now.confidenceThreshold,
+            modelSize: changed.contains('modelSize')
+                ? settings.modelSize
+                : now.modelSize,
+            inferenceBatchSize: changed.contains('inferenceBatchSize')
+                ? settings.inferenceBatchSize
+                : now.inferenceBatchSize,
+          ),
+        );
+      },
+      inverse: (before) {
+        final settingsBefore = before.settings;
+        final old = <String, Object?>{
+          if (changed.contains('mode')) 'mode': settingsBefore.mode,
+          if (changed.contains('clip')) 'clip': settingsBefore.clip,
+          if (changed.contains('startMs')) 'startMs': settingsBefore.startMs,
+          if (changed.contains('endMs')) 'endMs': settingsBefore.endMs,
+          if (changed.contains('sampleFps'))
+            'sampleFps': settingsBefore.sampleFps,
+          if (changed.contains('confidenceThreshold'))
+            'confidenceThreshold': settingsBefore.confidenceThreshold,
+          if (changed.contains('modelSize'))
+            'modelSize': settingsBefore.modelSize,
+          if (changed.contains('inferenceBatchSize'))
+            'inferenceBatchSize': settingsBefore.inferenceBatchSize,
+        };
+        return (current) {
+          final now = current.settings;
+          return current.copyWith(
+            settings: AnalysisSettings(
+              mode: old.containsKey('mode')
+                  ? old['mode'] as AnalysisMode
+                  : now.mode,
+              clip: old.containsKey('clip')
+                  ? old['clip'] as ClipSettings
+                  : now.clip,
+              startMs: old.containsKey('startMs')
+                  ? old['startMs'] as int
+                  : now.startMs,
+              endMs: old.containsKey('endMs')
+                  ? old['endMs'] as int?
+                  : now.endMs,
+              sampleFps: old.containsKey('sampleFps')
+                  ? old['sampleFps'] as double?
+                  : now.sampleFps,
+              confidenceThreshold: old.containsKey('confidenceThreshold')
+                  ? old['confidenceThreshold'] as double
+                  : now.confidenceThreshold,
+              modelSize: old.containsKey('modelSize')
+                  ? old['modelSize'] as int?
+                  : now.modelSize,
+              inferenceBatchSize: old.containsKey('inferenceBatchSize')
+                  ? old['inferenceBatchSize'] as int
+                  : now.inferenceBatchSize,
+            ),
+          );
+        };
+      },
     );
   }
 
-  void updateRois({required Roi hoop, required Roi net}) {
-    project = project.copyWith(
-      hoopRoi: hoop,
-      // `hoopRoi` is the large ball-search/analysis area. Keep the separately
-      // calibrated physical rim when that broad area is adjusted.
-      netRoi: net,
-    );
-    unawaited(_queueSave());
-    notifyListeners();
-  }
+  Future<bool> updateRoi(Roi roi) => updateRois(
+    hoop: roi,
+    net: Roi(
+      left: roi.left,
+      top: (roi.top + .06).clamp(0, 1),
+      right: roi.right,
+      bottom: (roi.bottom + .18).clamp(0, 1),
+    ),
+  );
 
-  Future<void> clearProject() async {
+  Future<bool> updateRois({required Roi hoop, required Roi net}) =>
+      _submitProjectChange(
+        (current) => current.copyWith(hoopRoi: hoop, netRoi: net),
+        inverse: _restoreRois,
+      );
+
+  Future<void> clearProject() => _withProjectTransition(() async {
     if (analysing) await cancelAnalysis();
     _invalidateVideoPreparation();
-    await _saveChain;
-    final deletedId = project.id;
-    stage = AnalysisStage.idle;
-    diagnosticError = null;
-    errorMessage = null;
-    _resetTransientState();
-    final file = await _projectFile(deletedId);
-    if (await file.exists()) await file.delete();
-    final cover = await _coverFile(deletedId);
-    if (await cover.exists()) await cover.delete();
-    coverPaths = {...coverPaths}..remove(deletedId);
-    recentProjects = recentProjects
-        .where((item) => item.id != deletedId)
-        .toList();
-    await _persistProjects();
-    if (recentProjects.isEmpty) {
-      project = _newProject();
-    } else {
-      project = recentProjects.first;
-      exportedPaths = const [];
-      exportAudioSkipped = false;
-      await _validateImportedVideoIfPresent();
-    }
-    final directory = await _dataDirectory();
-    for (final name in ['project.bhe.json', 'project.bhe']) {
-      final legacy = File('${directory.path}/$name');
-      if (await legacy.exists()) await legacy.delete();
-    }
-    for (final name in ['exports', 'package_staging']) {
-      final artifactDirectory = Directory(
-        await _projectPath(deletedId, area: name),
-      );
-      if (await artifactDirectory.exists()) {
-        await artifactDirectory.delete(recursive: true);
+    await _mutations.run(() async {
+      final deletedId = project.id;
+      stage = AnalysisStage.idle;
+      diagnosticError = null;
+      errorMessage = null;
+      _resetTransientState();
+      final file = await _projectFile(deletedId);
+      if (await file.exists()) await file.delete();
+      final cover = await _coverFile(deletedId);
+      if (await cover.exists()) await cover.delete();
+      coverPaths = {...coverPaths}..remove(deletedId);
+      recentProjects = recentProjects
+          .where((item) => item.id != deletedId)
+          .toList();
+      await _persistProjects();
+      if (recentProjects.isEmpty) {
+        project = _newProject();
+      } else {
+        project = recentProjects.first;
+        exportedPaths = const [];
+        exportAudioSkipped = false;
       }
-    }
-    final videoDirectory = Directory(
-      await _projectPath(deletedId, area: 'videos'),
-    );
-    if (await videoDirectory.exists()) {
-      await videoDirectory.delete(recursive: true);
-    }
-    notifyListeners();
-  }
+      final directory = await _dataDirectory();
+      for (final name in ['project.bhe.json', 'project.bhe']) {
+        final legacy = File('${directory.path}/$name');
+        if (await legacy.exists()) await legacy.delete();
+      }
+      for (final name in ['exports', 'package_staging']) {
+        final artifactDirectory = Directory(
+          await _projectPath(deletedId, area: name),
+        );
+        if (await artifactDirectory.exists()) {
+          await artifactDirectory.delete(recursive: true);
+        }
+      }
+      final videoDirectory = Directory(
+        await _projectPath(deletedId, area: 'videos'),
+      );
+      if (await videoDirectory.exists()) {
+        await videoDirectory.delete(recursive: true);
+      }
+      notifyListeners();
+    });
+    if (project.video != null) await _validateImportedVideoIfPresent();
+  });
 
   Future<bool> toggleCandidate(String id, CandidateSelection selection) =>
       _changeReview(
@@ -1139,23 +1399,28 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         ],
       );
 
-  void addCandidate(Candidate candidate) {
-    final candidates = [...project.candidates, candidate]
-      ..sort((a, b) => a.eventMs.compareTo(b.eventMs));
-    project = project.copyWith(candidates: candidates);
-    unawaited(_queueSave());
-    notifyListeners();
-  }
+  Future<bool> addCandidate(Candidate candidate) => _submitProjectChange(
+    (current) {
+      final candidates = [...current.candidates, candidate]
+        ..sort((a, b) => a.eventMs.compareTo(b.eventMs));
+      return current.copyWith(candidates: candidates);
+    },
+    inverse: (_) =>
+        (current) => current.copyWith(
+          candidates: current.candidates
+              .where((item) => item.id != candidate.id)
+              .toList(),
+        ),
+  );
 
-  void setAllCandidates(CandidateSelection selection) {
-    project = project.copyWith(
-      candidates: project.candidates
-          .map((candidate) => candidate.copyWith(selection: selection))
-          .toList(),
-    );
-    unawaited(_queueSave());
-    notifyListeners();
-  }
+  Future<bool> setAllCandidates(CandidateSelection selection) => _changeReview(
+    kind: ReviewChange.selection,
+    focusId: project.candidates.isEmpty ? '' : project.candidates.first.id,
+    notice: selection == CandidateSelection.included ? '已保留' : '已排除',
+    change: (items) => [
+      for (final candidate in items) candidate.copyWith(selection: selection),
+    ],
+  );
 
   Future<bool> setCandidatePlayer(String id, String? player) => _changeReview(
     kind: ReviewChange.player,
@@ -1169,12 +1434,15 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     ],
   );
 
-  void addPlayer(String player) {
+  Future<bool> addPlayer(String player) {
     final normalized = player.trim();
-    if (normalized.isEmpty || project.players.contains(normalized)) return;
-    project = project.copyWith(players: [...project.players, normalized]);
-    unawaited(_queueSave());
-    notifyListeners();
+    if (normalized.isEmpty) return Future.value(false);
+    return _submitProjectChange(
+      (current) => current.players.contains(normalized)
+          ? current
+          : current.copyWith(players: [...current.players, normalized]),
+      inverse: _restorePlayers,
+    );
   }
 
   Future<bool> renamePlayer(String oldName, String newName) {
@@ -1186,6 +1454,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   Future<bool> removePlayer(String player) => _changePlayer(player, null);
 
   Future<bool> _changePlayer(String oldName, String? newName) {
+    if (_projectTransitions != 0) return Future.value(false);
     final id = project.id, session = _projectSession;
     return _mutations.run(() async {
       if (_disposed || project.id != id || _projectSession != session) {
@@ -1283,26 +1552,31 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     await _persistPlayerGroups();
   }
 
-  void importPlayers(List<String> players) {
-    final missing = players.where((item) => !project.players.contains(item));
-    if (missing.isEmpty) return;
-    project = project.copyWith(players: [...project.players, ...missing]);
-    unawaited(_queueSave());
-    notifyListeners();
+  Future<bool> importPlayers(List<String> players) {
+    final requested = List<String>.of(players);
+    return _submitProjectChange((current) {
+      final all = [...current.players];
+      for (final name in requested) {
+        if (!all.contains(name)) all.add(name);
+      }
+      return current.copyWith(players: all);
+    }, inverse: _restorePlayers);
   }
 
   Future<void> exportProjectPackage() async {
     try {
+      await _mutations.drained;
+      final snapshot = project;
       final staging = Directory(
-        await _projectPath(project.id, area: 'package_staging'),
+        await _projectPath(snapshot.id, area: 'package_staging'),
       );
       if (await staging.exists()) await staging.delete(recursive: true);
       await staging.create(recursive: true);
       final projectJson = File('${staging.path}/project.json');
       await projectJson.writeAsString(
-        const ProjectPackageCodec().encode(project),
+        const ProjectPackageCodec().encode(snapshot),
       );
-      final file = File(await _projectPath(project.id, suffix: '.bhe'));
+      final file = File(await _projectPath(snapshot.id, suffix: '.bhe'));
       final encoder = ZipFileEncoder()
         ..create(file.path, level: ZipFileEncoder.store);
       encoder.addFileSync(projectJson, 'project.json');
@@ -1325,11 +1599,16 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   Future<void> exportClipsForPlayer(String? player) async {
     if (exporting) return;
-    if (!await _matchesProjectVideo()) {
+    final projectId = project.id, session = _projectSession;
+    bool current() =>
+        !_disposed && project.id == projectId && _projectSession == session;
+    if (!await _matchesProjectVideo(applyResult: current)) {
+      if (!current()) return;
       errorMessage ??= '请先重新选择原视频。';
       notifyListeners();
       return;
     }
+    if (!current()) return;
     final candidates = project.candidates
         .where(
           (candidate) => candidate.selection == CandidateSelection.included,
@@ -1355,6 +1634,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         candidates: candidates,
         outputDirectory: await _projectPath(project.id, area: 'exports'),
       )) {
+        if (!current()) return;
         exportAudioSkipped |= update.skippedAudioTracks.isNotEmpty;
         progress = update.progress;
         progressMessage = update.message;
@@ -1363,28 +1643,44 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         }
         notifyListeners();
       }
-      project = project.copyWith(
-        lastExportDurationMs: stopwatch.elapsedMilliseconds,
-      );
-      await _queueSave();
+      if (!current()) return;
+      final duration = stopwatch.elapsedMilliseconds;
+      if (!await _submitProjectChange(
+        (current) => current.copyWith(lastExportDurationMs: duration),
+        inverse: (before) => _restoreOperationFields(before, {'export'}),
+        operation: 'export',
+      )) {
+        return;
+      }
       MobileDiagnostics.instance.event('operation.completed');
     } on Object catch (error, stack) {
-      recordDiagnosticFailure(error, stack, operation: 'export');
-      notifyListeners();
+      if (current()) {
+        recordDiagnosticFailure(error, stack, operation: 'export');
+        notifyListeners();
+      } else {
+        MobileDiagnostics.instance.error(error, stack, operation: 'export');
+      }
     } finally {
       stopwatch.stop();
-      exporting = false;
-      notifyListeners();
+      if (current()) {
+        exporting = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> mergeClipsForPlayer(String? player) async {
     if (exporting) return;
-    if (!await _matchesProjectVideo()) {
+    final projectId = project.id, session = _projectSession;
+    bool current() =>
+        !_disposed && project.id == projectId && _projectSession == session;
+    if (!await _matchesProjectVideo(applyResult: current)) {
+      if (!current()) return;
       errorMessage ??= '请先重新选择原视频。';
       notifyListeners();
       return;
     }
+    if (!current()) return;
     final candidates =
         project.candidates
             .where(
@@ -1414,6 +1710,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         candidates: candidates,
         outputPath: outputPath,
       )) {
+        if (!current()) return;
         exportAudioSkipped |= update.skippedAudioTracks.isNotEmpty;
         progress = update.progress;
         progressMessage = update.message;
@@ -1422,18 +1719,29 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         }
         notifyListeners();
       }
-      project = project.copyWith(
-        lastExportDurationMs: stopwatch.elapsedMilliseconds,
-      );
-      await _queueSave();
+      if (!current()) return;
+      final duration = stopwatch.elapsedMilliseconds;
+      if (!await _submitProjectChange(
+        (current) => current.copyWith(lastExportDurationMs: duration),
+        inverse: (before) => _restoreOperationFields(before, {'export'}),
+        operation: 'export',
+      )) {
+        return;
+      }
       MobileDiagnostics.instance.event('operation.completed');
     } on Object catch (error, stack) {
-      recordDiagnosticFailure(error, stack, operation: 'export');
-      notifyListeners();
+      if (current()) {
+        recordDiagnosticFailure(error, stack, operation: 'export');
+        notifyListeners();
+      } else {
+        MobileDiagnostics.instance.error(error, stack, operation: 'export');
+      }
     } finally {
       stopwatch.stop();
-      exporting = false;
-      notifyListeners();
+      if (current()) {
+        exporting = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -1518,18 +1826,34 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       if (!videoMatches) {
         throw const MobileAnalysisException('视频检查未通过或耗时过长，请重新选择可正常播放的原视频。');
       }
-      reviewHistory.clear();
-      project = project.copyWith(
-        candidates: const [],
-        lastAnalysisStatus: 'running',
-        lastAnalysisProgressPercent: 0,
-        lastAnalysisMessage: progressMessage,
-      );
-      await _queueSave();
+      final initialMessage = progressMessage;
+      if (!await _submitProjectChange(
+        (current) => current.copyWith(
+          candidates: const [],
+          lastAnalysisStatus: 'running',
+          lastAnalysisProgressPercent: 0,
+          lastAnalysisMessage: initialMessage,
+        ),
+        inverse: (before) => _restoreOperationFields(before, {
+          'candidates',
+          'status',
+          'progress',
+          'message',
+        }),
+        operation: 'analysis',
+        onSuccess: () {
+          reviewHistory.clear();
+          _setReviewNotice(null);
+        },
+      )) {
+        return;
+      }
       if (generation != _analysisGeneration) return;
       progress = 0.02;
       progressMessage = '正在准备本地分析';
       notifyListeners();
+      var lastCheckpoint = -1;
+      List<Candidate>? latestCandidates;
       await for (final update in analysisEngine.analyze(
         video: project.video!,
         hoopRoi: project.hoopRoi!,
@@ -1547,26 +1871,64 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         processedFrames = update.processedFrames;
         totalFrames = update.totalFrames;
         eta = update.eta;
-        project = project.copyWith(candidates: update.candidates);
         final percent = (progress * 100).round();
-        project = project.copyWith(
-          lastAnalysisStatus: 'running',
-          lastAnalysisProgressPercent: percent,
-          lastAnalysisMessage: update.message,
-        );
-        if (percent == 100 || percent % 5 == 0) unawaited(_queueSave());
+        latestCandidates = update.candidates;
+        final checkpoint =
+            percent == 100 || (percent % 5 == 0 && percent != lastCheckpoint);
+        if (!checkpoint) {
+          notifyListeners();
+          continue;
+        }
+        lastCheckpoint = percent;
+        if (!await _submitProjectChange(
+          (current) => current.copyWith(
+            candidates: mergeAnalysisCandidates(
+              current.candidates,
+              update.candidates,
+            ),
+            lastAnalysisStatus: 'running',
+            lastAnalysisProgressPercent: percent,
+            lastAnalysisMessage: update.message,
+          ),
+          inverse: (before) => _restoreOperationFields(before, {
+            'candidates',
+            'status',
+            'progress',
+            'message',
+          }),
+          operation: 'analysis',
+        )) {
+          return;
+        }
         notifyListeners();
       }
       if (generation != _analysisGeneration) return;
       stopwatch.stop();
-      project = project.copyWith(
-        lastAnalysisDurationMs: stopwatch.elapsedMilliseconds,
-        lastAnalysisAt: DateTime.now(),
-        lastAnalysisStatus: 'completed',
-        lastAnalysisProgressPercent: 100,
-        lastAnalysisMessage: '分析完成',
-      );
-      await _queueSave();
+      final duration = stopwatch.elapsedMilliseconds;
+      final completedAt = DateTime.now();
+      if (!await _submitProjectChange(
+        (current) => current.copyWith(
+          candidates: latestCandidates == null
+              ? null
+              : mergeAnalysisCandidates(current.candidates, latestCandidates),
+          lastAnalysisDurationMs: duration,
+          lastAnalysisAt: completedAt,
+          lastAnalysisStatus: 'completed',
+          lastAnalysisProgressPercent: 100,
+          lastAnalysisMessage: '分析完成',
+        ),
+        inverse: (before) => _restoreOperationFields(before, {
+          if (latestCandidates != null) 'candidates',
+          'duration',
+          'at',
+          'status',
+          'progress',
+          'message',
+        }),
+        operation: 'analysis',
+      )) {
+        return;
+      }
       unawaited(_updateCover(project));
     } on Object catch (error, stack) {
       MobileDiagnostics.instance.error(error, stack, operation: 'project');
@@ -1582,11 +1944,16 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         );
         errorMessage = videoSourceFailure!.message;
       }
-      project = project.copyWith(
-        lastAnalysisStatus: 'failed',
-        lastAnalysisMessage: errorMessage,
+      final message = errorMessage;
+      await _submitProjectChange(
+        (current) => current.copyWith(
+          lastAnalysisStatus: 'failed',
+          lastAnalysisMessage: message,
+        ),
+        inverse: (before) =>
+            _restoreOperationFields(before, {'status', 'message'}),
+        operation: 'analysis',
       );
-      unawaited(_queueSave());
       notifyListeners();
     } finally {
       stopwatch.stop();
@@ -1623,11 +1990,17 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     analysisStartedAt = null;
     stage = AnalysisStage.cancelled;
     progressMessage = '分析已取消';
-    project = project.copyWith(
-      lastAnalysisStatus: 'cancelled',
-      lastAnalysisMessage: progressMessage,
+    final message = progressMessage;
+    await _submitProjectChange(
+      (current) => current.copyWith(
+        lastAnalysisStatus: 'cancelled',
+        lastAnalysisMessage: message,
+      ),
+      inverse: (before) =>
+          _restoreOperationFields(before, {'status', 'message'}),
+      operation: 'analysis',
+      allowDuringTransition: true,
     );
-    unawaited(_queueSave());
     notifyListeners();
   }
 

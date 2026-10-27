@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:async';
 
 import 'package:bhe_mobile/features/video_source/video_source_store.dart';
+import 'package:bhe_mobile/features/diagnostics/mobile_diagnostics.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class FaultFiles extends VideoFileOperations {
@@ -18,11 +19,26 @@ class FaultFiles extends VideoFileOperations {
 
   @override
   Future<void> move(File from, File to) async {
-    if ((fail == 'install' && from.path.contains('.import_')) ||
+    if ((fail == 'restore' && from.path.contains('.backup_')) ||
+        (fail == 'install' && from.path.contains('.import_')) ||
         (fail == 'move' && from.path.contains('file_picker'))) {
       throw const FileSystemException('injected rename failure');
     }
     return super.move(from, to);
+  }
+}
+
+class CapturingDiagnostics extends MobileDiagnostics {
+  final records = <DiagnosticErrorRecord>[];
+  @override
+  DiagnosticErrorRecord error(
+    Object error,
+    StackTrace? stack, {
+    String operation = 'app',
+  }) {
+    final record = super.error(error, stack, operation: operation);
+    records.add(record);
+    return record;
   }
 }
 
@@ -156,6 +172,48 @@ void main() {
       expect(await source.readAsString(), 'picked');
     },
   );
+  test(
+    'rollback failure preserves the original exception and reports recoverable backup',
+    () async {
+      final previous = MobileDiagnostics.instance;
+      final diagnostics = CapturingDiagnostics();
+      MobileDiagnostics.instance = diagnostics;
+      try {
+        final old = await input('data/videos/A/source.mp4', 'old');
+        final chosen = await input('new.mp4', 'new');
+        store = VideoSourceStore(
+          dataDirectory: () async => data,
+          temporaryDirectory: () async => cache,
+          files: FaultFiles('restore'),
+        );
+        await expectLater(
+          save(
+            chosen,
+            old: old.path,
+            persist: (_, _) async =>
+                throw const FormatException('original persist error'),
+          ),
+          throwsA(
+            isA<FormatException>().having(
+              (error) => error.message,
+              'original error',
+              'original persist error',
+            ),
+          ),
+        );
+        final backups = await Directory(
+          '${data.path}/videos/A',
+        ).list().where((entry) => entry.path.contains('.backup_')).toList();
+        expect(backups, hasLength(1));
+        expect(await File(backups.single.path).readAsString(), 'old');
+        expect(diagnostics.records.single.operation, 'video.restore');
+        expect(diagnostics.records.single.stack, isNotNull);
+      } finally {
+        MobileDiagnostics.instance = previous;
+      }
+    },
+  );
+
   test('rename failure falls back to copy', () async {
     final source = await input('cache/file_picker/one/picked.mp4', 'picked');
     store = VideoSourceStore(

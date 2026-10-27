@@ -1,3 +1,4 @@
+import '../../support/wait_project_writes.dart';
 import 'dart:async';
 import 'package:bhe_core/bhe_core.dart';
 import 'package:bhe_mobile/features/video_source/video_source_failure.dart';
@@ -217,6 +218,7 @@ void main() {
         operation: 'export',
       );
       fixture.state.updateSettings(fixture.state.project.settings);
+      await waitProjectWrites(tester, fixture.state.pendingProjectWrites);
       await tester.pump();
       expect(find.text('出错了：视频导出未完成，请重试。'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('video-feedback')));

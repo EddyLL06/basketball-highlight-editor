@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'project_paths.dart';
+import '../diagnostics/mobile_diagnostics.dart';
 
 class VideoSourceCancelled implements Exception {
   const VideoSourceCancelled();
@@ -170,8 +171,16 @@ class VideoSourceStore {
           await persist(target.path, value);
           committed = true;
         } on Object catch (error, stack) {
-          if (installed) await files.move(target, staging!);
-          if (await backup!.exists()) await files.move(backup, target);
+          try {
+            if (installed) await files.move(target, staging!);
+            if (await backup!.exists()) await files.move(backup, target);
+          } on Object catch (restoreError, restoreStack) {
+            MobileDiagnostics.instance.error(
+              restoreError,
+              restoreStack,
+              operation: 'video.restore',
+            );
+          }
           Error.throwWithStackTrace(error, stack);
         }
       });

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:bhe_core/bhe_core.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 
 import '../../support/mobile_video_fixture.dart';
 
@@ -68,4 +69,70 @@ void main() {
       await f.close();
     }
   });
+
+  for (final outcome in ['success', 'cancel', 'failure']) {
+    test(
+      'relink $outcome during project write preserves later review',
+      () async {
+        final f = MobileVideoFixture();
+        await f.init();
+        try {
+          f.state.project = f.project('${f.root.path}/missing.mp4');
+          expect(await f.state.updateCandidateNote('goal', 'before'), isTrue);
+          final chosen = await f.file('chosen.mp4', 'original');
+          f.choose(chosen);
+          final entered = Completer<void>(), release = Completer<void>();
+          var documentsCalls = 0;
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMethodCallHandler(
+                const MethodChannel('plugins.flutter.io/path_provider'),
+                (call) async {
+                  if (call.method == 'getApplicationDocumentsDirectory' &&
+                      ++documentsCalls == 2) {
+                    entered.complete();
+                    await release.future;
+                    if (outcome == 'failure') {
+                      throw PlatformException(
+                        code: 'video_metadata_write_failure',
+                      );
+                    }
+                  }
+                  return f.root.path;
+                },
+              );
+          final relink = f.state.relinkVideo();
+          await entered.future.timeout(const Duration(seconds: 5));
+          final later = f.state.updateCandidateNote('goal', 'after');
+          if (outcome == 'cancel') f.state.cancelVideoRelink();
+          release.complete();
+          await relink;
+          expect(await later, isTrue);
+          final disk = const ProjectPackageCodec().decode(
+            await File('${f.data.path}/projects/A.json').readAsString(),
+          );
+          expect(f.state.project.candidates.single.note, 'after');
+          expect(disk.candidates.single.note, 'after');
+          expect(f.state.canUndoReview, isTrue);
+          await f.state.undoReview();
+          expect(f.state.project.candidates.single.note, 'before');
+          expect(f.state.canUndoReview, outcome != 'success');
+          if (outcome == 'success') {
+            expect(
+              f.state.project.video!.path,
+              contains('/videos/A/source.mp4'),
+            );
+          } else {
+            expect(f.state.project.video!.path, '${f.root.path}/missing.mp4');
+            expect(
+              await File('${f.data.path}/videos/A/source.mp4').exists(),
+              isFalse,
+            );
+          }
+          if (outcome == 'failure') expect(f.state.diagnosticError, isNotNull);
+        } finally {
+          await f.close();
+        }
+      },
+    );
+  }
 }

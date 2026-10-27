@@ -23,7 +23,7 @@ Future<void> commitProjectFiles(Map<File, String> contents) async {
       await staged[file]!.rename(file.path);
       installed.add(file);
     }
-  } catch (_) {
+  } on Object {
     for (final file in installed.reversed) {
       if (await file.exists()) await file.delete();
     }
