@@ -490,6 +490,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   int _analysisGeneration = 0;
   int _analysisCancelIntent = 0;
   Future<void>? _analysisLaunchBarrier;
+  Completer<void>? _analysisNativeWait;
   int _videoPreparationGeneration = 0;
   DateTime? analysisStartedAt;
 
@@ -1450,6 +1451,9 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         }),
       );
     }
+    final waiting = _analysisNativeWait;
+    if (waiting != null && !waiting.isCompleted) waiting.complete();
+    _analysisNativeWait = null;
     _analysisLaunchBarrier = null;
     _exportRun++;
     _exportPreflight = false;
@@ -2459,6 +2463,72 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       if (selectedPlayers.isEmpty && !intentCurrent()) return;
       rosterCommitted = true;
       if (!intentCurrent()) return;
+      final engine = analysisEngine;
+      PreparedNativeAnalysis? prepared;
+      if (engine is NativeAnalysisEngine) {
+        stage = AnalysisStage.prepareProxy;
+        progress = 0.03;
+        progressMessage = '正在准备本地模型';
+        notifyListeners();
+        prepared = await engine.prepareAnalysis();
+        if (prepared == null || !intentCurrent()) return;
+      }
+      StreamIterator<AnalysisProgress>? nativeIterator;
+      AnalysisProgress? firstNativeUpdate;
+      if (engine is NativeAnalysisEngine) {
+        final iterator = StreamIterator(
+          engine.startPrepared(
+            prepared!,
+            video: project.video!,
+            hoopRoi: project.hoopRoi!,
+            rimRoi: project.rimRoi,
+            netRoi: project.netRoi!,
+            settings: project.settings,
+          ),
+        );
+        nativeIterator = iterator;
+        final cancelled = Completer<void>();
+        _analysisNativeWait = cancelled;
+        bool hasUpdate;
+        try {
+          hasUpdate = await Future.any([
+            iterator.moveNext(),
+            cancelled.future.then((_) => false),
+          ]);
+        } finally {
+          if (identical(_analysisNativeWait, cancelled)) {
+            _analysisNativeWait = null;
+          }
+        }
+        if (!hasUpdate || !intentCurrent()) {
+          if (!prepared.cancelled) {
+            try {
+              await engine.cancelPrepared(prepared);
+            } on Object catch (error, stack) {
+              MobileDiagnostics.instance.error(
+                error,
+                stack,
+                operation: 'analysis.cancel',
+              );
+            }
+          }
+          unawaited(iterator.cancel());
+          return;
+        }
+        firstNativeUpdate = iterator.current;
+      }
+      Stream<AnalysisProgress> replayNative() async* {
+        final iterator = nativeIterator!;
+        try {
+          yield firstNativeUpdate!;
+          while (await iterator.moveNext()) {
+            yield iterator.current;
+          }
+        } finally {
+          await iterator.cancel();
+        }
+      }
+
       final initialMessage = progressMessage;
       StreamController<AnalysisProgress>? controller;
       StreamSubscription<AnalysisProgress>? sourceSubscription;
@@ -2489,28 +2559,29 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
             if (!launched.isCompleted) launched.complete();
           }
 
-          sourceSubscription = analysisEngine
-              .analyze(
-                video: project.video!,
-                hoopRoi: project.hoopRoi!,
-                rimRoi: project.rimRoi,
-                netRoi: project.netRoi!,
-                settings: project.settings,
-              )
-              .listen(
-                (update) {
-                  markLaunched();
-                  output.add(update);
-                },
-                onError: (Object error, StackTrace stack) {
-                  markLaunched();
-                  output.addError(error, stack);
-                },
-                onDone: () {
-                  markLaunched();
-                  output.close();
-                },
-              );
+          final source = engine is NativeAnalysisEngine
+              ? replayNative()
+              : engine.analyze(
+                  video: project.video!,
+                  hoopRoi: project.hoopRoi!,
+                  rimRoi: project.rimRoi,
+                  netRoi: project.netRoi!,
+                  settings: project.settings,
+                );
+          sourceSubscription = source.listen(
+            (update) {
+              markLaunched();
+              output.add(update);
+            },
+            onError: (Object error, StackTrace stack) {
+              markLaunched();
+              output.addError(error, stack);
+            },
+            onDone: () {
+              markLaunched();
+              output.close();
+            },
+          );
           // Stream.listen starts synchronous engines immediately and schedules
           // async generators before this microtask, without waiting for data.
           scheduleMicrotask(markLaunched);
@@ -2518,6 +2589,18 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           _setReviewNotice(null);
         },
       )) {
+        if (engine is NativeAnalysisEngine && prepared != null) {
+          try {
+            await engine.cancelPrepared(prepared);
+          } on Object catch (error, stack) {
+            MobileDiagnostics.instance.error(
+              error,
+              stack,
+              operation: 'analysis.cancel',
+            );
+          }
+          unawaited(nativeIterator!.cancel());
+        }
         return;
       }
       if (generation != _analysisGeneration) {
@@ -2645,7 +2728,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   Future<void> cancelAnalysis() async {
     if (!analysing) return;
-    _analysisCancelIntent++;
+    final priorCancelIntent = _analysisCancelIntent;
+    final cancelIntent = ++_analysisCancelIntent;
     final generation = _analysisGeneration;
     final projectId = project.id;
     try {
@@ -2656,6 +2740,9 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       if (generation == _analysisGeneration &&
           project.id == projectId &&
           !_disposed) {
+        if (_analysisCancelIntent == cancelIntent) {
+          _analysisCancelIntent = priorCancelIntent;
+        }
         recordDiagnosticFailure(error, stack, operation: 'analysis');
         notifyListeners();
       }
@@ -2666,6 +2753,9 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         _disposed) {
       return;
     }
+    final waiting = _analysisNativeWait;
+    if (waiting != null && !waiting.isCompleted) waiting.complete();
+    _analysisNativeWait = null;
     _analysisGeneration++;
     _analysisLaunchBarrier = null;
     analysing = false;

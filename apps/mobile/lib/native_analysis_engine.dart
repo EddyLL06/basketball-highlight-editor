@@ -9,8 +9,17 @@ import 'package:path_provider/path_provider.dart';
 import 'features/diagnostics/friendly_error.dart';
 import 'features/diagnostics/mobile_diagnostics.dart';
 
+class PreparedNativeAnalysis {
+  PreparedNativeAnalysis._(this.modelPath);
+  String modelPath;
+  bool cancelled = false;
+  bool dispatched = false;
+}
+
 class NativeAnalysisEngine implements MobileAnalysisEngine {
-  NativeAnalysisEngine();
+  NativeAnalysisEngine({this.modelPreparer});
+
+  final Future<String> Function()? modelPreparer;
 
   static const _autoRoiDurationMs = 20 * 1000;
   static const _autoRoiMaxSamples = 12;
@@ -21,7 +30,7 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
   static const _progressChannel = EventChannel(
     'com.bhe.bhe/mobile_analysis_progress',
   );
-  bool _cancelled = false;
+  PreparedNativeAnalysis? _activeRun;
 
   @override
   Future<Map<String, dynamic>?> suggestRoi({
@@ -127,6 +136,32 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
     }
   }
 
+  PreparedNativeAnalysis _newRun() {
+    _activeRun?.cancelled = true;
+    final run = PreparedNativeAnalysis._('');
+    _activeRun = run;
+    return run;
+  }
+
+  Future<PreparedNativeAnalysis?> prepareAnalysis() => _prepare(_newRun());
+
+  Future<PreparedNativeAnalysis?> _prepare(PreparedNativeAnalysis run) async {
+    if (run.cancelled || !identical(_activeRun, run)) return null;
+    final modelPath =
+        await (modelPreparer?.call() ??
+                _materializeModelWithProgress(isCancelled: () => run.cancelled))
+            .timeout(
+              const Duration(seconds: 60),
+              onTimeout: () => throw const MobileAnalysisException(
+                '本地模型准备超过 60 秒，请检查存储空间后重试。',
+              ),
+            );
+    if (run.cancelled || !identical(_activeRun, run)) return null;
+    run.modelPath = modelPath;
+    MobileDiagnostics.instance.event('analysis.model.ready');
+    return run;
+  }
+
   @override
   Stream<AnalysisProgress> analyze({
     required VideoInfo video,
@@ -135,24 +170,43 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
     required Roi netRoi,
     required AnalysisSettings settings,
   }) async* {
-    _cancelled = false;
+    final run = _newRun();
     yield const AnalysisProgress(
       stage: AnalysisStage.validateInput,
       progress: 0.02,
       message: '正在检查视频',
     );
-    developer.log('analysis stream started', name: 'BHE-Analysis');
     yield const AnalysisProgress(
       stage: AnalysisStage.prepareProxy,
       progress: 0.03,
       message: '正在准备本地模型',
     );
-    final modelPath = await _materializeModelWithProgress().timeout(
-      const Duration(seconds: 60),
-      onTimeout: () =>
-          throw const MobileAnalysisException('本地模型准备超过 60 秒，请检查存储空间后重试。'),
+    final prepared = await _prepare(run);
+    if (prepared == null) return;
+    yield* startPrepared(
+      prepared,
+      video: video,
+      hoopRoi: hoopRoi,
+      rimRoi: rimRoi,
+      netRoi: netRoi,
+      settings: settings,
     );
-    MobileDiagnostics.instance.event('analysis.model.ready');
+  }
+
+  // Platform progress is produced by the native worker; callers can wait for
+  // that confirmation before discarding the preceding review.
+  Stream<AnalysisProgress> startPrepared(
+    PreparedNativeAnalysis run, {
+    required VideoInfo video,
+    required Roi hoopRoi,
+    Roi? rimRoi,
+    required Roi netRoi,
+    required AnalysisSettings settings,
+  }) {
+    if (run.cancelled || !identical(_activeRun, run)) {
+      return const Stream<AnalysisProgress>.empty();
+    }
+    run.dispatched = true;
     final progressController = StreamController<AnalysisProgress>();
     final progressSubscription = _progressChannel
         .receiveBroadcastStream()
@@ -165,7 +219,7 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       'analyzeVideo',
       {
         'videoPath': video.path,
-        'modelPath': modelPath,
+        'modelPath': run.modelPath,
         'hoopRoi': hoopRoi.toJson(),
         if (rimRoi != null) 'rimRoi': rimRoi.toJson(),
         'netRoi': netRoi.toJson(),
@@ -189,6 +243,22 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
         'dedupeMs': 2000,
       },
     );
+    return _consumeAnalysis(
+      run,
+      resultFuture,
+      progressController,
+      progressSubscription,
+      iterator,
+    );
+  }
+
+  Stream<AnalysisProgress> _consumeAnalysis(
+    PreparedNativeAnalysis run,
+    Future<Map<Object?, Object?>?> resultFuture,
+    StreamController<AnalysisProgress> progressController,
+    StreamSubscription<dynamic> progressSubscription,
+    StreamIterator<AnalysisProgress> iterator,
+  ) async* {
     try {
       Map<Object?, Object?>? result;
       while (true) {
@@ -205,7 +275,7 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
           break;
         }
       }
-      if (_cancelled) return;
+      if (run.cancelled) return;
       final candidates = ((result?['candidates'] as List?) ?? const [])
           .whereType<Map>()
           .map((item) => Candidate.fromJson(item.cast<String, dynamic>()))
@@ -227,6 +297,7 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       await progressSubscription.cancel();
       await iterator.cancel();
       await progressController.close();
+      if (identical(_activeRun, run)) _activeRun = null;
     }
   }
 
@@ -255,7 +326,9 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
     );
   }
 
-  Future<String> _materializeModelWithProgress() async {
+  Future<String> _materializeModelWithProgress({
+    bool Function()? isCancelled,
+  }) async {
     final directory = await getApplicationSupportDirectory();
     final file = File('${directory.path}/models/bball_model.onnx');
     final data = await rootBundle.load('assets/models/bball_model.onnx');
@@ -271,7 +344,9 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       return file.path;
     }
     await file.parent.create(recursive: true);
-    final temporary = File('${file.path}.tmp');
+    final temporary = File(
+      '${file.path}.${DateTime.now().microsecondsSinceEpoch}.tmp',
+    );
     const chunkSize = 1024 * 1024;
     final stopwatch = Stopwatch()..start();
     IOSink? output;
@@ -279,7 +354,9 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       if (await temporary.exists()) await temporary.delete();
       output = temporary.openWrite();
       for (var offset = 0; offset < bytes.length; offset += chunkSize) {
-        if (_cancelled) throw const MobileAnalysisException('分析已取消');
+        if (isCancelled?.call() ?? false) {
+          throw const MobileAnalysisException('分析已取消');
+        }
         final end = (offset + chunkSize).clamp(0, bytes.length);
         output.add(bytes.sublist(offset, end));
         await output.flush();
@@ -294,7 +371,9 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       if (await temporary.length() != bytes.length) {
         throw const MobileAnalysisException('本地模型复制不完整，请重试。');
       }
-      if (await file.exists()) await file.delete();
+      if (isCancelled?.call() ?? false) {
+        throw const MobileAnalysisException('分析已取消');
+      }
       await temporary.rename(file.path);
     } finally {
       await output?.close();
@@ -303,14 +382,22 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
     return file.path;
   }
 
+  Future<void> cancelPrepared(PreparedNativeAnalysis run) async {
+    if (identical(_activeRun, run)) await cancel();
+  }
+
   @override
   Future<void> cancel() async {
-    _cancelled = true;
+    final run = _activeRun;
+    if (run == null) return;
+    run.cancelled = true;
+    if (!run.dispatched) return;
     try {
       await _channel.invokeMethod<void>('cancelAnalysis');
     } on MissingPluginException {
       return;
     } on PlatformException catch (error, stack) {
+      if (identical(_activeRun, run)) run.cancelled = false;
       MobileDiagnostics.instance.error(
         error,
         stack,
