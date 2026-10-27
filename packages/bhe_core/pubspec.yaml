@@ -10,3 +10,5 @@ dependencies:
   crypto: ^3.0.7
   cryptography: ^2.7.0
   meta: ^1.16.0
+dev_dependencies:
+  test: ^1.33.0

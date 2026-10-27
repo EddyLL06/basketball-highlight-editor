@@ -1,6 +1,10 @@
 import 'dart:ffi' show Abi;
 import 'dart:io';
 
+import 'package:bhe_core/bhe_core.dart' show redactUserPaths;
+
+export 'package:bhe_core/bhe_core.dart' show redactUserPaths;
+
 import 'app_log.dart';
 
 /// 打包时由 `--dart-define=BHE_VERSION=<版本>` 注入，本地开发显示 dev。
@@ -58,18 +62,4 @@ Future<String> readLogTail(String directory, int lines) async {
     tail.insert(0, environment);
   }
   return tail.join('\n');
-}
-
-String redactUserPaths(String text, Map<String, String> env) {
-  var out = text;
-  final home = env['HOME'] ?? env['USERPROFILE'];
-  if (home != null && home.length > 1) out = out.replaceAll(home, '~');
-  final user = env['USER'] ?? env['USERNAME'];
-  if (user != null && user.length >= 2) {
-    out = out.replaceAllMapped(
-      RegExp('([\\\\/])${RegExp.escape(user)}(?=[\\\\/])'),
-      (m) => '${m[1]}<user>',
-    );
-  }
-  return out;
 }
