@@ -228,6 +228,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     _uncertainExportWatch = timer;
     drain.then((_) {
       if (identical(_uncertainExportWatch, timer)) timer.cancel();
+      if (!_disposed) notifyListeners();
     });
   }
 
@@ -503,14 +504,19 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   String? uncertainAnalysisStatus;
   bool get hasUncertainAnalysis => _uncertainNativeRun != null;
 
-  void _markNativeUncertain(PreparedNativeAnalysis run) {
+  void _markNativeUncertain(
+    PreparedNativeAnalysis run, {
+    bool cancellationAcknowledged = false,
+  }) {
     _uncertainNativeRun = run;
     uncertainAnalysisStatus = null;
-    uncertainAnalysisDiagnostic = MobileDiagnostics.instance.error(
-      TimeoutException('上次分析尚未确认停止'),
-      StackTrace.current,
-      operation: 'analysis',
-    );
+    uncertainAnalysisDiagnostic = cancellationAcknowledged
+        ? null
+        : MobileDiagnostics.instance.error(
+            TimeoutException('上次分析尚未确认停止'),
+            StackTrace.current,
+            operation: 'analysis',
+          );
     run.settled.then((_) async {
       // The result can precede Android worker cleanup, so verify native state.
       var attempt = 0;
@@ -571,13 +577,28 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   int _videoPreparationGeneration = 0;
   DateTime? analysisStartedAt;
 
+  String? _heavyTaskBlockReason({required bool startingAnalysis}) {
+    if (hasUncertainAnalysis || hasUncertainExport) {
+      return '上次任务尚未确认结束，请先确认停止。';
+    }
+    if (analysing) return '正在分析，请等待分析结束。';
+    if (exporting ||
+        (startingAnalysis && NativeMediaExportEngine.activeDrain != null)) {
+      return '正在导出，请等待导出结束。';
+    }
+    return null;
+  }
+
+  String? get analysisStartBlockReason =>
+      _heavyTaskBlockReason(startingAnalysis: true);
+  String? get exportStartBlockReason =>
+      _heavyTaskBlockReason(startingAnalysis: false);
+
   bool get canStartAnalysis =>
       hasVideo &&
-      !analysing &&
-      _uncertainNativeRun == null &&
+      analysisStartBlockReason == null &&
       !preparingVideo &&
       !relinkingVideo &&
-      !exporting &&
       videoSourceFailure == null;
   bool get hasVideo => project.video != null;
   bool get sourceVideoExists =>
@@ -1517,8 +1538,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   void _resetTransientState() {
     _exportDrainTimer?.cancel();
+    if (exporting && !_exportPreflight) _watchOldExport();
     if (exporting && !_exportPreflight && !_mergeCommitted) {
-      _watchOldExport();
       unawaited(
         exportEngine.cancel().catchError((Object error, StackTrace stack) {
           MobileDiagnostics.instance.error(
@@ -2158,7 +2179,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   int? _beginExport() {
-    if (exporting || hasUncertainExport) return null;
+    if (exportStartBlockReason != null) {
+      notifyListeners();
+      return null;
+    }
     _exportDrainTimer?.cancel();
     final run = ++_exportRun;
     exporting = true;
@@ -2421,6 +2445,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   Future<void> saveExportedFiles() async {
     if (exportedPaths.isEmpty) return;
+    if (exportStartBlockReason != null) {
+      notifyListeners();
+      return;
+    }
     _exportRun++;
     _mergeCommitted = false;
     exporting = true;
@@ -2465,9 +2493,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         projectSession == intentSession &&
         videoPreparationGeneration == intentVideoGeneration &&
         !projectTransitioning;
-    if (analysing || !rosterCurrent()) return;
-    if (_uncertainNativeRun != null) {
-      errorMessage = '上次分析尚未确认停止，请稍候再试。';
+    if (!rosterCurrent()) return;
+    if (analysisStartBlockReason != null) {
       notifyListeners();
       return;
     }
@@ -2857,6 +2884,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     final cancelIntent = ++_analysisCancelIntent;
     final generation = _analysisGeneration;
     final projectId = project.id;
+    final engine = analysisEngine;
+    final nativeRun = engine is NativeAnalysisEngine ? engine.activeRun : null;
     try {
       final launch = _analysisLaunchBarrier;
       if (launch != null) await launch;
@@ -2890,6 +2919,12 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         project.id != projectId ||
         _disposed) {
       return;
+    }
+    if (nativeRun != null &&
+        nativeRun.dispatched &&
+        !identical(_uncertainNativeRun, nativeRun)) {
+      _markNativeUncertain(nativeRun, cancellationAcknowledged: true);
+      unawaited(checkUncertainAnalysis());
     }
     final waiting = _analysisNativeWait;
     if (waiting != null && !waiting.isCompleted) waiting.complete();

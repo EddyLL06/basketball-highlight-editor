@@ -39,6 +39,7 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
     'com.bhe.bhe/mobile_analysis_progress',
   );
   PreparedNativeAnalysis? _activeRun;
+  PreparedNativeAnalysis? get activeRun => _activeRun;
 
   @override
   Future<Map<String, dynamic>?> suggestRoi({

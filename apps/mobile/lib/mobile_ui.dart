@@ -844,6 +844,9 @@ class _ProjectSetup extends StatelessWidget {
           ),
         ],
         if (state.hasUncertainAnalysis) _UncertainAnalysisNotice(state: state),
+        if (!state.hasUncertainAnalysis &&
+            state.analysisStartBlockReason != null)
+          _InlineNotice(message: state.analysisStartBlockReason!),
         const SizedBox(height: 18),
         Row(
           children: [
@@ -1252,6 +1255,8 @@ class _AnalysisViewState extends State<_AnalysisView> {
                     ],
                   ),
                 ),
+                if (state.exportStartBlockReason case final message?)
+                  _InlineNotice(message: message),
                 VideoSourceNotice(state: state),
               ],
             ),
@@ -4100,6 +4105,13 @@ class _ExportViewState extends State<_ExportView> {
                   l10n?.exportPageSubtitle ?? '按审核结果导出保留片段，可分别导出或合并为一条视频。',
             ),
             if (state.hasUncertainExport) _UncertainExportNotice(state: state),
+            if (state.hasUncertainAnalysis) ...[
+              _UncertainAnalysisNotice(state: state),
+              const _InlineNotice(message: '上次分析尚未确认停止，暂时不能导出。'),
+            ],
+            if (!state.hasUncertainExport && !state.hasUncertainAnalysis &&
+                state.exportStartBlockReason != null)
+              _InlineNotice(message: state.exportStartBlockReason!),
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -4139,7 +4151,7 @@ class _ExportViewState extends State<_ExportView> {
                     _PlayerChoiceChip(
                       player: player,
                       selected: selectedPlayer == player,
-                      onSelected: (state.exporting || state.hasUncertainExport)
+                      onSelected: (state.exportStartBlockReason != null)
                           ? (_) {}
                           : (selected) => setState(
                               () => selectedPlayer = selected ? player : null,
@@ -4152,7 +4164,7 @@ class _ExportViewState extends State<_ExportView> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: (state.exporting || state.hasUncertainExport)
+                    onPressed: (state.exportStartBlockReason != null)
                         ? null
                         : () => unawaited(
                             state.exportClipsForPlayer(selectedPlayer),
@@ -4187,7 +4199,7 @@ class _ExportViewState extends State<_ExportView> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: (state.exporting || state.hasUncertainExport)
+                        onPressed: (state.exportStartBlockReason != null)
                             ? null
                             : () => unawaited(state.exportClips()),
                         icon: const Icon(LucideIcons.files, size: 18),
@@ -4198,7 +4210,7 @@ class _ExportViewState extends State<_ExportView> {
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: (state.exporting || state.hasUncertainExport)
+                        onPressed: (state.exportStartBlockReason != null)
                             ? null
                             : () => unawaited(
                                 state.mergeClipsForPlayer(selectedPlayer),
@@ -4275,8 +4287,9 @@ class _ExportViewState extends State<_ExportView> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: FilledButton.icon(
-                              onPressed: () =>
-                                  unawaited(state.saveExportedFiles()),
+                              onPressed: state.exportStartBlockReason == null
+                                  ? () => unawaited(state.saveExportedFiles())
+                                  : null,
                               icon: const Icon(LucideIcons.save, size: 17),
                               label: Text(context.bheText('保存到相册')),
                             ),
