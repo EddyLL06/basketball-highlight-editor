@@ -1357,7 +1357,6 @@ class _ReviewViewState extends State<_ReviewView> {
   Future<void> _openVideo() => _loadReviewVideo(this);
   void _installSourcePlayer(VideoPlayerController? next) => setState(() {
     controller = next;
-    selectedIndex = 0;
   });
 
   void _videoChanged() {
@@ -1680,7 +1679,7 @@ class _ReviewViewState extends State<_ReviewView> {
       ),
     );
     if (result == true && mounted) {
-      final updated = state.applyBatchClipRange(
+      final updated = await state.applyBatchClipRange(
         beforeSeconds: before.round(),
         afterSeconds: after.round(),
         candidateIds: filtering
@@ -1903,14 +1902,13 @@ class _ReviewViewState extends State<_ReviewView> {
     final items = candidates;
     if (index < 0 || index >= items.length) return null;
     final candidate = items[index];
-    state.toggleCandidate(candidate.id, selection);
+    unawaited(state.toggleCandidate(candidate.id, selection));
     if (selection == CandidateSelection.included ||
         selection == CandidateSelection.excluded) {
       // A status filter can hide the candidate just reviewed; the next one
       // then moves into its place.
-      final remaining = candidates;
-      final shown = remaining.indexWhere((item) => item.id == candidate.id);
-      final next = shown >= 0 ? shown + 1 : index;
+      final remaining = items;
+      final next = index + 1;
       if (next < remaining.length) {
         await _select(next);
         return next;
@@ -1975,7 +1973,7 @@ class _ReviewViewState extends State<_ReviewView> {
       confirmLabel: context.bheText('应用'),
     );
     if (result != null) {
-      state.updateCandidate(
+      await state.updateCandidate(
         candidate.copyWith(startMs: result.start, endMs: result.end),
       );
     }
@@ -3737,7 +3735,7 @@ class _EvidenceSheet extends StatelessWidget {
       builder: (_) => _NoteSheet(initialNote: candidate.note),
     );
     if (value != null && context.mounted) {
-      state.updateCandidateNote(candidate.id, value);
+      await state.updateCandidateNote(candidate.id, value);
     }
   }
 
@@ -3896,10 +3894,10 @@ Future<void> _showPlayerPicker(
   if (value == null || !context.mounted) return;
   final normalized = value.trim();
   if (normalized.isEmpty) {
-    state.setCandidatePlayer(candidate.id, null);
+    await state.setCandidatePlayer(candidate.id, null);
   } else {
     state.addPlayer(normalized);
-    state.setCandidatePlayer(candidate.id, normalized);
+    await state.setCandidatePlayer(candidate.id, normalized);
   }
 }
 

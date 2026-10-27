@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 import '../../support/fake_video_platform.dart';
 import '../../support/mobile_video_fixture.dart';
+import '../../support/wait_project_writes.dart';
 
 void main() {
   late MobileVideoFixture fixture;
@@ -77,7 +78,12 @@ void main() {
             await tester.pump(const Duration(milliseconds: 400));
             final keep = find.text(l10n.text('选中')).last;
             final before = tester.getRect(keep);
-            fixture.state.toggleCandidate('goal', CandidateSelection.excluded);
+            await tester.runAsync(
+              () => fixture.state.toggleCandidate(
+                'goal',
+                CandidateSelection.excluded,
+              ),
+            );
             await tester.pump();
             final notice = find
                 .byKey(const ValueKey('review-undo-action'))
@@ -88,6 +94,8 @@ void main() {
             if (error != null) debugPrint(error.toString());
             expect(error, isNull);
             await tester.tap(notice);
+            await tester.pump();
+            await waitProjectWrites(tester, fixture.state.pendingProjectWrites);
             await tester.pump();
             expect(
               fixture.state.project.candidates.single.selection,

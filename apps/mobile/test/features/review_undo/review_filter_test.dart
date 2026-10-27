@@ -4,6 +4,7 @@ import 'package:bhe_mobile/mobile_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../../support/mobile_video_fixture.dart';
+import '../../support/wait_project_writes.dart';
 
 void main() {
   late MobileVideoFixture fixture;
@@ -32,10 +33,15 @@ void main() {
       await tester.pump();
       await tester.tap(find.byKey(const Key('review-filter-included')));
       await tester.pump();
-      fixture.state.toggleCandidate('goal', CandidateSelection.excluded);
+      await tester.runAsync(
+        () =>
+            fixture.state.toggleCandidate('goal', CandidateSelection.excluded),
+      );
       await tester.pump();
       expect(find.byKey(const ValueKey('review-undo-action')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('review-undo-action')));
+      await tester.pump();
+      await waitProjectWrites(tester, fixture.state.pendingProjectWrites);
       await tester.pump();
       expect(
         fixture.state.project.candidates.single.selection,

@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 
 import 'features/review_undo/review_history.dart';
+import 'features/project_mutation/project_mutation_queue.dart';
 import 'features/video_source/project_paths.dart';
 import 'features/video_source/project_file_commit.dart';
 import 'features/video_source/video_source_store.dart';
@@ -136,7 +137,9 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   bool exportCancelled = false;
   bool exportAudioSkipped = false;
   List<String> exportedPaths = const [];
-  Future<void> _saveChain = Future<void>.value();
+  final ProjectMutationQueue _mutations = ProjectMutationQueue();
+  Future<void> get _saveChain => _mutations.drained;
+  Future<void> get pendingProjectWrites => _mutations.drained;
   final ReviewHistory reviewHistory = ReviewHistory();
   String? undoFocusId;
   int undoRevision = 0;
@@ -152,66 +155,129 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   bool get canUndoReview => reviewHistory.canUndo;
 
-  void _recordReview(
-    ReviewChange kind,
-    Iterable<Candidate> previous,
-    String focusId,
-    String notice,
-  ) {
-    final before = {for (final candidate in previous) candidate.id: candidate};
-    if (before.isEmpty) return;
-    reviewHistory.add(ReviewEntry(kind, before, focusId));
-    _setReviewNotice(notice);
-  }
+  int _projectSession = 0;
 
-  Future<void> undoReview() async {
-    final entry = reviewHistory.pop();
-    if (entry == null) return;
-    final id = project.id;
-    final previous = {for (final c in project.candidates) c.id: c};
-    project = project.copyWith(
-      candidates: [
-        for (final candidate in project.candidates)
-          if (entry.before[candidate.id] case final before?)
-            restoreReviewFields(candidate, before, entry.kind)
-          else
-            candidate,
-      ],
-    );
-    final stateAfterUndo = project;
-    undoFocusId = entry.focusId;
-    undoRevision++;
-    _setReviewNotice(null);
-    final revision = reviewRevision;
-    final pending = _queueSave();
-    notifyListeners();
-    try {
-      await pending;
-      final belongsToSession = reviewHistory.complete(entry);
-      if (belongsToSession &&
-          !_disposed &&
-          project.id == id &&
-          reviewRevision == revision) {
-        _setReviewNotice('已撤销');
-        notifyListeners();
+  Future<bool> _changeReview({
+    required ReviewChange kind,
+    required String focusId,
+    required String notice,
+    required List<Candidate> Function(List<Candidate>) change,
+  }) {
+    final projectId = project.id;
+    final session = _projectSession;
+    return _mutations.run(() async {
+      if (_disposed || project.id != projectId || _projectSession != session) {
+        return false;
       }
-    } catch (_) {
-      if (!_disposed && project.id == id && reviewHistory.restore(entry)) {
-        if (identical(project, stateAfterUndo)) {
+      final original = project.candidates;
+      final next = change(original);
+      final previous = <String, ReviewFields>{};
+      for (var i = 0; i < original.length; i++) {
+        final old = original[i], updated = next[i];
+        final different = switch (kind) {
+          ReviewChange.selection =>
+            old.selection != updated.selection ||
+                old.reviewed != updated.reviewed,
+          ReviewChange.player => old.player != updated.player,
+          ReviewChange.note => old.note != updated.note,
+          ReviewChange.range =>
+            old.startMs != updated.startMs ||
+                old.endMs != updated.endMs ||
+                old.rangeEdited != updated.rangeEdited,
+        };
+        if (different) previous[old.id] = ReviewFields.capture(kind, old);
+      }
+      if (previous.isEmpty) return false;
+      project = project.copyWith(candidates: next);
+      notifyListeners();
+      try {
+        await _writeProject(project);
+        if (_disposed ||
+            project.id != projectId ||
+            _projectSession != session) {
+          return false;
+        }
+        reviewHistory.add(ReviewEntry(kind, previous, focusId));
+        _setReviewNotice(notice);
+        notifyListeners();
+        return true;
+      } catch (error, stack) {
+        if (!_disposed &&
+            project.id == projectId &&
+            _projectSession == session) {
           project = project.copyWith(
             candidates: [
               for (final c in project.candidates)
-                if (entry.before.containsKey(c.id))
-                  restoreReviewFields(c, previous[c.id]!, entry.kind)
+                if (previous[c.id] case final old?)
+                  restoreReviewFields(c, old, kind)
                 else
                   c,
             ],
           );
+          recordDiagnosticFailure(error, stack, operation: 'project');
+          _setReviewNotice('保存失败，请重试');
+          notifyListeners();
         }
-        _setReviewNotice('保存失败，请重试');
-        notifyListeners();
+        return false;
       }
-    }
+    });
+  }
+
+  Future<void> undoReview() {
+    final projectId = project.id;
+    final session = _projectSession;
+    return _mutations.run(() async {
+      if (_disposed || project.id != projectId || _projectSession != session) {
+        return;
+      }
+      final entry = reviewHistory.pop();
+      if (entry == null) return;
+      final previous = <String, ReviewFields>{
+        for (final candidate in project.candidates)
+          if (entry.before.containsKey(candidate.id))
+            candidate.id: ReviewFields.capture(entry.kind, candidate),
+      };
+      project = project.copyWith(
+        candidates: [
+          for (final candidate in project.candidates)
+            if (entry.before[candidate.id] case final old?)
+              restoreReviewFields(candidate, old, entry.kind)
+            else
+              candidate,
+        ],
+      );
+      notifyListeners();
+      try {
+        await _writeProject(project);
+        if (!_disposed &&
+            project.id == projectId &&
+            _projectSession == session &&
+            reviewHistory.complete(entry)) {
+          undoFocusId = entry.focusId;
+          undoRevision++;
+          _setReviewNotice('已撤销');
+          notifyListeners();
+        }
+      } catch (error, stack) {
+        if (!_disposed &&
+            project.id == projectId &&
+            _projectSession == session &&
+            reviewHistory.restore(entry)) {
+          project = project.copyWith(
+            candidates: [
+              for (final c in project.candidates)
+                if (previous[c.id] case final old?)
+                  restoreReviewFields(c, old, entry.kind)
+                else
+                  c,
+            ],
+          );
+          recordDiagnosticFailure(error, stack, operation: 'project');
+          _setReviewNotice('保存失败，请重试');
+          notifyListeners();
+        }
+      }
+    });
   }
 
   int _analysisGeneration = 0;
@@ -324,7 +390,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           candidates: replace ? const [] : snapshot.candidates,
           clearLastAnalysis: replace,
         );
-        final task = _saveChain.then((_) async {
+        final task = _mutations.run(() async {
           if (!current()) throw const VideoSourceCancelled();
           await _writeProject(next);
           if (!current()) {
@@ -335,10 +401,6 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           project = next;
           videoSourceRevision++;
         });
-        _saveChain = task.then<void>(
-          (_) {},
-          onError: (Object _, StackTrace _) {},
-        );
         await task;
       },
     );
@@ -728,11 +790,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   Future<void> _queueSave() {
     final snapshot = project;
-    _saveChain = _saveChain.then<void>(
-      (_) => _writeProject(snapshot),
-      onError: (Object error, StackTrace stack) => _writeProject(snapshot),
-    );
-    return _saveChain;
+    return _mutations.run(() => _writeProject(snapshot));
   }
 
   Future<void> pickVideo() async {
@@ -866,6 +924,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   void _resetTransientState() {
+    _projectSession++;
     reviewHistory.clear();
     _setReviewNotice(null);
     videoSourceFailure = null;
@@ -1046,28 +1105,18 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     notifyListeners();
   }
 
-  void toggleCandidate(String id, CandidateSelection selection) {
-    final old = project.candidates.where(
-      (c) => c.id == id && (c.selection != selection || !c.reviewed),
-    );
-    _recordReview(
-      ReviewChange.selection,
-      old,
-      id,
-      selection == CandidateSelection.included ? '已保留' : '已排除',
-    );
-    project = project.copyWith(
-      candidates: project.candidates
-          .map(
-            (candidate) => candidate.id == id
-                ? candidate.copyWith(selection: selection, reviewed: true)
-                : candidate,
-          )
-          .toList(),
-    );
-    unawaited(_queueSave());
-    notifyListeners();
-  }
+  Future<bool> toggleCandidate(String id, CandidateSelection selection) =>
+      _changeReview(
+        kind: ReviewChange.selection,
+        focusId: id,
+        notice: selection == CandidateSelection.included ? '已保留' : '已排除',
+        change: (items) => [
+          for (final item in items)
+            item.id == id
+                ? item.copyWith(selection: selection, reviewed: true)
+                : item,
+        ],
+      );
 
   void addCandidate(Candidate candidate) {
     final candidates = [...project.candidates, candidate]
@@ -1087,28 +1136,17 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     notifyListeners();
   }
 
-  void setCandidatePlayer(String id, String? player) {
-    _recordReview(
-      ReviewChange.player,
-      project.candidates.where((c) => c.id == id && c.player != player),
-      id,
-      '已设标签',
-    );
-    project = project.copyWith(
-      candidates: project.candidates
-          .map(
-            (candidate) => candidate.id == id
-                ? candidate.copyWith(
-                    player: player,
-                    clearPlayer: player == null,
-                  )
-                : candidate,
-          )
-          .toList(),
-    );
-    unawaited(_queueSave());
-    notifyListeners();
-  }
+  Future<bool> setCandidatePlayer(String id, String? player) => _changeReview(
+    kind: ReviewChange.player,
+    focusId: id,
+    notice: '已设标签',
+    change: (items) => [
+      for (final item in items)
+        item.id == id
+            ? item.copyWith(player: player, clearPlayer: player == null)
+            : item,
+    ],
+  );
 
   void addPlayer(String player) {
     final normalized = player.trim();
@@ -1553,105 +1591,85 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     notifyListeners();
   }
 
-  void updateCandidate(Candidate candidate) {
-    _recordReview(
-      ReviewChange.range,
-      project.candidates.where(
-        (c) =>
-            c.id == candidate.id &&
-            (c.startMs != candidate.startMs ||
-                c.endMs != candidate.endMs ||
-                c.rangeEdited != candidate.rangeEdited),
-      ),
-      candidate.id,
-      '已改时长',
-    );
-    project = project.copyWith(
-      candidates: project.candidates
-          .map((item) => item.id == candidate.id ? candidate : item)
-          .toList(),
-    );
-    unawaited(_queueSave());
-    notifyListeners();
-  }
+  Future<bool> updateCandidate(Candidate candidate) => _changeReview(
+    kind: ReviewChange.range,
+    focusId: candidate.id,
+    notice: '已改时长',
+    change: (items) => [
+      for (final item in items)
+        item.id == candidate.id
+            ? item.copyWith(
+                startMs: candidate.startMs,
+                endMs: candidate.endMs,
+                rangeEdited: candidate.rangeEdited,
+              )
+            : item,
+    ],
+  );
 
-  /// Applies an event-centered clip range to all or selected candidates.
-  /// Manually edited ranges are preserved unless explicitly overwritten.
-  int applyBatchClipRange({
+  Future<int> applyBatchClipRange({
     required int beforeSeconds,
     required int afterSeconds,
     Iterable<String>? candidateIds,
     String? focusId,
     bool overwriteManual = false,
-  }) {
-    final video = project.video;
-    if (video == null) return 0;
+  }) async {
     final ids = candidateIds?.toSet();
     var updated = 0;
-    final beforeMs = beforeSeconds.clamp(0, 3600) * 1000;
-    final afterMs = afterSeconds.clamp(0, 3600) * 1000;
-    final candidates = project.candidates.map((candidate) {
-      if (ids != null && !ids.contains(candidate.id)) return candidate;
-      if (candidate.rangeEdited && !overwriteManual) return candidate;
-      final start = (candidate.eventMs - beforeMs)
-          .clamp(0, video.durationMs)
-          .toInt();
-      final end = (candidate.eventMs + afterMs)
-          .clamp(0, video.durationMs)
-          .toInt();
-      if (end <= start) return candidate;
-      updated++;
-      return candidate.copyWith(startMs: start, endMs: end, rangeEdited: false);
-    }).toList();
-    if (updated == 0) return 0;
-    final changed = project.candidates
-        .where(
-          (old) => candidates.any(
-            (next) =>
-                next.id == old.id &&
-                (next.startMs != old.startMs ||
-                    next.endMs != old.endMs ||
-                    next.rangeEdited != old.rangeEdited),
-          ),
-        )
-        .toList();
-    if (changed.isNotEmpty) {
-      _recordReview(
-        ReviewChange.range,
-        changed,
-        changed.any((c) => c.id == focusId) ? focusId! : changed.first.id,
-        '已改时长',
-      );
-    }
-    project = project.copyWith(candidates: candidates);
-    unawaited(_queueSave());
-    notifyListeners();
-    return updated;
+    final changed = await _changeReview(
+      kind: ReviewChange.range,
+      focusId:
+          focusId ??
+          ids?.firstOrNull ??
+          project.candidates.firstOrNull?.id ??
+          '',
+      notice: '已改时长',
+      change: (items) {
+        final video = project.video;
+        if (video == null) return items;
+        final beforeMs = beforeSeconds.clamp(0, 3600) * 1000;
+        final afterMs = afterSeconds.clamp(0, 3600) * 1000;
+        return [
+          for (final item in items)
+            if ((ids == null || ids.contains(item.id)) &&
+                (!item.rangeEdited || overwriteManual))
+              () {
+                final start = (item.eventMs - beforeMs)
+                    .clamp(0, video.durationMs)
+                    .toInt();
+                final end = (item.eventMs + afterMs)
+                    .clamp(0, video.durationMs)
+                    .toInt();
+                if (end <= start) return item;
+                updated++;
+                return item.copyWith(
+                  startMs: start,
+                  endMs: end,
+                  rangeEdited: false,
+                );
+              }()
+            else
+              item,
+        ];
+      },
+    );
+    return changed ? updated : 0;
   }
 
-  void updateCandidateNote(String id, String? note) {
-    final normalized = note == null || note.trim().isEmpty ? null : note;
-    _recordReview(
-      ReviewChange.note,
-      project.candidates.where((c) => c.id == id && c.note != normalized),
-      id,
-      '已改备注',
-    );
-    project = project.copyWith(
-      candidates: project.candidates
-          .map(
-            (item) => item.id == id
-                ? item.copyWith(
-                    note: note,
-                    clearNote: note == null || note.trim().isEmpty,
-                  )
-                : item,
-          )
-          .toList(),
-    );
-    unawaited(_queueSave());
-    notifyListeners();
-  }
+  Future<bool> updateCandidateNote(String id, String? note) => _changeReview(
+    kind: ReviewChange.note,
+    focusId: id,
+    notice: '已改备注',
+    change: (items) => [
+      for (final item in items)
+        item.id == id
+            ? item.copyWith(
+                note: note,
+                clearNote: note == null || note.trim().isEmpty,
+              )
+            : item,
+    ],
+  );
 }
 
 Roi netRoiFromRim(Roi analysisRoi, Roi rimRoi) {

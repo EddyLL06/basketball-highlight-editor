@@ -2,10 +2,62 @@ import 'package:bhe_core/bhe_core.dart';
 
 enum ReviewChange { selection, player, note, range }
 
+/// Only fields belonging to this review operation are retained.
+class ReviewFields {
+  const ReviewFields({
+    this.selection,
+    this.reviewed,
+    this.player,
+    this.note,
+    this.startMs,
+    this.endMs,
+    this.rangeEdited,
+  });
+  final CandidateSelection? selection;
+  final bool? reviewed;
+  final String? player;
+  final String? note;
+  final int? startMs;
+  final int? endMs;
+  final bool? rangeEdited;
+
+  factory ReviewFields.capture(ReviewChange kind, Candidate c) =>
+      switch (kind) {
+        ReviewChange.selection => ReviewFields(
+          selection: c.selection,
+          reviewed: c.reviewed,
+        ),
+        ReviewChange.player => ReviewFields(player: c.player),
+        ReviewChange.note => ReviewFields(note: c.note),
+        ReviewChange.range => ReviewFields(
+          startMs: c.startMs,
+          endMs: c.endMs,
+          rangeEdited: c.rangeEdited,
+        ),
+      };
+
+  Candidate apply(Candidate current, ReviewChange kind) => switch (kind) {
+    ReviewChange.selection => current.copyWith(
+      selection: selection,
+      reviewed: reviewed,
+    ),
+    ReviewChange.player => current.copyWith(
+      player: player,
+      clearPlayer: player == null,
+    ),
+    ReviewChange.note => current.copyWith(note: note, clearNote: note == null),
+    ReviewChange.range => current.copyWith(
+      startMs: startMs,
+      endMs: endMs,
+      rangeEdited: rangeEdited,
+    ),
+  };
+}
+
 class ReviewEntry {
   ReviewEntry(this.kind, this.before, this.focusId);
   final ReviewChange kind;
-  final Map<String, Candidate> before;
+  final Map<String, ReviewFields> before;
   final String focusId;
   int sequence = -1;
 }
@@ -31,12 +83,10 @@ class ReviewHistory {
 
   void remapPlayer(String oldName, String? newName) {
     for (final entry in allEntries) {
+      if (entry.kind != ReviewChange.player) continue;
       for (final item in entry.before.entries.toList()) {
         if (item.value.player == oldName) {
-          entry.before[item.key] = item.value.copyWith(
-            player: newName,
-            clearPlayer: newName == null,
-          );
+          entry.before[item.key] = ReviewFields(player: newName);
         }
       }
     }
@@ -55,30 +105,10 @@ class ReviewHistory {
     add(entry);
     return true;
   }
-
-
 }
 
 Candidate restoreReviewFields(
   Candidate current,
-  Candidate before,
+  ReviewFields fields,
   ReviewChange kind,
-) => switch (kind) {
-  ReviewChange.selection => current.copyWith(
-    selection: before.selection,
-    reviewed: before.reviewed,
-  ),
-  ReviewChange.player => current.copyWith(
-    player: before.player,
-    clearPlayer: before.player == null,
-  ),
-  ReviewChange.note => current.copyWith(
-    note: before.note,
-    clearNote: before.note == null,
-  ),
-  ReviewChange.range => current.copyWith(
-    startMs: before.startMs,
-    endMs: before.endMs,
-    rangeEdited: before.rangeEdited,
-  ),
-};
+) => fields.apply(current, kind);

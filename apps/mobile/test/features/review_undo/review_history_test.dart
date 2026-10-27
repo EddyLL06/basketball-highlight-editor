@@ -14,10 +14,10 @@ void main() {
     try {
       final video = await f.file('original.mp4', 'original');
       f.state.project = f.project(video.path);
-      f.state.toggleCandidate('goal', CandidateSelection.excluded);
-      f.state.setCandidatePlayer('goal', null);
-      f.state.updateCandidateNote('goal', 'note');
-      f.state.updateCandidate(
+      await f.state.toggleCandidate('goal', CandidateSelection.excluded);
+      await f.state.setCandidatePlayer('goal', null);
+      await f.state.updateCandidateNote('goal', 'note');
+      await f.state.updateCandidate(
         f.state.project.candidates.single.copyWith(startMs: 500),
       );
       await f.state.undoReview();
@@ -49,14 +49,14 @@ void main() {
       final video = await f.file('original.mp4', 'original');
       f.state.project = f.project(video.path);
       for (var i = 0; i < 21; i++) {
-        f.state.updateCandidateNote('goal', '$i');
+        await f.state.updateCandidateNote('goal', '$i');
       }
       for (var i = 0; i < 20; i++) {
         await f.state.undoReview();
       }
       expect(f.state.project.candidates.single.note, '0');
       expect(f.state.canUndoReview, false);
-      f.state.updateCandidateNote('goal', 'again');
+      await f.state.updateCandidateNote('goal', 'again');
       await f.state.createNewProject();
       expect(f.state.canUndoReview, false);
     } finally {
@@ -81,7 +81,7 @@ void main() {
         ],
       );
       expect(
-        f.state.applyBatchClipRange(
+        await f.state.applyBatchClipRange(
           beforeSeconds: 2,
           afterSeconds: 2,
           overwriteManual: true,
@@ -104,7 +104,7 @@ void main() {
     try {
       final video = await f.file('original.mp4', 'original');
       f.state.project = f.project(video.path);
-      f.state.toggleCandidate('goal', CandidateSelection.excluded);
+      await f.state.toggleCandidate('goal', CandidateSelection.excluded);
       final saved = File('${f.data.path}/projects/A.json');
       for (var i = 0; i < 100 && !await saved.exists(); i++) {
         await Future<void>.delayed(const Duration(milliseconds: 10));
@@ -147,7 +147,7 @@ void main() {
       try {
         final video = await f.file('original.mp4', 'original');
         f.state.project = f.project(video.path);
-        f.state.toggleCandidate('goal', CandidateSelection.excluded);
+        await f.state.toggleCandidate('goal', CandidateSelection.excluded);
         final saved = File('${f.data.path}/projects/A.json');
         for (var i = 0; i < 100 && !await saved.exists(); i++) {
           await Future<void>.delayed(const Duration(milliseconds: 10));
@@ -170,10 +170,11 @@ void main() {
             );
         final undo = f.state.undoReview();
         await entered.future;
-        f.state.updateCandidateNote('goal', 'later');
+        final later = f.state.updateCandidateNote('goal', 'later');
         release.complete();
         await undo;
-        expect(f.state.reviewNotice, '保存失败，请重试');
+        await later;
+        expect(f.state.diagnosticError, isNotNull);
         expect(f.state.project.candidates.single.note, 'later');
         await f.state.undoReview();
         expect(f.state.project.candidates.single.note, isNull);
@@ -192,7 +193,11 @@ void main() {
   test('clearing a session invalidates pending undo completion', () {
     final history = ReviewHistory();
     const candidate = Candidate(id: 'c', startMs: 0, endMs: 1, eventMs: 0);
-    history.add(ReviewEntry(ReviewChange.selection, {'c': candidate}, 'c'));
+    history.add(
+      ReviewEntry(ReviewChange.selection, {
+        'c': ReviewFields.capture(ReviewChange.selection, candidate),
+      }, 'c'),
+    );
     final entry = history.pop()!;
     history.clear();
     expect(history.complete(entry), isFalse);

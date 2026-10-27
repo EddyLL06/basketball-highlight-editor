@@ -31,7 +31,7 @@ void main() {
         await f.state.savePlayerGroup('team');
         expect(f.state.renamePlayer('Alice', '  '), isFalse);
         expect(f.state.renamePlayer('Alice', ' Bob '), isFalse);
-        f.state.setCandidatePlayer('goal', 'Bob');
+        await f.state.setCandidatePlayer('goal', 'Bob');
         expect(f.state.renamePlayer('Alice', ' Carol '), isTrue);
         expect(f.state.project.players, ['Carol', 'Bob']);
         expect(f.state.project.candidates.last.player, 'Carol');
@@ -60,7 +60,7 @@ void main() {
       try {
         final source = await f.file('original.mp4', 'original');
         f.state.project = f.project(source.path);
-        f.state.setCandidatePlayer('goal', null);
+        await f.state.setCandidatePlayer('goal', null);
         f.state.removePlayer('Alice');
         await f.state.undoReview();
         expect(f.state.project.candidates.single.player, isNull);
@@ -117,7 +117,11 @@ void main() {
       eventMs: 0,
       player: 'Alice',
     );
-    history.add(ReviewEntry(ReviewChange.player, {'c': old}, 'c'));
+    history.add(
+      ReviewEntry(ReviewChange.player, {
+        'c': ReviewFields.capture(ReviewChange.player, old),
+      }, 'c'),
+    );
     final pending = history.pop()!;
     history.remapPlayer('Alice', 'Carol');
     expect(pending.before['c']!.player, 'Carol');

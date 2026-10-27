@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 import '../../support/fake_video_platform.dart';
 import '../../support/mobile_video_fixture.dart';
+import '../../support/wait_project_writes.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -66,7 +67,12 @@ void main() {
             )!;
             final keep = find.text(localizations.text('选中'));
             final before = tester.getRect(keep);
-            fixture.state.toggleCandidate('goal', CandidateSelection.excluded);
+            await tester.runAsync(
+              () => fixture.state.toggleCandidate(
+                'goal',
+                CandidateSelection.excluded,
+              ),
+            );
             await tester.pump();
             expect(
               find.byKey(const ValueKey('review-undo-action')),
@@ -79,6 +85,8 @@ void main() {
             );
             expect(notice.overlaps(before), isFalse);
             await tester.tap(find.byKey(const ValueKey('review-undo-action')));
+            await tester.pump();
+            await waitProjectWrites(tester, fixture.state.pendingProjectWrites);
             await tester.pump();
             expect(
               fixture.state.project.candidates.single.selection,
