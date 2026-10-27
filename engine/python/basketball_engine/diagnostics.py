@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+from importlib import metadata
 import platform
 import stat
 import subprocess
@@ -10,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
-from . import __version__
+from . import __version__, ANALYSIS_ALGORITHM_VERSION
 from .media_tools import resolve_media_tool
 
 
@@ -171,13 +173,84 @@ def _windows_environment():
     }.items())
 
 
+def _environment_value(read, default="unknown"):
+    try:
+        return read()
+    except Exception:
+        return default
+
+
+def _cpu_name():
+    system = platform.system()
+    if system == "Windows":
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as key:
+            return winreg.QueryValueEx(key, "ProcessorNameString")[0].strip() or "unknown"
+    if system == "Darwin":
+        result = subprocess.run(
+            ["sysctl", "-n", "machdep.cpu.brand_string"], check=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL, timeout=5,
+        )
+        return result.stdout.strip() or "unknown"
+    if system == "Linux":
+        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="replace").splitlines():
+            name, separator, value = line.partition(":")
+            if separator and name.strip() == "model name":
+                return value.strip() or "unknown"
+    return "unknown"
+
+
+def _library_versions():
+    versions = {}
+    for name in ("onnxruntime", "onnxruntime-directml", "onnxruntime-gpu", "torch",
+                 "ultralytics", "numpy", "opencv-python", "opencv-python-headless",
+                 "opencv-contrib-python", "opencv-contrib-python-headless"):
+        try:
+            versions[name] = metadata.version(name)
+        except Exception:
+            pass
+    return versions
+
+
+def _windows_gpu_names():
+    import winreg
+
+    names = []
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                        r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}") as key:
+        for index in range(winreg.QueryInfoKey(key)[0]):
+            try:
+                name = winreg.EnumKey(key, index)
+                with winreg.OpenKey(key, name) as adapter:
+                    description = winreg.QueryValueEx(adapter, "DriverDesc")[0].strip()
+                if description and description not in names:
+                    names.append(description)
+                if len(names) == 3:
+                    break
+            except Exception:
+                continue
+    return names or "unknown"
+
+
 def environment_summary() -> str:
-    memory = _total_memory_bytes()
-    ffmpeg = resolve_media_tool("ffmpeg")
+    memory = _environment_value(_total_memory_bytes, None)
+    memory_text = _environment_value(lambda: f"{memory / 1024 ** 3:.1f}GB" if memory else "unknown")
+    ffmpeg = _environment_value(lambda: resolve_media_tool("ffmpeg"))
+    system = _environment_value(platform.system)
+    cpu_name = _environment_value(_cpu_name)
+    libs = _environment_value(_library_versions, {})
+    windows = _environment_value(_windows_environment, "") if system == "Windows" else ""
+    gpu = _environment_value(_windows_gpu_names) if system == "Windows" else None
     return (
-        f"environment engine={__version__} python={platform.python_version()} "
-        f"os={platform.platform()} machine={platform.machine()} cpu={os.cpu_count()} "
-        f"memory={f'{memory / 1024 ** 3:.1f}GB' if memory else 'unknown'} "
-        f"ffmpeg={ffmpeg} ({_ffmpeg_version(ffmpeg)})"
-        f"{_windows_environment() if platform.system() == 'Windows' else ''}"
+        f"environment engine={__version__} python={_environment_value(platform.python_version)} "
+        f"os={_environment_value(platform.platform)} machine={_environment_value(platform.machine)} "
+        f"cpu={_environment_value(os.cpu_count)} memory={memory_text} "
+        f"ffmpeg={ffmpeg} ({_environment_value(lambda: _ffmpeg_version(ffmpeg))})"
+        f"{windows} cpu_name={json.dumps(cpu_name, ensure_ascii=False)} "
+        f"libs={json.dumps(libs, separators=(',', ':'))}"
+        + (f" gpu={json.dumps(gpu, ensure_ascii=False, separators=(',', ':'))}" if system == "Windows" else "")
+        + f" algorithm={ANALYSIS_ALGORITHM_VERSION}"
     )

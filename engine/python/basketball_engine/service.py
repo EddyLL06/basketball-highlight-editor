@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-from . import __version__
+from . import __version__, ANALYSIS_ALGORITHM_VERSION
 from .adapters.analysis import (
     apply_rim_checks,
     build_pipeline_commands,
@@ -51,7 +51,6 @@ from basketball_highlight.rim_check import RIM_CHECK_VERSION
 from basketball_highlight.tracking import link_ball_detections
 
 
-ANALYSIS_ALGORITHM_VERSION = "python-v2.15-crop-scale-clamp"
 
 
 class EngineService:
