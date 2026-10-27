@@ -6,10 +6,12 @@ class _InlineNotice extends StatelessWidget {
     required this.message,
     this.error = false,
     this.action,
+    this.textColor,
   });
   final String message;
   final bool error;
   final Widget? action;
+  final Color? textColor;
 
   @override
   Widget build(BuildContext context) {
@@ -44,7 +46,9 @@ class _InlineNotice extends StatelessWidget {
               children: [
                 Text(
                   l10n?.text(message) ?? message,
-                  style: Theme.of(context).textTheme.bodySmall,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: textColor),
                 ),
                 ?action,
               ],

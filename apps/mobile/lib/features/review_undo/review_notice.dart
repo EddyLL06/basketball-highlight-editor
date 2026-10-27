@@ -11,6 +11,7 @@ class _ReviewUndoNoticeState extends State<_ReviewUndoNotice> {
   Timer? timer;
   int revision = -1;
   String? message;
+  DiagnosticErrorRecord? failureRecord;
   @override
   void initState() {
     super.initState();
@@ -21,8 +22,19 @@ class _ReviewUndoNoticeState extends State<_ReviewUndoNotice> {
   void changed() {
     if (revision == widget.state.reviewRevision) return;
     revision = widget.state.reviewRevision;
+    if (message == '保存失败，请重试' &&
+        widget.state.reviewNotice != null &&
+        widget.state.reviewNotice != message &&
+        (timer?.isActive ?? false)) {
+      return;
+    }
     timer?.cancel();
     if (!mounted) return;
+    if (widget.state.reviewNotice == '保存失败，请重试') {
+      failureRecord = widget.state.reviewDiagnosticError;
+    } else if (widget.state.reviewNotice == null) {
+      failureRecord = null;
+    }
     final at = widget.state.reviewNoticeAt;
     final remaining = at == null
         ? Duration.zero
@@ -47,23 +59,48 @@ class _ReviewUndoNoticeState extends State<_ReviewUndoNotice> {
   }
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 96,
-    child: message == null
-        ? null
-        : _InlineNotice(
-            message: context.bheText(message!),
-            action: message == '已撤销' || message == '保存失败，请重试'
-                ? null
-                : TextButton(
-                    key: const ValueKey('review-undo-action'),
-                    onPressed: () => unawaited(widget.state.undoReview()),
-                    style: TextButton.styleFrom(
-                      minimumSize: const Size(48, 48),
-                      padding: EdgeInsets.zero,
-                    ),
-                    child: Text(context.bheText('撤销')),
-                  ),
-          ),
-  );
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final failed = message == '保存失败，请重试';
+    return SizedBox(
+      height: 96,
+      child: message == null
+          ? null
+          : Material(
+              key: const ValueKey('review-notice-surface'),
+              color: colors.surface,
+              child: _InlineNotice(
+                message: context.bheText(message!),
+                error: failed,
+                textColor: colors.onSurface,
+                action: failed && failureRecord != null
+                    ? TextButton(
+                        key: const ValueKey('review-feedback-action'),
+                        onPressed: () => showMobileDiagnostics(
+                          context,
+                          error: failureRecord,
+                        ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: colors.onSurface,
+                          minimumSize: const Size(48, 48),
+                          padding: EdgeInsets.zero,
+                        ),
+                        child: Text(context.bheText('反馈')),
+                      )
+                    : message == '已撤销' || failed
+                    ? null
+                    : TextButton(
+                        key: const ValueKey('review-undo-action'),
+                        onPressed: () => unawaited(widget.state.undoReview()),
+                        style: TextButton.styleFrom(
+                          foregroundColor: colors.onSurface,
+                          minimumSize: const Size(48, 48),
+                          padding: EdgeInsets.zero,
+                        ),
+                        child: Text(context.bheText('撤销')),
+                      ),
+              ),
+            ),
+    );
+  }
 }

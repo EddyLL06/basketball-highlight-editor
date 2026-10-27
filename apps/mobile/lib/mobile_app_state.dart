@@ -146,9 +146,11 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   int undoRevision = 0;
   int reviewRevision = 0;
   String? reviewNotice;
+  DiagnosticErrorRecord? reviewDiagnosticError;
   DateTime? reviewNoticeAt;
 
   void _setReviewNotice(String? notice) {
+    if (notice == null) reviewDiagnosticError = null;
     reviewNotice = notice;
     reviewNoticeAt = notice == null ? null : DateTime.now();
     reviewRevision++;
@@ -157,14 +159,26 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   bool get canUndoReview => reviewHistory.canUndo;
 
   int _projectSession = 0;
+  int get projectSession => _projectSession;
   int _projectTransitions = 0;
+  int _projectIntent = 0;
+  bool get projectTransitioning => _projectTransitions != 0;
 
-  Future<T> _withProjectTransition<T>(Future<T> Function() action) async {
+  int _newProjectIntent() => ++_projectIntent;
+  bool _isProjectIntent(int intent) => !_disposed && intent == _projectIntent;
+
+  Future<void> _withProjectTransition(
+    int intent,
+    Future<void> Function() action,
+  ) async {
+    if (!_isProjectIntent(intent)) return;
     _projectTransitions++;
+    notifyListeners();
     try {
-      return await action();
+      await action();
     } finally {
       _projectTransitions--;
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -231,6 +245,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
             ],
           );
           recordDiagnosticFailure(error, stack, operation: 'project');
+          reviewDiagnosticError = diagnosticError;
           _setReviewNotice('保存失败，请重试');
           notifyListeners();
         } else {
@@ -292,6 +307,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
             ],
           );
           recordDiagnosticFailure(error, stack, operation: 'project');
+          reviewDiagnosticError = diagnosticError;
           _setReviewNotice('保存失败，请重试');
           notifyListeners();
         } else {
@@ -380,8 +396,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     bool fromPicker = false,
     bool replace = false,
     String? name,
+    int? projectIntent,
   }) async {
-    bool current() => _isCurrentVideoPreparation(generation, snapshot.id);
+    bool current() =>
+        _isCurrentVideoPreparation(generation, snapshot.id, projectIntent);
     return _videoStore.save(
       sourcePath: path,
       projectId: snapshot.id,
@@ -524,7 +542,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     }
   }
 
-  Future<void> _validateImportedVideoIfPresent() async {
+  Future<void> _validateImportedVideoIfPresent({int? projectIntent}) async {
     final snapshot = project;
     final video = snapshot.video;
     if (video == null) {
@@ -541,8 +559,13 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       }
       // Existing records may share a legacy cache path. Migration is a copy;
       // only a fresh picker selection grants permission to move its cache.
-      await _storeVideo(source, snapshot, generation);
-      if (_isCurrentVideoPreparation(generation, snapshot.id)) {
+      await _storeVideo(
+        source,
+        snapshot,
+        generation,
+        projectIntent: projectIntent,
+      );
+      if (_isCurrentVideoPreparation(generation, snapshot.id, projectIntent)) {
         videoSourceFailure = null;
         diagnosticError = null;
         errorMessage = null;
@@ -551,7 +574,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       return;
     } on Object catch (error, stack) {
       MobileDiagnostics.instance.error(error, stack, operation: 'project');
-      if (_isCurrentVideoPreparation(generation, snapshot.id)) {
+      if (_isCurrentVideoPreparation(generation, snapshot.id, projectIntent)) {
         _recordVideoFailure(error, video.path, stack);
       }
     }
@@ -925,47 +948,70 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     );
   }
 
-  Future<void> openProject(String id) => _withProjectTransition(() async {
-    if (analysing) await cancelAnalysis();
-    _invalidateVideoPreparation();
-    final opened = await _mutations.run(() async {
-      final file = await _projectFile(id);
-      if (!await file.exists()) return false;
-      final loaded = const ProjectPackageCodec().decode(
-        await file.readAsString(),
+  Future<void> openProject(String id) {
+    final intent = _newProjectIntent();
+    return _withProjectTransition(intent, () async {
+      if (analysing) await cancelAnalysis();
+      if (!_isProjectIntent(intent)) return;
+      _invalidateVideoPreparation();
+      final opened = await _mutations.run(() async {
+        if (!_isProjectIntent(intent)) return false;
+        final file = await _projectFile(id);
+        if (!await file.exists() || !_isProjectIntent(intent)) return false;
+        final loaded = const ProjectPackageCodec().decode(
+          await file.readAsString(),
+        );
+        if (!_isProjectIntent(intent)) return false;
+        project = loaded;
+        _resetTransientState();
+        diagnosticError = null;
+        errorMessage = null;
+        exportedPaths = const [];
+        exportAudioSkipped = false;
+        recentProjects = [
+          project,
+          ...recentProjects.where((item) => item.id != project.id),
+        ];
+        await _persistProjects();
+        notifyListeners();
+        return true;
+      });
+      if (!opened || !_isProjectIntent(intent)) return;
+      await _validateImportedVideoIfPresent(projectIntent: intent);
+      if (!_isProjectIntent(intent)) return;
+      MobileDiagnostics.instance.event(
+        'project.open',
+        available: sourceVideoExists,
       );
-      project = loaded;
-      _resetTransientState();
-      diagnosticError = null;
-      errorMessage = null;
-      exportedPaths = const [];
-      exportAudioSkipped = false;
-      recentProjects = [
-        project,
-        ...recentProjects.where((item) => item.id != project.id),
-      ];
-      await _persistProjects();
       notifyListeners();
-      return true;
+    }).catchError((Object error, StackTrace stack) {
+      if (_isProjectIntent(intent)) {
+        recordDiagnosticFailure(error, stack, operation: 'project.open');
+        notifyListeners();
+      } else {
+        MobileDiagnostics.instance.error(
+          error,
+          stack,
+          operation: 'project.open',
+        );
+      }
     });
-    if (!opened) return;
-    await _validateImportedVideoIfPresent();
-    MobileDiagnostics.instance.event(
-      'project.open',
-      available: sourceVideoExists,
-    );
-    notifyListeners();
-  });
+  }
 
-  Future<void> createNewProject() => _withProjectTransition(() async {
-    if (analysing) await cancelAnalysis();
-    _invalidateVideoPreparation();
-    await _mutations.run(() async {
-      project = _newProject();
-      _resetTransientState();
-      notifyListeners();
-    });
-  });
+  Future<void> createNewProject() => _createNewProject(_newProjectIntent());
+
+  Future<void> _createNewProject(int intent) =>
+      _withProjectTransition(intent, () async {
+        if (analysing) await cancelAnalysis();
+        if (!_isProjectIntent(intent)) return;
+        _invalidateVideoPreparation();
+        await _mutations.run(() async {
+          if (!_isProjectIntent(intent)) return;
+          project = _newProject();
+          _resetTransientState();
+          notifyListeners();
+        });
+      });
 
   ProjectSnapshot _newProject() =>
       ProjectSnapshot(id: _newProjectId(), name: '新项目', video: null);
@@ -981,20 +1027,54 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   Future<void> createNewProjectAndPickVideo() async {
-    if (analysing) await cancelAnalysis();
-    _invalidateVideoPreparation();
-    final picked = await _pickVideo();
-    if (picked == null) return;
-    await createNewProject();
-    await _prepareVideo(picked.path, name: picked.name);
+    final intent = _newProjectIntent();
+    final id = project.id, session = _projectSession;
+    try {
+      final picked = await _pickVideo();
+      if (picked == null ||
+          !_isProjectIntent(intent) ||
+          project.id != id ||
+          _projectSession != session) {
+        return;
+      }
+      await _createNewProject(intent);
+      if (!_isProjectIntent(intent)) return;
+      await _prepareVideo(
+        picked.path,
+        name: picked.name,
+        projectIntent: intent,
+      );
+    } on Object catch (error, stack) {
+      if (!_isProjectIntent(intent)) {
+        MobileDiagnostics.instance.error(
+          error,
+          stack,
+          operation: 'project.new',
+        );
+        return;
+      }
+      recordDiagnosticFailure(error, stack, operation: 'project.new');
+      notifyListeners();
+    }
   }
 
   Future<void> pickVideo() async {
+    final intent = _projectIntent, id = project.id, session = _projectSession;
     if (analysing) await cancelAnalysis();
+    if (!_isProjectIntent(intent) ||
+        project.id != id ||
+        _projectSession != session) {
+      return;
+    }
     _invalidateVideoPreparation();
     final picked = await _pickVideo();
-    if (picked == null) return;
-    await _prepareVideo(picked.path, name: picked.name);
+    if (picked == null ||
+        !_isProjectIntent(intent) ||
+        project.id != id ||
+        _projectSession != session) {
+      return;
+    }
+    await _prepareVideo(picked.path, name: picked.name, projectIntent: intent);
   }
 
   Future<({String path, String name})?> _pickVideo() async {
@@ -1009,7 +1089,11 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     );
   }
 
-  Future<void> _prepareVideo(String path, {String? name}) async {
+  Future<void> _prepareVideo(
+    String path, {
+    String? name,
+    int? projectIntent,
+  }) async {
     final projectId = project.id;
     final preparationGeneration = ++_videoPreparationGeneration;
     videoSourceFailure = null;
@@ -1028,8 +1112,15 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         fromPicker: true,
         replace: true,
         name: name,
+        projectIntent: projectIntent,
       );
-      if (!_isCurrentVideoPreparation(preparationGeneration, projectId)) return;
+      if (!_isCurrentVideoPreparation(
+        preparationGeneration,
+        projectId,
+        projectIntent,
+      )) {
+        return;
+      }
       diagnosticError = null;
       errorMessage = null;
       preparingVideoMessage = '正在识别篮筐区域';
@@ -1040,7 +1131,11 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           startMs: project.settings.startMs,
           modelSize: project.settings.modelInputSize,
         );
-        if (!_isCurrentVideoPreparation(preparationGeneration, projectId)) {
+        if (!_isCurrentVideoPreparation(
+          preparationGeneration,
+          projectId,
+          projectIntent,
+        )) {
           return;
         }
         final rawRoi = suggestion?['roi'];
@@ -1095,7 +1190,11 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         error: error,
         stackTrace: stack,
       );
-      if (_isCurrentVideoPreparation(preparationGeneration, projectId)) {
+      if (_isCurrentVideoPreparation(
+        preparationGeneration,
+        projectId,
+        projectIntent,
+      )) {
         _recordVideoFailure(error, path, stack);
       }
     } finally {
@@ -1107,10 +1206,15 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     }
   }
 
-  bool _isCurrentVideoPreparation(int generation, String projectId) =>
+  bool _isCurrentVideoPreparation(
+    int generation,
+    String projectId, [
+    int? intent,
+  ]) =>
       !_disposed &&
       generation == _videoPreparationGeneration &&
-      project.id == projectId;
+      project.id == projectId &&
+      (intent == null || _isProjectIntent(intent));
 
   void _invalidateVideoPreparation() {
     _videoPreparationGeneration++;
@@ -1125,6 +1229,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     _projectSession++;
     _analysisGeneration++;
     reviewHistory.clear();
+    reviewDiagnosticError = null;
     _setReviewNotice(null);
     videoSourceFailure = null;
     diagnosticError = null;
@@ -1142,54 +1247,86 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     analysisStartedAt = null;
   }
 
-  Future<void> importProject() => _withProjectTransition(() async {
-    if (analysing) await cancelAnalysis();
-    _invalidateVideoPreparation();
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['bhe', 'json'],
-    );
-    final path = result?.files.single.path;
-    if (path == null) return;
+  Future<void> importProject() async {
+    final intent = _newProjectIntent();
+    final id = project.id, session = _projectSession;
     try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['bhe', 'json'],
+      );
+      final path = result?.files.single.path;
+      if (path == null ||
+          !_isProjectIntent(intent) ||
+          project.id != id ||
+          _projectSession != session) {
+        return;
+      }
       final file = File(path);
       final content = path.toLowerCase().endsWith('.bhe')
           ? _readProjectFromArchive(await file.readAsBytes())
           : await file.readAsString();
-      await _mutations.run(() async {
-        final imported = const ProjectPackageCodec().decode(
-          content,
-          existingIds: [
-            project.id,
-            ...recentProjects.map((item) => item.id),
-            ...await existingProjectStorageIds(await _dataDirectory()),
-          ],
-        );
-        await _writeProject(imported);
-        project = imported;
-        _resetTransientState();
-        diagnosticError = null;
-        errorMessage = null;
-        notifyListeners();
+      if (!_isProjectIntent(intent) ||
+          project.id != id ||
+          _projectSession != session) {
+        return;
+      }
+      await _withProjectTransition(intent, () async {
+        if (analysing) await cancelAnalysis();
+        if (!_isProjectIntent(intent)) return;
+        _invalidateVideoPreparation();
+        final imported = await _mutations.run(() async {
+          if (!_isProjectIntent(intent)) return false;
+          final existing = await existingProjectStorageIds(
+            await _dataDirectory(),
+          );
+          if (!_isProjectIntent(intent)) return false;
+          final value = const ProjectPackageCodec().decode(
+            content,
+            existingIds: [
+              project.id,
+              ...recentProjects.map((item) => item.id),
+              ...existing,
+            ],
+          );
+          await _writeProject(value);
+          project = value;
+          _resetTransientState();
+          diagnosticError = null;
+          errorMessage = null;
+          notifyListeners();
+          return true;
+        });
+        if (!imported || !_isProjectIntent(intent)) return;
+        await _validateImportedVideoIfPresent(projectIntent: intent);
+        if (_isProjectIntent(intent)) notifyListeners();
       });
-      await _validateImportedVideoIfPresent();
-      notifyListeners();
     } on Object catch (error, stack) {
+      if (!_isProjectIntent(intent)) {
+        MobileDiagnostics.instance.error(
+          error,
+          stack,
+          operation: 'project.import',
+        );
+        return;
+      }
       recordDiagnosticFailure(error, stack, operation: 'project.import');
       notifyListeners();
     }
-  });
+  }
 
   Future<void> relinkVideo() async {
     if (relinkingVideo || preparingVideo || exporting) return;
     var snapshot = project;
+    final intent = _projectIntent;
     final generation = ++_videoPreparationGeneration;
     final operation = ++_relinkSerial;
     relinkingVideo = true;
     relinkCancelling = false;
     notifyListeners();
     String? path;
-    bool current() => _isCurrentVideoPreparation(generation, snapshot.id);
+    bool current() =>
+        _isCurrentVideoPreparation(generation, snapshot.id, intent);
     try {
       if (analysing) {
         await cancelAnalysis();
@@ -1209,6 +1346,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         generation,
         fromPicker: true,
         name: picked.name,
+        projectIntent: intent,
       );
       if (!current()) return;
       videoSourceFailure = null;
@@ -1337,54 +1475,61 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         inverse: _restoreRois,
       );
 
-  Future<void> clearProject() => _withProjectTransition(() async {
-    if (analysing) await cancelAnalysis();
-    _invalidateVideoPreparation();
-    await _mutations.run(() async {
-      final deletedId = project.id;
-      stage = AnalysisStage.idle;
-      diagnosticError = null;
-      errorMessage = null;
-      _resetTransientState();
-      final file = await _projectFile(deletedId);
-      if (await file.exists()) await file.delete();
-      final cover = await _coverFile(deletedId);
-      if (await cover.exists()) await cover.delete();
-      coverPaths = {...coverPaths}..remove(deletedId);
-      recentProjects = recentProjects
-          .where((item) => item.id != deletedId)
-          .toList();
-      await _persistProjects();
-      if (recentProjects.isEmpty) {
-        project = _newProject();
-      } else {
-        project = recentProjects.first;
-        exportedPaths = const [];
-        exportAudioSkipped = false;
-      }
-      final directory = await _dataDirectory();
-      for (final name in ['project.bhe.json', 'project.bhe']) {
-        final legacy = File('${directory.path}/$name');
-        if (await legacy.exists()) await legacy.delete();
-      }
-      for (final name in ['exports', 'package_staging']) {
-        final artifactDirectory = Directory(
-          await _projectPath(deletedId, area: name),
-        );
-        if (await artifactDirectory.exists()) {
-          await artifactDirectory.delete(recursive: true);
+  Future<void> clearProject() {
+    final intent = _newProjectIntent();
+    return _withProjectTransition(intent, () async {
+      if (analysing) await cancelAnalysis();
+      if (!_isProjectIntent(intent)) return;
+      _invalidateVideoPreparation();
+      await _mutations.run(() async {
+        if (!_isProjectIntent(intent)) return;
+        final deletedId = project.id;
+        stage = AnalysisStage.idle;
+        diagnosticError = null;
+        errorMessage = null;
+        _resetTransientState();
+        final file = await _projectFile(deletedId);
+        if (await file.exists()) await file.delete();
+        final cover = await _coverFile(deletedId);
+        if (await cover.exists()) await cover.delete();
+        coverPaths = {...coverPaths}..remove(deletedId);
+        recentProjects = recentProjects
+            .where((item) => item.id != deletedId)
+            .toList();
+        await _persistProjects();
+        if (recentProjects.isEmpty) {
+          project = _newProject();
+        } else {
+          project = recentProjects.first;
+          exportedPaths = const [];
+          exportAudioSkipped = false;
         }
+        final directory = await _dataDirectory();
+        for (final name in ['project.bhe.json', 'project.bhe']) {
+          final legacy = File('${directory.path}/$name');
+          if (await legacy.exists()) await legacy.delete();
+        }
+        for (final name in ['exports', 'package_staging']) {
+          final artifactDirectory = Directory(
+            await _projectPath(deletedId, area: name),
+          );
+          if (await artifactDirectory.exists()) {
+            await artifactDirectory.delete(recursive: true);
+          }
+        }
+        final videoDirectory = Directory(
+          await _projectPath(deletedId, area: 'videos'),
+        );
+        if (await videoDirectory.exists()) {
+          await videoDirectory.delete(recursive: true);
+        }
+        notifyListeners();
+      });
+      if (_isProjectIntent(intent) && project.video != null) {
+        await _validateImportedVideoIfPresent(projectIntent: intent);
       }
-      final videoDirectory = Directory(
-        await _projectPath(deletedId, area: 'videos'),
-      );
-      if (await videoDirectory.exists()) {
-        await videoDirectory.delete(recursive: true);
-      }
-      notifyListeners();
     });
-    if (project.video != null) await _validateImportedVideoIfPresent();
-  });
+  }
 
   Future<bool> toggleCandidate(String id, CandidateSelection selection) =>
       _changeReview(
@@ -1564,28 +1709,53 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   Future<void> exportProjectPackage() async {
+    final id = project.id, session = _projectSession;
+    bool current() =>
+        !_disposed &&
+        !projectTransitioning &&
+        project.id == id &&
+        _projectSession == session;
+    if (!current()) return;
     try {
-      await _mutations.drained;
-      final snapshot = project;
-      final staging = Directory(
-        await _projectPath(snapshot.id, area: 'package_staging'),
-      );
-      if (await staging.exists()) await staging.delete(recursive: true);
-      await staging.create(recursive: true);
-      final projectJson = File('${staging.path}/project.json');
-      await projectJson.writeAsString(
-        const ProjectPackageCodec().encode(snapshot),
-      );
-      final file = File(await _projectPath(snapshot.id, suffix: '.bhe'));
-      final encoder = ZipFileEncoder()
-        ..create(file.path, level: ZipFileEncoder.store);
-      encoder.addFileSync(projectJson, 'project.json');
-      encoder.closeSync();
-      await staging.delete(recursive: true);
-      await SharePlus.instance.share(ShareParams(files: [XFile(file.path)]));
+      final package = await _mutations.run(() async {
+        if (!current()) return null;
+        final snapshot = project;
+        final staging = Directory(
+          await _projectPath(id, area: 'package_staging'),
+        );
+        try {
+          if (await staging.exists()) await staging.delete(recursive: true);
+          await staging.create(recursive: true);
+          final projectJson = File('${staging.path}/project.json');
+          await projectJson.writeAsString(
+            const ProjectPackageCodec().encode(snapshot),
+          );
+          final file = File(await _projectPath(id, suffix: '.bhe'));
+          final encoder = ZipFileEncoder()
+            ..create(file.path, level: ZipFileEncoder.store);
+          try {
+            encoder.addFileSync(projectJson, 'project.json');
+          } finally {
+            encoder.closeSync();
+          }
+          if (!current()) {
+            if (await file.exists()) await file.delete();
+            return null;
+          }
+          return file;
+        } finally {
+          if (await staging.exists()) await staging.delete(recursive: true);
+        }
+      });
+      if (package == null || !current()) return;
+      await SharePlus.instance.share(ShareParams(files: [XFile(package.path)]));
     } on Object catch (error, stack) {
-      recordDiagnosticFailure(error, stack, operation: 'export');
-      notifyListeners();
+      if (current()) {
+        recordDiagnosticFailure(error, stack, operation: 'export');
+        notifyListeners();
+      } else {
+        MobileDiagnostics.instance.error(error, stack, operation: 'export');
+      }
     }
   }
 

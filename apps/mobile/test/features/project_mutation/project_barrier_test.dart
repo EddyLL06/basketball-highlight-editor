@@ -96,7 +96,10 @@ void main() {
             _ => f.state.importProject(),
           };
           transition.then((_) => finished = true);
-          await Future<void>.delayed(Duration.zero);
+          for (var i = 0; i < 100 && !f.state.projectTransitioning; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+          }
+          expect(f.state.projectTransitioning, isTrue);
           expect(finished, isFalse);
           expect(
             await f.state.updateCandidateNote('goal', 'during switch'),

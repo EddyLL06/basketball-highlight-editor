@@ -1,6 +1,7 @@
 import 'package:bhe_l10n/bhe_l10n.dart';
 import 'package:bhe_mobile/mobile_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 import '../../support/fake_video_platform.dart';
@@ -119,4 +120,55 @@ void main() {
       }
     },
   );
+
+  testWidgets('failed player rename leaves the active player filter intact', (
+    tester,
+  ) async {
+    final previous = VideoPlayerPlatform.instance;
+    VideoPlayerPlatform.instance = FakeVideoPlatform();
+    await tester.binding.setSurfaceSize(const Size(360, 800));
+    tester.binding.platformDispatcher.localeTestValue = const Locale('zh');
+    try {
+      f.state.project = f.project('${f.root.path}/missing.mp4');
+      await tester.pumpWidget(BheMobileApp(appState: f.state));
+      await tester.pump();
+      final l10n = Localizations.of<BheLocalizations>(
+        tester.element(find.byType(Scaffold).first),
+        BheLocalizations,
+      )!;
+      await tester.ensureVisible(find.text(l10n.reviewCount(1)));
+      await tester.pump();
+      await tester.tap(find.text(l10n.reviewCount(1)));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.tap(find.byKey(const Key('review-player-filter')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.tap(
+        find.byKey(const Key('review-player-option-player:Alice')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/path_provider'),
+            (_) async => throw PlatformException(code: 'rename_failed'),
+          );
+      expect(
+        await tester.runAsync(() => f.state.renamePlayer('Alice', 'Bob')),
+        isFalse,
+      );
+      await tester.pump();
+      expect(f.state.project.players, ['Alice']);
+      expect(find.byKey(const Key('review-clear-filters')), findsOneWidget);
+      expect(find.byTooltip(l10n.text('球员：Alice')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    } finally {
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(() => pumpEventQueue());
+      VideoPlayerPlatform.instance = previous;
+      tester.binding.platformDispatcher.clearLocaleTestValue();
+      await tester.binding.setSurfaceSize(null);
+    }
+  });
 }

@@ -132,6 +132,14 @@ void main() {
               expect(items[1].reviewed, isTrue);
               expect(items[2].selection, initial);
               expect(items[2].reviewed, isFalse);
+              await tester.runAsync(() => f.state.undoReview());
+              await tester.pump();
+              expect(f.state.project.candidates[1].selection, initial);
+              await tester.tap(action);
+              await tester.pump();
+              await waitProjectWrites(tester, f.state.pendingProjectWrites);
+              expect(f.state.project.candidates[1].selection, target);
+              expect(f.state.project.candidates[2].selection, initial);
               expect(tester.takeException(), isNull);
             } finally {
               if (!release.isCompleted) release.complete();

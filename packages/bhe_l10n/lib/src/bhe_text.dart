@@ -423,6 +423,8 @@ const _englishText = <String, String>{
 
   '重命名球员': 'Rename player',
   '名称不能为空': 'Name cannot be empty',
+  '正在切换项目，请稍候': 'Switching projects, please wait',
+  '本次审核未保存': 'This review was not saved',
   '操作已取消': 'Action canceled',
   '已有同名球员': 'A player with this name already exists',
   '重命名': 'Rename',

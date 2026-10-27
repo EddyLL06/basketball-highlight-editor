@@ -229,6 +229,7 @@ class _BheMobileAppState extends State<BheMobileApp> {
   }
 
   void _handleSystemBack(BuildContext context) {
+    if (state.projectTransitioning) return;
     if (state.analysing) return;
     if (section != _WorkspaceSection.project) {
       setState(() => section = _WorkspaceSection.project);
@@ -271,6 +272,27 @@ class _BheMobileAppState extends State<BheMobileApp> {
     theme: bheTheme(Brightness.light),
     darkTheme: bheTheme(Brightness.dark),
     themeMode: dark ? ThemeMode.dark : ThemeMode.light,
+    builder: (context, child) => AnimatedBuilder(
+      animation: state,
+      child: child,
+      builder: (context, child) => Stack(children: [
+        AbsorbPointer(
+          absorbing: state.projectTransitioning,
+          child: Opacity(opacity: state.projectTransitioning ? .55 : 1, child: child),
+        ),
+        if (state.projectTransitioning)
+          Positioned(top: 0, left: 0, right: 0, child: SafeArea(
+            child: Material(
+              key: const ValueKey('project-transition-notice'),
+              color: Theme.of(context).colorScheme.surface,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(context.bheText('正在切换项目，请稍候'), textAlign: TextAlign.center),
+              ),
+            ),
+          )),
+      ]),
+    ),
     home: Builder(
       builder: (context) => PopScope<void>(
         canPop: false,
@@ -1274,6 +1296,8 @@ class _ReviewViewState extends State<_ReviewView> {
   bool _stoppingAtCandidateEnd = false;
   bool _seeking = false;
   bool _completionPromptShown = false;
+  Timer? _completionTimer;
+  int _completionGeneration = 0;
   bool _fullscreen = false;
   int _undoRevision = 0;
   int _playerMutationRevision = 0;
@@ -1304,6 +1328,7 @@ class _ReviewViewState extends State<_ReviewView> {
     String? rim,
     String? player,
   }) async {
+    _cancelCompletionPrompt();
     setState(() {
       statusFilter = status ?? statusFilter;
       rimFilter = rim ?? rimFilter;
@@ -1356,7 +1381,7 @@ class _ReviewViewState extends State<_ReviewView> {
     if (!candidates.any((item) => item.id == id)) {
       setState(() { statusFilter = 'all'; rimFilter = 'all'; playerFilter = 'all'; });
     }
-    _completionPromptShown = false;
+    _cancelCompletionPrompt();
     final index = candidates.indexWhere((item) => item.id == id);
     if (index >= 0) unawaited(_select(index));
   }
@@ -1413,6 +1438,7 @@ class _ReviewViewState extends State<_ReviewView> {
   @override
   void dispose() {
     _disposed = true;
+    _cancelCompletionPrompt();
     unawaited(
       SystemChrome.setPreferredOrientations(const [
         DeviceOrientation.portraitUp,
@@ -1916,23 +1942,52 @@ class _ReviewViewState extends State<_ReviewView> {
     if (candidate != null) _reviewAt(candidate.id, selection);
   }
 
+  void _cancelCompletionPrompt() {
+    _completionGeneration++;
+    _completionTimer?.cancel();
+    _completionTimer = null;
+    _completionPromptShown = false;
+  }
+
   ({String id, bool last, Future<bool> saved})? _reviewAt(String id, CandidateSelection selection) {
+    if (state.projectTransitioning) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.bheText('正在切换项目，请稍候'))));
+      return null;
+    }
     final items = candidates;
     final index = items.indexWhere((item) => item.id == id);
     if (index < 0) return null;
+    _cancelCompletionPrompt();
+    final generation = _completionGeneration;
+    final projectId = state.project.id;
     // Choose the next stable ID before the queued edit can change visibility.
     final nextId = index + 1 < items.length ? items[index + 1].id : null;
     final saved = state.toggleCandidate(id, selection);
+    unawaited(saved.then((success) {
+      if (!mounted || generation != _completionGeneration || projectId != state.project.id) return;
+      if (!success) {
+        final current = selected;
+        if (nextId == null || current?.id == nextId) {
+          final restored = candidates.indexWhere((item) => item.id == id);
+          if (restored >= 0) unawaited(_select(restored));
+        }
+        if (state.reviewNotice != '保存失败，请重试') {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.bheText('本次审核未保存'))));
+        }
+        return;
+      }
+      if (nextId != null) return;
+      final revision = state.reviewRevision;
+      _completionTimer = Timer(const Duration(seconds: 5), () {
+        if (mounted && generation == _completionGeneration && revision == state.reviewRevision && !_completionPromptShown) {
+          _completionPromptShown = true;
+          unawaited(_showReviewCompletePrompt(context));
+        }
+      });
+    }));
     if (nextId != null) {
       unawaited(_select(index + 1));
       return (id: nextId, last: false, saved: saved);
-    }
-    if (!_completionPromptShown) {
-      _completionPromptShown = true;
-      final revision = state.reviewRevision;
-      Future<void>.delayed(const Duration(seconds: 5), () {
-        if (mounted && revision == state.reviewRevision) unawaited(_showReviewCompletePrompt(context));
-      });
     }
     return (id: id, last: true, saved: saved);
   }
@@ -2734,109 +2789,128 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
     required int maxValue,
   }) {
     final value = widget.controller.value;
-    return ColoredBox(
-      color: const Color(0xFF111318),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 7, 10, 8),
-        child: Row(
-          children: [
-            _LandscapeIconButton(
-              icon: LucideIcons.rotateCcw,
-              tooltip: context.bheText('重播当前片段'),
-              onPressed: () => widget.onReplay(_candidate),
-            ),
-            _LandscapeIconButton(
-              icon: LucideIcons.chevronLeft,
-              tooltip: '${context.bheText('后退')} 1.5 ${context.bheText('秒')}',
-              onPressed: () => widget.onSeek(-1500),
-            ),
-            _LandscapeIconButton(
-              icon: value.isPlaying ? LucideIcons.pause : LucideIcons.play,
-              tooltip: context.bheText(value.isPlaying ? '暂停' : '播放'),
-              selected: value.isPlaying,
-              onPressed: widget.onToggle,
-            ),
-            _LandscapeIconButton(
-              icon: LucideIcons.chevronRight,
-              tooltip: '${context.bheText('前进')} 1.5 ${context.bheText('秒')}',
-              onPressed: () => widget.onSeek(1500),
-            ),
-            const SizedBox(width: 6),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 700;
+        final controls = <Widget>[
+          _LandscapeIconButton(
+            icon: LucideIcons.rotateCcw,
+            tooltip: context.bheText('重播当前片段'),
+            onPressed: () => widget.onReplay(_candidate),
+          ),
+          _LandscapeIconButton(
+            icon: LucideIcons.chevronLeft,
+            tooltip: '${context.bheText('后退')} 1.5 ${context.bheText('秒')}',
+            onPressed: () => widget.onSeek(-1500),
+          ),
+          _LandscapeIconButton(
+            icon: value.isPlaying ? LucideIcons.pause : LucideIcons.play,
+            tooltip: context.bheText(value.isPlaying ? '暂停' : '播放'),
+            selected: value.isPlaying,
+            onPressed: widget.onToggle,
+          ),
+          _LandscapeIconButton(
+            icon: LucideIcons.chevronRight,
+            tooltip: '${context.bheText('前进')} 1.5 ${context.bheText('秒')}',
+            onPressed: () => widget.onSeek(1500),
+          ),
+          const SizedBox(width: 6),
+          if (!compact)
             Text(
               _formatMs(position),
               style: const TextStyle(color: Colors.white70, fontSize: 11),
             ),
-            Expanded(
-              child: Slider(
-                min: lower.toDouble(),
-                max: maxValue.toDouble(),
-                value: position
-                    .clamp(lower.toDouble(), maxValue.toDouble())
-                    .toDouble(),
-                onChanged: (next) => widget.onSeekTo(next.round()),
-              ),
+          Expanded(
+            child: Slider(
+              min: lower.toDouble(),
+              max: maxValue.toDouble(),
+              value: position
+                  .clamp(lower.toDouble(), maxValue.toDouble())
+                  .toDouble(),
+              onChanged: (next) => widget.onSeekTo(next.round()),
             ),
+          ),
+          if (!compact)
             Text(
               _formatMs(upper - lower),
               style: const TextStyle(color: Colors.white54, fontSize: 11),
             ),
-            const SizedBox(width: 5),
-            _LandscapeIconButton(
-              icon: _autoReplay ? LucideIcons.repeat1 : LucideIcons.repeat,
-              tooltip: context.bheText(_autoReplay ? '关闭循环播放' : '开启循环播放'),
-              selected: _autoReplay,
-              onPressed: () {
-                setState(() => _autoReplay = !_autoReplay);
-                widget.onToggleAutoReplay();
-              },
-            ),
-            PopupMenuButton<double>(
-              tooltip: context.bheText('播放速度'),
-              initialValue: _speed,
-              onSelected: (value) {
-                setState(() => _speed = value);
-                widget.onSpeed(value);
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: .75, child: Text('0.75×')),
-                PopupMenuItem(value: 1, child: Text('1.0×')),
-                PopupMenuItem(value: 1.25, child: Text('1.25×')),
-                PopupMenuItem(value: 1.5, child: Text('1.5×')),
-                PopupMenuItem(value: 2, child: Text('2.0×')),
-              ],
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(
-                  '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 1 : 2)}×',
-                  style: const TextStyle(color: Colors.white70, fontSize: 11),
-                ),
+          const SizedBox(width: 5),
+          _LandscapeIconButton(
+            icon: _autoReplay ? LucideIcons.repeat1 : LucideIcons.repeat,
+            tooltip: context.bheText(_autoReplay ? '关闭循环播放' : '开启循环播放'),
+            selected: _autoReplay,
+            onPressed: () {
+              setState(() => _autoReplay = !_autoReplay);
+              widget.onToggleAutoReplay();
+            },
+          ),
+          PopupMenuButton<double>(
+            tooltip: context.bheText('播放速度'),
+            initialValue: _speed,
+            onSelected: (value) {
+              setState(() => _speed = value);
+              widget.onSpeed(value);
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: .75, child: Text('0.75×')),
+              PopupMenuItem(value: 1, child: Text('1.0×')),
+              PopupMenuItem(value: 1.25, child: Text('1.25×')),
+              PopupMenuItem(value: 1.5, child: Text('1.5×')),
+              PopupMenuItem(value: 2, child: Text('2.0×')),
+            ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 1 : 2)}×',
+                style: const TextStyle(color: Colors.white70, fontSize: 11),
               ),
             ),
-            const SizedBox(width: 7),
-            OutlinedButton.icon(
-              onPressed: () => _reviewCandidate(CandidateSelection.excluded),
-              icon: const Icon(LucideIcons.x, size: 17),
-              label: Text(context.bheText('不选')),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                minimumSize: const Size(78, 38),
-                side: BorderSide(color: Colors.white.withValues(alpha: .28)),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-              ),
+          ),
+        ];
+        final decisions = <Widget>[
+          const SizedBox(width: 7),
+          OutlinedButton.icon(
+            onPressed: () => _reviewCandidate(CandidateSelection.excluded),
+            icon: const Icon(LucideIcons.x, size: 17),
+            label: Text(context.bheText('不选')),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              minimumSize: const Size(78, 38),
+              side: BorderSide(color: Colors.white.withValues(alpha: .28)),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
             ),
-            const SizedBox(width: 6),
-            FilledButton.icon(
-              onPressed: () => _reviewCandidate(CandidateSelection.included),
-              icon: const Icon(LucideIcons.check, size: 17),
-              label: Text(context.bheText('选中')),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(82, 38),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-              ),
+          ),
+          const SizedBox(width: 6),
+          FilledButton.icon(
+            onPressed: () => _reviewCandidate(CandidateSelection.included),
+            icon: const Icon(LucideIcons.check, size: 17),
+            label: Text(context.bheText('选中')),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(82, 38),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
             ),
-          ],
-        ),
-      ),
+          ),
+        ];
+        return ColoredBox(
+          color: const Color(0xFF111318),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 7, 10, 8),
+            child: compact
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(children: controls),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: decisions,
+                      ),
+                    ],
+                  )
+                : Row(children: [...controls, ...decisions]),
+          ),
+        );
+      },
     );
   }
 }
@@ -3915,6 +3989,7 @@ Future<void> _showPlayerPicker(
   MobileAppState state,
   Candidate candidate,
 ) async {
+  final session = state.projectSession;
   final value = await showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
@@ -3926,12 +4001,12 @@ Future<void> _showPlayerPicker(
       initialPlayer: candidate.player,
     ),
   );
-  if (value == null || !context.mounted) return;
+  if (value == null || !context.mounted || session != state.projectSession) return;
   final normalized = value.trim();
   if (normalized.isEmpty) {
     await state.setCandidatePlayer(candidate.id, null);
   } else {
-    if (!await state.addPlayer(normalized)) return;
+    if (!await state.addPlayer(normalized) || session != state.projectSession) return;
     await state.setCandidatePlayer(candidate.id, normalized);
   }
 }

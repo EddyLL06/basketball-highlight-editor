@@ -17,23 +17,46 @@ class _PlayerTagSheet extends StatefulWidget {
 class _PlayerTagSheetState extends State<_PlayerTagSheet> {
   late final TextEditingController _input;
   late List<String> _players;
+  late final int _session;
   String? _selected;
   bool _creating = false;
   bool _saving = false;
   bool _saveFailed = false;
   bool _failureHasDiagnostic = false;
+  DiagnosticErrorRecord? _failureRecord;
   String _failureMessage = '保存失败，请重试';
 
   @override
   void initState() {
     super.initState();
+    _session = widget.state.projectSession;
+    widget.state.addListener(_onProjectState);
     _selected = widget.initialPlayer;
     _players = [...widget.players];
     _input = TextEditingController();
   }
 
+  void _onProjectState() {
+    if (!mounted || _saving || widget.state.projectSession == _session) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          !_saving &&
+          widget.state.projectSession != _session &&
+          ModalRoute.of(context)?.isCurrent == true) {
+        Navigator.of(context).pop();
+      }
+    });
+  }
+
+  bool _closeIfStale() {
+    if (widget.state.projectSession == _session) return false;
+    Navigator.of(context).pop();
+    return true;
+  }
+
   @override
   void dispose() {
+    widget.state.removeListener(_onProjectState);
     _input.dispose();
     super.dispose();
   }
@@ -81,6 +104,7 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
       final previousDiagnostic = widget.state.diagnosticError;
       final success = await widget.state.removePlayer(player);
       if (!mounted) return;
+      if (_closeIfStale()) return;
       setState(() {
         _saving = false;
         _saveFailed = !success;
@@ -88,6 +112,9 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
           previousDiagnostic,
           widget.state.diagnosticError,
         );
+        _failureRecord = _failureHasDiagnostic
+            ? widget.state.diagnosticError
+            : null;
         _failureMessage = _failureHasDiagnostic ? '保存失败，请重试' : '操作已取消';
       });
       if (!success) return;
@@ -109,6 +136,7 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
     final previousDiagnostic = widget.state.diagnosticError;
     final success = await widget.state.renamePlayer(player, name);
     if (!mounted) return;
+    if (_closeIfStale()) return;
     setState(() {
       _saving = false;
       _saveFailed = !success;
@@ -116,6 +144,9 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
         previousDiagnostic,
         widget.state.diagnosticError,
       );
+      _failureRecord = _failureHasDiagnostic
+          ? widget.state.diagnosticError
+          : null;
       _failureMessage = _failureHasDiagnostic
           ? '保存失败，请重试'
           : widget.state.project.players.contains(name)
@@ -162,7 +193,7 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
                     : TextButton(
                         onPressed: () => showMobileDiagnostics(
                           context,
-                          error: widget.state.diagnosticError,
+                          error: _failureRecord,
                         ),
                         child: Text(context.bheText('反馈')),
                       ),
