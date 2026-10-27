@@ -316,18 +316,20 @@ class MobileAppState extends ChangeNotifier {
     }
   }
 
-  Future<bool> _matchesProjectVideo() async {
+  Future<bool> _matchesProjectVideo({bool Function()? applyResult}) async {
     final expected = project.video;
     if (expected == null) return false;
     try {
       await _inspectVideo(File(expected.path), expected: expected);
-      if (project.video == expected) {
+      if (project.video == expected && (applyResult?.call() ?? true)) {
         videoSourceFailure = null;
         errorMessage = null;
       }
       return true;
     } on Object catch (error) {
-      if (project.video == expected) _recordVideoFailure(error, expected.path);
+      if (project.video == expected && (applyResult?.call() ?? true)) {
+        _recordVideoFailure(error, expected.path);
+      }
       return false;
     }
   }
@@ -1173,25 +1175,35 @@ class MobileAppState extends ChangeNotifier {
     progressMessage = '正在检查视频';
     analysing = true;
     errorMessage = null;
-    project = project.copyWith(candidates: const []);
-    project = project.copyWith(
-      lastAnalysisStatus: 'running',
-      lastAnalysisProgressPercent: 0,
-      lastAnalysisMessage: progressMessage,
-    );
     final stopwatch = Stopwatch()..start();
     final generation = ++_analysisGeneration;
     analysisStartedAt = DateTime.now();
     notifyListeners();
-    unawaited(_queueSave());
     try {
-      final videoMatches = await _matchesProjectVideo().timeout(
-        const Duration(seconds: 45),
-        onTimeout: () => false,
-      );
+      var checkingInput = true;
+      final videoMatches =
+          await _matchesProjectVideo(
+            applyResult: () =>
+                checkingInput && generation == _analysisGeneration,
+          ).timeout(
+            const Duration(seconds: 45),
+            onTimeout: () {
+              checkingInput = false;
+              return false;
+            },
+          );
+      checkingInput = false;
+      if (generation != _analysisGeneration) return;
       if (!videoMatches) {
         throw const MobileAnalysisException('视频检查未通过或耗时过长，请重新选择可正常播放的原视频。');
       }
+      project = project.copyWith(
+        candidates: const [],
+        lastAnalysisStatus: 'running',
+        lastAnalysisProgressPercent: 0,
+        lastAnalysisMessage: progressMessage,
+      );
+      await _queueSave();
       if (generation != _analysisGeneration) return;
       progress = 0.02;
       progressMessage = '正在准备本地分析';
@@ -1234,7 +1246,7 @@ class MobileAppState extends ChangeNotifier {
     } on Object catch (error) {
       if (generation != _analysisGeneration) return;
       stage = AnalysisStage.failed;
-      errorMessage = error.toString();
+      errorMessage = videoSourceFailure?.message ?? error.toString();
       project = project.copyWith(
         lastAnalysisStatus: 'failed',
         lastAnalysisMessage: errorMessage,
