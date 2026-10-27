@@ -14,6 +14,7 @@ import '../feedback/feedback_dialog.dart';
 import '../../components/cs_button.dart';
 import '../../components/cs_empty_state.dart';
 import '../../components/cs_progress_track.dart';
+import 'candidate_status_labels.dart';
 import '../../core/video_orientation.dart';
 import '../../providers/player_groups_provider.dart';
 import '../../providers/project_state.dart';
@@ -5926,6 +5927,12 @@ class _CandidateRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
     final theme = Theme.of(context);
+    final adjusted = _hasAdjustedRange(candidate);
+    final rimStatus = _rimCheckStatus(candidate);
+    final statusLabel = excluded
+        ? (_isAutoExcluded(candidate) ? '自动排除' : '已排除')
+        : rimStatus == 'made' ? '通过' : rimStatus == 'unsure' ? '未确认' : null;
+    final statusColor = excluded ? c.error : rimStatus == 'made' ? c.success : c.warning;
     return Semantics(
       button: true,
       selected: selected,
@@ -6054,75 +6061,16 @@ class _CandidateRow extends StatelessWidget {
                                             ),
                                       ),
                                     ),
-                                    if (_hasAdjustedRange(candidate)) ...[
+                                    if (adjusted || overlapsPrevious || statusLabel != null) ...[
                                       const SizedBox(width: 4),
-                                      Tooltip(
-                                        key: ValueKey(
-                                          'adjusted-range-${candidate['id']}',
-                                        ),
-                                        message: context.bheText('已调整时长'),
-                                        child: Icon(
-                                          Icons.tune_rounded,
-                                          size: 13,
-                                          color: c.textTertiary,
-                                        ),
-                                      ),
-                                    ],
-                                    if (overlapsPrevious) ...[
-                                      const SizedBox(width: 4),
-                                      Tooltip(
-                                        key: ValueKey(
-                                          'overlapping-${candidate['id']}',
-                                        ),
-                                        message: context.bheText('与上一段重叠'),
-                                        child: Icon(
-                                          Icons.join_inner_rounded,
-                                          size: 13,
-                                          color: c.textTertiary,
-                                        ),
-                                      ),
-                                    ],
-                                    if (excluded) ...[
-                                      const SizedBox(width: Spacing.xs),
                                       Flexible(
-                                        child: Text(
-                                          context.bheText(
-                                            _isAutoExcluded(candidate)
-                                                ? '自动排除'
-                                                : '已排除',
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.labelSmall
-                                              ?.copyWith(color: c.error),
-                                        ),
-                                      ),
-                                    ],
-                                    if (!excluded &&
-                                        _rimCheckStatus(candidate) ==
-                                            'made') ...[
-                                      const SizedBox(width: Spacing.xs),
-                                      Flexible(
-                                        child: Text(
-                                          context.bheText('通过'),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.labelSmall
-                                              ?.copyWith(color: c.success),
-                                        ),
-                                      ),
-                                    ],
-                                    if (!excluded &&
-                                        _rimCheckStatus(candidate) ==
-                                            'unsure') ...[
-                                      const SizedBox(width: Spacing.xs),
-                                      Flexible(
-                                        child: Text(
-                                          context.bheText('未确认'),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.labelSmall
-                                              ?.copyWith(color: c.warning),
+                                        flex: 4,
+                                        child: CandidateStatusLabels(
+                                          candidateId: candidate['id'].toString(),
+                                          adjusted: adjusted,
+                                          overlapsPrevious: overlapsPrevious,
+                                          statusLabel: statusLabel,
+                                          statusColor: statusColor,
                                         ),
                                       ),
                                     ],

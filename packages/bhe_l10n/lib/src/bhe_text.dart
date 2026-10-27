@@ -379,6 +379,8 @@ String _englishDuration(String value) => value
     .trim();
 
 const _englishText = <String, String>{
+  '已调整': 'Edited',
+  '重叠': 'Overlap',
   '检查分析引擎': 'Checking analysis engine',
   '引擎自检': 'Engine check',
   '分析引擎在这台电脑上无法启动（运行库初始化失败）。请先安装最新的 VC++ 运行库后重启电脑，仍然不行请把 CPU 型号和诊断信息发给我们。':
