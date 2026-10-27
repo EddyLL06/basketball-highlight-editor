@@ -195,6 +195,12 @@ void main() {
             find.text(language == 'zh' ? '诊断与复制' : 'Diagnostics and copy'),
             findsOneWidget,
           );
+          expect(
+            find.textContaining(
+              language == 'zh' ? '强制停止 BHE' : 'force stop BHE',
+            ),
+            findsOneWidget,
+          );
           final diagnostics = find.text(
             language == 'zh' ? '诊断与复制' : 'Diagnostics and copy',
           );

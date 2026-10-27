@@ -507,16 +507,19 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   void _markNativeUncertain(
     PreparedNativeAnalysis run, {
     bool cancellationAcknowledged = false,
+    DiagnosticErrorRecord? diagnostic,
   }) {
     _uncertainNativeRun = run;
     uncertainAnalysisStatus = null;
-    uncertainAnalysisDiagnostic = cancellationAcknowledged
-        ? null
-        : MobileDiagnostics.instance.error(
-            TimeoutException('上次分析尚未确认停止'),
-            StackTrace.current,
-            operation: 'analysis',
-          );
+    uncertainAnalysisDiagnostic =
+        diagnostic ??
+        (cancellationAcknowledged
+            ? null
+            : MobileDiagnostics.instance.error(
+                TimeoutException('上次分析尚未确认停止'),
+                StackTrace.current,
+                operation: 'analysis',
+              ));
     run.settled.then((_) async {
       // The result can precede Android worker cleanup, so verify native state.
       var attempt = 0;
@@ -2898,9 +2901,18 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           _analysisCancelIntent = priorCancelIntent;
         }
         recordDiagnosticFailure(error, stack, operation: 'analysis');
+        if (nativeRun != null && nativeRun.dispatched) {
+          if (identical(_uncertainNativeRun, nativeRun)) {
+            uncertainAnalysisDiagnostic = diagnosticError;
+          } else {
+            _markNativeUncertain(nativeRun, diagnostic: diagnosticError);
+          }
+        }
         final run = _waitingNativeRun;
         if (error is TimeoutException && run != null) {
-          _markNativeUncertain(run);
+          if (!identical(_uncertainNativeRun, run)) {
+            _markNativeUncertain(run, diagnostic: diagnosticError);
+          }
           final waiting = _analysisNativeWait;
           if (waiting != null && !waiting.isCompleted) waiting.complete();
           _analysisNativeWait = null;
