@@ -1823,6 +1823,7 @@ def test_cancel_live_job_reports_cancelling_until_worker_stops(tmp_path: Path):
 def test_unexpected_analysis_error_is_persisted_as_failed(tmp_path: Path, monkeypatch):
     project_root = tmp_path / "project"
     service = EngineService()
+    monkeypatch.setattr(service, "_ensure_detector_ready", lambda *args, **kwargs: None)
     service.handle("create_project", {"name": "测试项目", "root_path": str(project_root)})
     store = ProjectStore(project_root)
     source = tmp_path / "source.mp4"
@@ -1865,6 +1866,7 @@ def test_unexpected_analysis_error_is_persisted_as_failed(tmp_path: Path, monkey
 def _analysis_fixture(tmp_path: Path):
     project_root = tmp_path / "project"
     service = EngineService()
+    service._ensure_detector_ready = lambda *args, **kwargs: None
     service.handle("create_project", {"name": "分析闭环", "root_path": str(project_root)})
     store = ProjectStore(project_root)
     source = tmp_path / "source.mp4"

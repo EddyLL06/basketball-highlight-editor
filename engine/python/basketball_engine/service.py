@@ -41,6 +41,8 @@ from .adapters.export import (
     trajectory_points,
     validate_output_file,
 )
+from .adapters.runtime_preflight import DetectorPreflight, runtime_error
+from basketball_highlight.runtime_errors import is_runtime_failure
 from .protocol import ProtocolError
 from .storage import ProjectStore, new_id
 from .media_tools import resolve_media_tool
@@ -62,6 +64,7 @@ class EngineService:
         self._job_processes: dict[str, set[subprocess.Popen]] = {}
         self._store_lock = threading.Lock()
         self._job_lock = threading.Lock()
+        self._detector_preflight = DetectorPreflight()
 
     def shutdown(self, timeout: float = 5.0) -> None:
         with self._job_lock:
@@ -676,6 +679,12 @@ class EngineService:
 
     _validated_source = _validated_original_source
 
+    def _ensure_detector_ready(self, model_path, device, cancel_check=None, process_callback=None):
+        return self._detector_preflight.ensure(
+            Path(__file__).resolve().parents[3], model_path, device,
+            cancel_check=cancel_check, process_callback=process_callback,
+        )
+
     def suggest_roi(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Find a stable hoop in a short full-frame scan and suggest a ball ROI."""
         store = self._require_store(payload)
@@ -714,6 +723,8 @@ class EngineService:
         ):
             raise ProtocolError("INVALID_REQUEST", "自动 ROI 参数必须在有效范围内")
 
+        device = str(payload.get("device") or "auto").strip().lower()
+        self._ensure_detector_ready(model_path, device)
         output = store.root / "artifacts" / "detections" / f"roi_suggestion_{video_id}.json"
         script = repo_root / "scripts" / "detect_auto_roi.py"
         command = [
@@ -756,6 +767,10 @@ class EngineService:
             subprocess.TimeoutExpired,
             json.JSONDecodeError,
         ) as exc:
+            details = f"{exc}\n{getattr(exc, 'stderr', '') or ''}"
+            if is_runtime_failure(details):
+                self._detector_preflight.invalidate()
+                raise runtime_error(details) from exc
             raise ProtocolError("ROI_DETECTION_FAILED", f"自动 ROI 检测失败: {exc}") from exc
 
         if not result.get("success") or not isinstance(result.get("roi"), dict):
@@ -1521,6 +1536,17 @@ class EngineService:
                 f"roi_source={calibration.get('source', 'manual')} net_roi={net_roi is not None} "
                 f"proxy={proxy_width}x{proxy_height}@{proxy_fps:g}fps"
             )
+            cancel_event = self._job_cancel_events.get(job_id)
+            last_stage["name"] = "engine_preflight"
+            store.update_job(job_id, state="running", stage="engine_preflight", progress=0.01)
+            log_diagnostic(f"{label} stage=engine_preflight progress=0.01 elapsed={elapsed()}")
+            preflight_started = time.perf_counter()
+            self._ensure_detector_ready(
+                model_path, device,
+                cancel_check=cancel_event.is_set if cancel_event else None,
+                process_callback=lambda process: self._set_job_process(job_id, process),
+            )
+            preflight_ms = round((time.perf_counter() - preflight_started) * 1000)
             artifact_root = store.root / "artifacts"
             run_root = artifact_root / "detections" / f"{video_id}_{analysis_key}"
             proxy_video = artifact_root / "proxies" / f"{video_id}_{analysis_key}.mp4"
@@ -1586,7 +1612,7 @@ class EngineService:
             store.update_job(
                 job_id,
                 state="running",
-                stage="validate_input",
+                stage="engine_preflight",
                 progress=0.01,
                 checkpoint=checkpoint,
             )
@@ -1756,6 +1782,7 @@ class EngineService:
                 cancel_event=cancel_event,
             )
             stage_timings_ms = dict(pipeline.get("stage_timings_ms", {}))
+            stage_timings_ms["engine_preflight"] = preflight_ms
             stage_timings_ms["prepare_review_previews"] = round(
                 (time.perf_counter() - preview_started) * 1000
             )
@@ -1808,6 +1835,8 @@ class EngineService:
                 checkpoint=checkpoint_with_elapsed(),
             )
         except ProtocolError as exc:
+            if exc.code == "ENGINE_RUNTIME_UNAVAILABLE":
+                self._detector_preflight.invalidate()
             log_end("failed", exc.code, exc.message)
             store.update_job(
                 job_id,
@@ -1893,6 +1922,9 @@ class EngineService:
             except PipelineCancelled:
                 raise
             except Exception as exc:
+                if isinstance(exc, ProtocolError) and exc.code == "ENGINE_RUNTIME_UNAVAILABLE":
+                    self._detector_preflight.invalidate()
+                    log_diagnostic(f"analysis job={job_id} verify_rim_crossing: {exc.message}")
                 # 复核失败不能丢掉整次分析:候选保持人工审核。
                 pipeline["logs"].append(f"verify_rim_crossing: {exc}")
                 output = None

@@ -18,6 +18,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from .runtime_errors import DetectorRuntimeUnavailable, is_runtime_failure
+
 SUPPORTED_DEVICES = ("auto", "cpu", "cuda", "mps", "dml", "coreml")
 
 # 进程内选定的后端。脚本先 select_device() 再 load_detector(),
@@ -205,7 +207,7 @@ def max_batch_for(device: str) -> int:
     return {"dml": 1, "coreml": 1, "cpu": 8, "cuda": 16, "mps": 8}.get(device, 8)
 
 
-def load_detector(
+def _load_detector(
     model_path: str | Path,
     device: str | None = None,
     **kwargs: Any,
@@ -269,7 +271,7 @@ def load_detector(
 
     try:
         from ultralytics import YOLO
-    except OSError as error:
+    except (ImportError, OSError) as error:
         # torch 的 DLL 起不来时，CPU 改走 ORT，检测结果和 .pt 一致。
         onnx_path = onnx_path_for(path)
         if target != "cpu" or not onnx_path.is_file():
@@ -283,6 +285,19 @@ def load_detector(
 
     _remember(target if target in {"cuda", "mps"} else "cpu")
     return YOLO(str(path))
+
+
+def load_detector(model_path, device=None, **kwargs):
+    try:
+        return _load_detector(model_path, device, **kwargs)
+    except (FileNotFoundError, PermissionError):
+        raise
+    except (ImportError, OSError) as exc:
+        raise DetectorRuntimeUnavailable(str(exc)) from exc
+    except Exception as exc:
+        if is_runtime_failure(str(exc)):
+            raise DetectorRuntimeUnavailable(str(exc)) from exc
+        raise
 
 
 def backend_report(model_path: str | Path | None = None) -> dict[str, Any]:

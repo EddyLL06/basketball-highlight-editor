@@ -18,6 +18,7 @@ _SRC_PATH = _RUNTIME_ROOT / "src"
 if _SRC_PATH.is_dir() and str(_SRC_PATH) not in sys.path:
     sys.path.insert(0, str(_SRC_PATH))
 
+from basketball_highlight.runtime_errors import is_runtime_failure
 from basketball_highlight.review_reason import suggest_review_reasons
 from basketball_highlight.rim_check import (
     AUTO_REVIEW_REASON,
@@ -502,6 +503,10 @@ def run_pipeline(
                 raise PipelineCancelled("JOB_CANCELLED")
             if process.returncode != 0:
                 details = (stderr or stdout or "").strip()
+                if is_runtime_failure(details):
+                    from .runtime_preflight import runtime_error
+
+                    raise runtime_error(details)
                 if len(details) > 1200:
                     details = details[-1200:]
                     # 从整行开始：硬切会让第一行只剩半个词，界面只显示第一行。

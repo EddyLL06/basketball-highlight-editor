@@ -38,6 +38,7 @@ def _linked_video(tmp_path: Path):
 
 def test_failed_analysis_logs_the_video_and_the_stage_it_failed_in(tmp_path: Path, monkeypatch, capsys):
     service, project_root, video, model = _linked_video(tmp_path)
+    monkeypatch.setattr(service, "_ensure_detector_ready", lambda *args, **kwargs: None)
 
     def fail_in_proxy(commands, output, on_stage, **kwargs):
         on_stage("prepare_proxy", 0.02)
