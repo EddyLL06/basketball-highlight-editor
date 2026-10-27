@@ -39,6 +39,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     this.videoProbe,
     this.exportCancelTimeout = const Duration(seconds: 5),
     this.exportDrainTimeout = const Duration(seconds: 30),
+    this.analysisStartupTimeout = const Duration(seconds: 60),
+    this.analysisCancelTimeout = const Duration(seconds: 6),
   }) : analysisEngine = analysisEngine ?? NativeAnalysisEngine(),
        exportEngine = exportEngine ?? NativeMediaExportEngine(),
        _providedVideoStore = videoSourceStore {
@@ -50,6 +52,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   final Future<VideoInfo> Function(File)? videoProbe;
   final Duration exportCancelTimeout;
   final Duration exportDrainTimeout;
+  final Duration analysisStartupTimeout;
+  final Duration analysisCancelTimeout;
   late final VideoSourceStore _videoStore =
       _providedVideoStore ??
       VideoSourceStore(
@@ -491,12 +495,27 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   int _analysisCancelIntent = 0;
   Future<void>? _analysisLaunchBarrier;
   Completer<void>? _analysisNativeWait;
+  Future<void>? _analysisCancelPending;
+  PreparedNativeAnalysis? _waitingNativeRun;
+  PreparedNativeAnalysis? _uncertainNativeRun;
+
+  void _markNativeUncertain(PreparedNativeAnalysis run) {
+    _uncertainNativeRun = run;
+    run.settled.then((_) {
+      if (identical(_uncertainNativeRun, run)) {
+        _uncertainNativeRun = null;
+        if (!_disposed) notifyListeners();
+      }
+    });
+  }
+
   int _videoPreparationGeneration = 0;
   DateTime? analysisStartedAt;
 
   bool get canStartAnalysis =>
       hasVideo &&
       !analysing &&
+      _uncertainNativeRun == null &&
       !preparingVideo &&
       !relinkingVideo &&
       !exporting &&
@@ -2388,6 +2407,11 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         videoPreparationGeneration == intentVideoGeneration &&
         !projectTransitioning;
     if (analysing || !rosterCurrent()) return;
+    if (_uncertainNativeRun != null) {
+      errorMessage = '上次分析尚未确认停止，请稍候再试。';
+      notifyListeners();
+      return;
+    }
     if (!hasVideo || project.hoopRoi == null || project.netRoi == null) {
       errorMessage = '请先选择视频并设置投篮分析区、篮网检测区。';
       notifyListeners();
@@ -2489,19 +2513,42 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         nativeIterator = iterator;
         final cancelled = Completer<void>();
         _analysisNativeWait = cancelled;
+        _waitingNativeRun = prepared;
         bool hasUpdate;
         try {
-          hasUpdate = await Future.any([
-            iterator.moveNext(),
-            cancelled.future.then((_) => false),
-          ]);
+          try {
+            hasUpdate = await Future.any([
+              iterator.moveNext(),
+              cancelled.future.then((_) => false),
+            ]).timeout(analysisStartupTimeout);
+          } on TimeoutException {
+            _markNativeUncertain(prepared);
+            unawaited(
+              engine
+                  .cancelPrepared(prepared)
+                  .timeout(analysisCancelTimeout)
+                  .catchError((Object error, StackTrace stack) {
+                    MobileDiagnostics.instance.error(
+                      error,
+                      stack,
+                      operation: 'analysis.cancel',
+                    );
+                  }),
+            );
+            unawaited(iterator.cancel());
+            throw const MobileAnalysisException('分析启动超时，正在尝试停止，请检查设备后重试。');
+          }
+          final pendingCancel = _analysisCancelPending;
+          if (pendingCancel != null) await pendingCancel;
         } finally {
           if (identical(_analysisNativeWait, cancelled)) {
             _analysisNativeWait = null;
           }
+          if (identical(_waitingNativeRun, prepared)) _waitingNativeRun = null;
         }
         if (!hasUpdate || !intentCurrent()) {
-          if (!prepared.cancelled) {
+          if (!prepared.cancelled &&
+              !identical(_uncertainNativeRun, prepared)) {
             try {
               await engine.cancelPrepared(prepared);
             } on Object catch (error, stack) {
@@ -2726,8 +2773,27 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     }
   }
 
-  Future<void> cancelAnalysis() async {
-    if (!analysing) return;
+  Future<void> cancelAnalysis() {
+    final pending = _analysisCancelPending;
+    if (pending != null) return pending;
+    if (!analysing) return Future.value();
+    final completion = Completer<void>();
+    final result = completion.future;
+    _analysisCancelPending = result;
+    () async {
+      try {
+        await _cancelAnalysisOnce();
+      } finally {
+        if (identical(_analysisCancelPending, result)) {
+          _analysisCancelPending = null;
+        }
+        completion.complete();
+      }
+    }();
+    return result;
+  }
+
+  Future<void> _cancelAnalysisOnce() async {
     final priorCancelIntent = _analysisCancelIntent;
     final cancelIntent = ++_analysisCancelIntent;
     final generation = _analysisGeneration;
@@ -2735,7 +2801,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     try {
       final launch = _analysisLaunchBarrier;
       if (launch != null) await launch;
-      await analysisEngine.cancel();
+      await analysisEngine.cancel().timeout(analysisCancelTimeout);
     } on Object catch (error, stack) {
       if (generation == _analysisGeneration &&
           project.id == projectId &&
@@ -2744,6 +2810,19 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           _analysisCancelIntent = priorCancelIntent;
         }
         recordDiagnosticFailure(error, stack, operation: 'analysis');
+        final run = _waitingNativeRun;
+        if (error is TimeoutException && run != null) {
+          _markNativeUncertain(run);
+          final waiting = _analysisNativeWait;
+          if (waiting != null && !waiting.isCompleted) waiting.complete();
+          _analysisNativeWait = null;
+          _analysisGeneration++;
+          analysing = false;
+          analysisStartedAt = null;
+          stage = AnalysisStage.failed;
+          progressMessage = '无法确认分析已停止，请稍候再试。';
+          errorMessage = progressMessage;
+        }
         notifyListeners();
       }
       return;

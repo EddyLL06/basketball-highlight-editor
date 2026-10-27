@@ -14,12 +14,19 @@ class PreparedNativeAnalysis {
   String modelPath;
   bool cancelled = false;
   bool dispatched = false;
+  Future<void>? cancelPending;
+  final Completer<void> _settled = Completer<void>();
+  Future<void> get settled => _settled.future;
 }
 
 class NativeAnalysisEngine implements MobileAnalysisEngine {
-  NativeAnalysisEngine({this.modelPreparer});
+  NativeAnalysisEngine({
+    this.modelPreparer,
+    this.cancelTimeout = const Duration(seconds: 5),
+  });
 
   final Future<String> Function()? modelPreparer;
+  final Duration cancelTimeout;
 
   static const _autoRoiDurationMs = 20 * 1000;
   static const _autoRoiMaxSamples = 12;
@@ -243,6 +250,14 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
         'dedupeMs': 2000,
       },
     );
+    resultFuture.then<void>(
+      (_) {
+        if (!run._settled.isCompleted) run._settled.complete();
+      },
+      onError: (Object _, StackTrace _) {
+        if (!run._settled.isCompleted) run._settled.complete();
+      },
+    );
     return _consumeAnalysis(
       run,
       resultFuture,
@@ -273,6 +288,14 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
         } else {
           result = next as Map<Object?, Object?>?;
           break;
+        }
+      }
+      final pending = run.cancelPending;
+      if (pending != null) {
+        try {
+          await pending;
+        } on Object {
+          /* cancel() reports the failure */
         }
       }
       if (run.cancelled) return;
@@ -344,14 +367,12 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       return file.path;
     }
     await file.parent.create(recursive: true);
-    final temporary = File(
-      '${file.path}.${DateTime.now().microsecondsSinceEpoch}.tmp',
-    );
+    final temporaryDirectory = await file.parent.createTemp('.bball_model-');
+    final temporary = File('${temporaryDirectory.path}/model.tmp');
     const chunkSize = 1024 * 1024;
     final stopwatch = Stopwatch()..start();
     IOSink? output;
     try {
-      if (await temporary.exists()) await temporary.delete();
       output = temporary.openWrite();
       for (var offset = 0; offset < bytes.length; offset += chunkSize) {
         if (isCancelled?.call() ?? false) {
@@ -377,7 +398,9 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       await temporary.rename(file.path);
     } finally {
       await output?.close();
-      if (await temporary.exists()) await temporary.delete();
+      if (await temporaryDirectory.exists()) {
+        await temporaryDirectory.delete(recursive: true);
+      }
     }
     return file.path;
   }
@@ -390,14 +413,30 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
   Future<void> cancel() async {
     final run = _activeRun;
     if (run == null) return;
-    run.cancelled = true;
-    if (!run.dispatched) return;
-    try {
-      await _channel.invokeMethod<void>('cancelAnalysis');
-    } on MissingPluginException {
+    if (!run.dispatched) {
+      run.cancelled = true;
       return;
+    }
+    final existing = run.cancelPending;
+    if (existing != null) return existing;
+    final request = _cancelDispatched(run);
+    run.cancelPending = request;
+    try {
+      await request;
+    } finally {
+      if (identical(run.cancelPending, request)) run.cancelPending = null;
+    }
+  }
+
+  Future<void> _cancelDispatched(PreparedNativeAnalysis run) async {
+    try {
+      await _channel
+          .invokeMethod<void>('cancelAnalysis')
+          .timeout(cancelTimeout);
+      run.cancelled = true;
+    } on MissingPluginException {
+      run.cancelled = true;
     } on PlatformException catch (error, stack) {
-      if (identical(_activeRun, run)) run.cancelled = false;
       MobileDiagnostics.instance.error(
         error,
         stack,

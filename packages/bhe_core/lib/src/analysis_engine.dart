@@ -34,6 +34,10 @@ class AnalysisFrame {
   final List<int> imageBytes;
 }
 
+/// Non-native implementations are subscribed after the existing review is
+/// cleared. A cancellable asynchronous preparation that must preserve reviews
+/// needs an explicit preparation/start handshake; mobile state currently
+/// implements that handshake for NativeAnalysisEngine.
 abstract interface class MobileAnalysisEngine {
   Stream<AnalysisProgress> analyze({
     required VideoInfo video,
