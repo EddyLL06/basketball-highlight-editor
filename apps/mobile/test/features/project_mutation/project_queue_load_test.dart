@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:bhe_core/bhe_core.dart';
+import 'package:bhe_mobile/features/review_undo/review_action_result.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -55,7 +56,10 @@ void main() {
         final peak = f.state.pendingProjectMutations;
         expect(peak, 30);
         release.complete();
-        expect(await Future.wait(writes), everyElement(isTrue));
+        expect(
+          await Future.wait(writes),
+          everyElement(ReviewActionResult.changed),
+        );
         clock.stop();
         expect(f.state.pendingProjectMutations, 0);
         final disk = const ProjectPackageCodec().decode(

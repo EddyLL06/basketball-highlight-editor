@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:bhe_core/bhe_core.dart';
+import 'package:bhe_mobile/features/review_undo/review_action_result.dart';
 import 'package:bhe_mobile/features/diagnostics/mobile_diagnostics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
@@ -492,13 +493,19 @@ Future<void> main() async {
                   : CandidateSelection.excluded,
             );
             if (!fail) {
-              check(ok, 'selection expected success');
+              check(
+                ok == ReviewActionResult.changed,
+                'selection expected success',
+              );
               m.cs[id]!
                 ..selection = target
                 ..reviewed = true;
               m.historyAdd('selection', old);
             } else {
-              check(!ok, 'failed selection returned success');
+              check(
+                ok == ReviewActionResult.rejected,
+                'failed selection returned success',
+              );
             }
           } else if (op == 1 && canCandidate) {
             final c = m.cs[id]!,

@@ -1949,7 +1949,7 @@ class _ReviewViewState extends State<_ReviewView> {
     _completionPromptShown = false;
   }
 
-  ({String id, bool last, Future<bool> saved})? _reviewAt(String id, CandidateSelection selection) {
+  ({String id, bool last, Future<ReviewActionResult> saved})? _reviewAt(String id, CandidateSelection selection) {
     if (state.projectTransitioning) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.bheText('正在切换项目，请稍候'))));
       return null;
@@ -1963,9 +1963,9 @@ class _ReviewViewState extends State<_ReviewView> {
     // Choose the next stable ID before the queued edit can change visibility.
     final nextId = index + 1 < items.length ? items[index + 1].id : null;
     final saved = state.toggleCandidate(id, selection);
-    unawaited(saved.then((success) {
+    unawaited(saved.then((result) {
       if (!mounted || generation != _completionGeneration || projectId != state.project.id) return;
-      if (!success) {
+      if (result == ReviewActionResult.rejected) {
         final current = selected;
         if (nextId == null || current?.id == nextId) {
           final restored = candidates.indexWhere((item) => item.id == id);
@@ -2385,7 +2385,7 @@ class _FullscreenReviewPage extends StatefulWidget {
   final ValueChanged<int> onSeek;
   final ValueChanged<int> onSeekTo;
   final Future<void> Function(int index) onSelect;
-  final ({String id, bool last, Future<bool> saved})? Function(String id, CandidateSelection selection) onReview;
+  final ({String id, bool last, Future<ReviewActionResult> saved})? Function(String id, CandidateSelection selection) onReview;
   final List<Candidate> Function() currentCandidates;
   final VoidCallback onExit;
   final VoidCallback onToggleAnnotations;
@@ -2477,8 +2477,8 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
       _selectedId = next.id;
     });
     if (next.last) {
-      unawaited(next.saved.then((saved) {
-        if (mounted && saved && widget.currentCandidates().isEmpty) widget.onExit();
+      unawaited(next.saved.then((result) {
+        if (mounted && result != ReviewActionResult.rejected && widget.currentCandidates().isEmpty) widget.onExit();
       }));
     }
   }

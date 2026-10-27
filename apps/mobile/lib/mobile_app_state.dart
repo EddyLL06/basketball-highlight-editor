@@ -14,6 +14,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 
 import 'features/review_undo/review_history.dart';
+import 'features/review_undo/review_action_result.dart';
+
+export 'features/review_undo/review_action_result.dart';
 import 'features/project_mutation/project_mutation_queue.dart';
 import 'features/project_mutation/analysis_candidate_merge.dart';
 import 'features/video_source/project_paths.dart';
@@ -186,18 +189,20 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   String? lastPlayerOldName;
   String? lastPlayerNewName;
 
-  Future<bool> _changeReview({
+  Future<ReviewActionResult> _changeReviewResult({
     required ReviewChange kind,
     required String focusId,
     required String notice,
     required List<Candidate> Function(List<Candidate>) change,
   }) {
-    if (_projectTransitions != 0) return Future.value(false);
+    if (_projectTransitions != 0) {
+      return Future.value(ReviewActionResult.rejected);
+    }
     final projectId = project.id;
     final session = _projectSession;
     return _mutations.run(() async {
       if (_disposed || project.id != projectId || _projectSession != session) {
-        return false;
+        return ReviewActionResult.rejected;
       }
       final original = project.candidates;
       final next = change(original);
@@ -217,7 +222,11 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         };
         if (different) previous[old.id] = ReviewFields.capture(kind, old);
       }
-      if (previous.isEmpty) return false;
+      if (previous.isEmpty) {
+        return original.any((item) => item.id == focusId)
+            ? ReviewActionResult.unchanged
+            : ReviewActionResult.rejected;
+      }
       project = project.copyWith(candidates: next);
       notifyListeners();
       try {
@@ -225,12 +234,12 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         if (_disposed ||
             project.id != projectId ||
             _projectSession != session) {
-          return false;
+          return ReviewActionResult.rejected;
         }
         reviewHistory.add(ReviewEntry(kind, previous, focusId));
         _setReviewNotice(notice);
         notifyListeners();
-        return true;
+        return ReviewActionResult.changed;
       } catch (error, stack) {
         if (!_disposed &&
             project.id == projectId &&
@@ -251,10 +260,24 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         } else {
           MobileDiagnostics.instance.error(error, stack, operation: 'project');
         }
-        return false;
+        return ReviewActionResult.rejected;
       }
     });
   }
+
+  Future<bool> _changeReview({
+    required ReviewChange kind,
+    required String focusId,
+    required String notice,
+    required List<Candidate> Function(List<Candidate>) change,
+  }) async =>
+      await _changeReviewResult(
+        kind: kind,
+        focusId: focusId,
+        notice: notice,
+        change: change,
+      ) ==
+      ReviewActionResult.changed;
 
   Future<void> undoReview() {
     if (_projectTransitions != 0) return Future.value();
@@ -1531,18 +1554,20 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     });
   }
 
-  Future<bool> toggleCandidate(String id, CandidateSelection selection) =>
-      _changeReview(
-        kind: ReviewChange.selection,
-        focusId: id,
-        notice: selection == CandidateSelection.included ? '已保留' : '已排除',
-        change: (items) => [
-          for (final item in items)
-            item.id == id
-                ? item.copyWith(selection: selection, reviewed: true)
-                : item,
-        ],
-      );
+  Future<ReviewActionResult> toggleCandidate(
+    String id,
+    CandidateSelection selection,
+  ) => _changeReviewResult(
+    kind: ReviewChange.selection,
+    focusId: id,
+    notice: selection == CandidateSelection.included ? '已保留' : '已排除',
+    change: (items) => [
+      for (final item in items)
+        item.id == id
+            ? item.copyWith(selection: selection, reviewed: true)
+            : item,
+    ],
+  );
 
   Future<bool> addCandidate(Candidate candidate) => _submitProjectChange(
     (current) {
