@@ -9,7 +9,8 @@ import 'package:bhe_mobile/features/diagnostics/mobile_diagnostics.dart'
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import '../../support/mobile_video_fixture.dart';
+import '../support/mobile_video_fixture.dart';
+import 'seed_count.dart';
 
 class Engine extends MobileAnalysisEngineUnavailable {
   int calls = 0;
@@ -80,8 +81,7 @@ void main() {
     () async {
       final start =
           int.tryParse(Platform.environment['P2A_COMMIT_START'] ?? '') ?? 0;
-      final count =
-          int.tryParse(Platform.environment['P2A_COMMIT_COUNT'] ?? '') ?? 60;
+      final count = regressionSeedCount('P2A_COMMIT_COUNT');
       final oldDiag = diag.MobileDiagnostics.instance,
           outcomes = <Map<String, Object?>>[];
       for (var seed = start; seed < start + count; seed++) {
@@ -331,7 +331,7 @@ void main() {
           .where((x) => (x['errors'] as List).isNotEmpty)
           .toList();
       final result = {
-        'base': 'current',
+        'base': 'current checkout',
         'seed_start': start,
         'count': count,
         'failures': failures,
@@ -358,7 +358,9 @@ void main() {
         );
       }
       if (failures.isNotEmpty) {
-        debugPrint('FIRST_FAILURE ${jsonEncode(failures.first)}');
+        debugPrint(
+          'FAILING_SEEDS ${failures.map((failure) => failure['seed']).join(',')}\nFIRST_FAILURE ${jsonEncode(failures.first)}',
+        );
       }
       expect(failures.length, 0, reason: 'see P2A_COMMIT_RESULT');
     },

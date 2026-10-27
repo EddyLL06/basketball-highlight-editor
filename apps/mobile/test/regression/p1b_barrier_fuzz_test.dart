@@ -9,7 +9,8 @@ import 'package:bhe_mobile/features/diagnostics/mobile_diagnostics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
-import '../../support/mobile_video_fixture.dart';
+import '../support/mobile_video_fixture.dart';
+import 'seed_count.dart';
 
 class LogBackend implements DiagnosticBackend {
   final messages = <String>[];
@@ -77,8 +78,7 @@ Future<void> main() async {
           matrix = <String, int>{};
       final seedStart =
           int.tryParse(Platform.environment['BHE_BARRIER_SEED'] ?? '') ?? 10000;
-      final total =
-          int.tryParse(Platform.environment['BHE_BARRIER_COUNT'] ?? '') ?? 100;
+      final total = regressionSeedCount('BHE_BARRIER_COUNT');
       for (var seed = seedStart; seed < seedStart + total; seed++) {
         final rng = Random(seed),
             f = MobileVideoFixture(),
@@ -344,7 +344,9 @@ Future<void> main() async {
         'BARRIER_SUMMARY ${jsonEncode({'sequences': total, 'coverage': coverage, 'failures': failures.length})}',
       );
       if (failures.isNotEmpty)
-        debugPrint('FIRST_FAILURE ${jsonEncode(failures.first)}');
+        debugPrint(
+          'FAILING_SEEDS ${failures.map((failure) => failure['seed']).join(',')}\nFIRST_FAILURE ${jsonEncode(failures.first)}',
+        );
       MobileDiagnostics.instance = old;
       expect(
         failures,

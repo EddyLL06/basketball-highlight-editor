@@ -11,7 +11,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_test/flutter_test.dart';
-import '../../support/mobile_video_fixture.dart';
+import '../support/mobile_video_fixture.dart';
+import 'seed_count.dart';
 
 class LogBackend implements DiagnosticBackend {
   final lines = <String>[];
@@ -393,8 +394,7 @@ Future<void> main() async {
     var injectedFailures = 0, delayedCalls = 0;
     final seedStart =
         int.tryParse(Platform.environment['BHE_FUZZ_SEED'] ?? '') ?? 0;
-    final count =
-        int.tryParse(Platform.environment['BHE_FUZZ_COUNT'] ?? '') ?? 100;
+    final count = regressionSeedCount('BHE_FUZZ_COUNT');
     for (var seed = seedStart; seed < seedStart + count; seed++) {
       final random = Random(seed),
           f = MobileVideoFixture(),
@@ -781,7 +781,9 @@ Future<void> main() async {
       'FUZZ_SUMMARY ${jsonEncode({'sequences': count, 'operations_attempted': counts, 'operations_executed': executed, 'injected_failures': injectedFailures, 'injected_failures_by_operation': failuresByOperation, 'delayed_calls': delayedCalls, 'failures': failures.length})}',
     );
     if (failures.isNotEmpty) {
-      debugPrint('FIRST_FAILURE ${jsonEncode(failures.first)}');
+      debugPrint(
+        'FAILING_SEEDS ${failures.map((failure) => failure['seed']).join(',')}\nFIRST_FAILURE ${jsonEncode(failures.first)}',
+      );
     }
     MobileDiagnostics.instance = oldDiagnostics;
     expect(
