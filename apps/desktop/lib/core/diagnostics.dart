@@ -38,6 +38,13 @@ Future<String> buildDiagnosticReport({
     ..writeln()
     ..writeln('最近的运行日志:')
     ..writeln(log.isEmpty ? '(没有找到运行日志)' : log);
+  final updateLog = await readUpdateLogTail(engineLogDirectory(env));
+  if (updateLog.isNotEmpty) {
+    buffer
+      ..writeln()
+      ..writeln('最近的更新日志:')
+      ..writeln(updateLog);
+  }
   return redactUserPaths(buffer.toString(), env);
 }
 
@@ -62,4 +69,17 @@ Future<String> readLogTail(String directory, int lines) async {
     tail.insert(0, environment);
   }
   return tail.join('\n');
+}
+
+Future<String> readUpdateLogTail(String directory) async {
+  try {
+    final file = File('$directory${Platform.pathSeparator}update.log');
+    if (!await file.exists()) return '';
+    final lines = await file.readAsLines();
+    return (lines.length > 60 ? lines.sublist(lines.length - 60) : lines).join(
+      '\n',
+    );
+  } on Object {
+    return '';
+  }
 }

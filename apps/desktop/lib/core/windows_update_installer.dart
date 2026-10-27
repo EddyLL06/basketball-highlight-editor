@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:bhe_core/bhe_core.dart';
 import 'package:flutter/services.dart';
 
+import 'app_log.dart';
+
 abstract class UpdateInstallSession {
   Future<void> commit();
   Future<void> cancel();
@@ -62,6 +64,8 @@ class WindowsUpdateInstaller {
           helper.path,
           '-RequestPath',
           request.path,
+          '-LogDirectory',
+          engineLogDirectory(Platform.environment),
         ],
         workingDirectory: directory.path,
         mode: ProcessStartMode.detached,

@@ -1,7 +1,8 @@
 # Windows PowerShell 5.1. Runs from the update cache, never from the app folder.
 param(
     [Parameter(Mandatory = $true)][string]$RequestPath,
-    [switch]$NoErrorDialog
+    [switch]$NoErrorDialog,
+    [string]$LogDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -17,12 +18,31 @@ $Lock = $null
 $NewProcess = $null
 $BackupReceipt = $null
 $Utf8 = New-Object System.Text.UTF8Encoding($false)
+$UpdateResult = 'failed'
+
+function Write-UpdateLog([string]$Phase, [string]$Result, [string]$Message = '') {
+    try {
+        $directory = $LogDirectory
+        if (!$directory) {
+            $base = $env:LOCALAPPDATA
+            if (!$base) { $base = $env:HOME }
+            if (!$base) { $base = $env:USERPROFILE }
+            if (!$base) { $base = [IO.Path]::GetTempPath() }
+            $directory = Join-Path (Join-Path $base 'BHE') 'logs'
+        }
+        [void][IO.Directory]::CreateDirectory($directory)
+        $line = '[' + [DateTime]::UtcNow.ToString('o') + '] update phase=' + $Phase + ' result=' + $Result
+        if ($Message) { $line += ' detail=' + ($Message | ConvertTo-Json -Compress) }
+        [IO.File]::AppendAllText((Join-Path $directory 'update.log'), "$line`r`n", $Utf8)
+    } catch { }
+}
 
 function Write-SessionFile([string]$Name, [string]$Value) {
     [IO.File]::WriteAllText((Join-Path $Session $Name), $Value, $Utf8)
 }
 
 function Write-Phase([string]$Phase) {
+    Write-UpdateLog $Phase 'entered'
     $state = @{ phase = $Phase; install = $Install; backup = $Backup; stage = $Stage }
     try { Write-SessionFile 'status.json' ($state | ConvertTo-Json -Compress) }
     catch {
@@ -45,6 +65,7 @@ function Write-CleanupLog([string]$Message) {
     try {
         [IO.File]::AppendAllText((Join-Path $Session 'cleanup.log'), "$Message`r`n", $Utf8)
     } catch { }
+    Write-UpdateLog 'cleanup' 'info' $Message
 }
 
 function Write-BackupReceipt([string]$Root, [string]$BackupPath) {
@@ -181,6 +202,7 @@ function Assert-ReleaseTree([string]$Root, [string]$Version = '') {
 }
 
 function Expand-VerifiedPackage([string]$Archive, [string]$Destination) {
+    Write-UpdateLog 'verify' 'begin'
     # .NET Framework does not load ZipArchive/ZipArchiveMode just because
     # System.IO.Compression.FileSystem was loaded in this fresh process.
     Add-Type -AssemblyName System.IO.Compression
@@ -193,6 +215,7 @@ function Expand-VerifiedPackage([string]$Archive, [string]$Destination) {
         try { $actual = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
         finally { $sha.Dispose() }
         if ($actual -ne $request.sha256) { throw 'Package SHA-256 verification failed. Download it again.' }
+        Write-UpdateLog 'verify' 'ok'
         $stream.Position = 0
         $zip = New-Object IO.Compression.ZipArchive($stream, [IO.Compression.ZipArchiveMode]::Read, $true)
         try {
@@ -222,6 +245,7 @@ function Expand-VerifiedPackage([string]$Archive, [string]$Destination) {
     } finally { $stream.Dispose() }
 }
 
+Write-UpdateLog 'start' 'begin'
 try {
     Write-SessionFile 'started' 'started'
     $request = Get-Content -LiteralPath $RequestPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -278,10 +302,14 @@ try {
     Write-Phase 'replacing'
     Write-BackupReceipt $Install $Backup
     $BackupReceipt = $Backup + '.bhe-update.json'
+    Write-UpdateLog 'backup' 'begin'
     [IO.Directory]::Move($Install, $Backup)
     $MovedOld = $true
+    Write-UpdateLog 'backup' 'ok'
+    Write-UpdateLog 'replace' 'begin'
     [IO.Directory]::Move($newRoot, $Install)
     $InstalledNew = $true
+    Write-UpdateLog 'replace' 'ok'
     Write-Phase 'starting'
     $NewProcess = Start-Release $Install
     Start-Sleep -Seconds 3
@@ -290,9 +318,11 @@ try {
     # A live process is not a full health check.
     Write-Phase 'installed'
     Remove-OlderBackups $Install $Backup
+    $UpdateResult = 'ok'
 } catch {
     $message = $_.Exception.Message
     if ($MovedOld -and ($null -eq $NewProcess -or $NewProcess.HasExited)) {
+        Write-UpdateLog 'rollback' 'begin'
         try {
             if ($InstalledNew) {
                 $failed = Join-Path $parent ('.bhe-failed-' + $id)
@@ -300,10 +330,12 @@ try {
             }
             [IO.Directory]::Move($Backup, $Install)
             Write-Phase 'restored'
+            Write-UpdateLog 'rollback' 'restored'
             Start-Release $Install | Out-Null
         } catch {
             $message += "`r`nAutomatic restore failed: $($_.Exception.Message)`r`nPrevious release: $Backup"
             Write-Phase 'restore-required'
+            Write-UpdateLog 'rollback' 'failed' $message
         }
     } elseif ($MovedOld) {
         $message += "`r`nThe new BHE is running. Previous release retained at: $Backup"
@@ -315,6 +347,7 @@ try {
             $message += "`r`nCould not reopen the previous release: $($_.Exception.Message)"
         }
     }
+    Write-UpdateLog 'error' 'failed' $message
     try { Write-SessionFile 'error.txt' $message } catch { }
     if ($Committed -and !$NoErrorDialog) {
         # The old UI has closed; show a visible failure and the recovery paths.
@@ -325,6 +358,7 @@ try {
     }
     exit 1
 } finally {
+    Write-UpdateLog 'end' $UpdateResult
     if ($null -ne $Lock) { $Lock.Dispose() }
     if ($BackupReceipt -and !(Test-Path -LiteralPath $Backup)) {
         Remove-Item -LiteralPath $BackupReceipt -Force -ErrorAction SilentlyContinue
