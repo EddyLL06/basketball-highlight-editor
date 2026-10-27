@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 REQUIRED_SCRIPTS = (
+    "check_detector.py",
     "create_proxy.py",
     "scan_video.py",
     "generate_candidates.py",
