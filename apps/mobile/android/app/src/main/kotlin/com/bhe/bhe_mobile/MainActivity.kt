@@ -752,25 +752,20 @@ class MainActivity : FlutterActivity() {
         val inputPath = call.argument<String>("inputPath")
         val outputPath = call.argument<String>("outputPath")
         val rawClips = call.argument<List<*>>("clips")
-        val sortedClips = rawClips?.mapNotNull { item ->
-            val values = item as? Map<*, *> ?: return@mapNotNull null
-            val start = (values["startMs"] as? Number)?.toLong()
-            val end = (values["endMs"] as? Number)?.toLong()
-            if (start == null || end == null || end <= start) null else start to end
-        }?.sortedBy { it.first } ?: emptyList()
-        val clips = mutableListOf<Pair<Long, Long>>()
-        for (clip in sortedClips) {
-            val previous = clips.lastOrNull()
-            if (previous != null && clip.first <= previous.second) {
-                clips[clips.lastIndex] = previous.first to maxOf(previous.second, clip.second)
-            } else {
-                clips += clip
+        val plan = try {
+            require(inputPath != null && outputPath != null && rawClips != null)
+            val intervals = rawClips.map { item ->
+                val values = item as? Map<*, *> ?: throw IllegalArgumentException("Invalid interval")
+                val start = (values["startMs"] as? Number)?.toLong() ?: throw IllegalArgumentException("Invalid start")
+                val end = (values["endMs"] as? Number)?.toLong() ?: throw IllegalArgumentException("Invalid end")
+                ExportInterval(start, end)
             }
-        }
-        if (inputPath == null || outputPath == null || clips.isEmpty()) {
+            ExportOverlapPlanner.plan(intervals)
+        } catch (error: IllegalArgumentException) {
             result.error("INVALID_ARGUMENT", "合并导出参数无效", null)
             return
         }
+        val clips = plan.intervals
         val cancelled = AtomicBoolean(false)
         exportCancelled[exportId] = cancelled
         Thread {
@@ -837,7 +832,7 @@ class MainActivity : FlutterActivity() {
                 currentMuxer.stop()
                 muxerStarted = false
                 AppDiagnostics.event("export.completed")
-                mainHandler.post { result.success(exportResult(outputPath, selection)) }
+                mainHandler.post { result.success(exportResult(outputPath, selection) + ("mergedOverlapCount" to plan.mergedOverlapCount)) }
             } catch (_: InterruptedException) {
                 File(outputPath).delete()
                 AppDiagnostics.event("export.cancelled")
