@@ -107,9 +107,9 @@ class MobileVideoFixture {
           ]);
   }
 
-  Future<void> close() async {
+  Future<void> close({bool disposeState = true}) async {
     await pumpEventQueue();
-    state.dispose();
+    if (disposeState) state.dispose();
     FilePicker.platform = TestFilePicker();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(

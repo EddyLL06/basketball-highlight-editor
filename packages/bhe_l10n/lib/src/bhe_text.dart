@@ -367,6 +367,13 @@ String _englishDuration(String value) => value
     .trim();
 
 const _englishText = <String, String>{
+  '视频文件找不到了，请重新选择原视频。': 'The video file is missing. Choose the original video again.',
+  '这个视频无法播放，请重新选择原视频。': 'This video cannot be played. Choose the original video again.',
+  '所选视频与项目记录不一致，请选择原始视频。': 'The selected video does not match this project. Choose the original video.',
+  '重新选择视频': 'Choose video again',
+  '正在重新选择视频': 'Choosing the source video',
+  '正在取消': 'Cancelling',
+
   '如果 BHE 对你有帮助': 'If BHE has been helpful',
   '如果 BHE 帮你省下了一些剪辑时间，欢迎在 GitHub 点个 Star，也可以分享给球友，让更多人知道这个项目。谢谢支持！':
       'If BHE has saved you some editing time, please consider starring it on GitHub or sharing it with your basketball friends. It helps more people discover the project. Thank you for your support!',

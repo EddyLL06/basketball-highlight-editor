@@ -14,24 +14,32 @@ import 'package:video_player/video_player.dart';
 
 import 'app_updater.dart';
 import 'clip_range_editor.dart';
+import 'features/video_source/video_playback.dart';
+import 'features/video_source/video_source_failure.dart';
 import 'mobile_app_state.dart';
 import 'mobile_theme.dart';
 
 export 'mobile_theme.dart' show BhePalette, bheTheme;
+
+part 'features/video_source/video_source_notice.dart';
+part 'features/video_source/review_video_source.dart';
+part 'features/video_source/video_preview.dart';
+part 'features/video_source/review_controls.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 
 enum _WorkspaceSection { project, review, export }
 
 class BheMobileApp extends StatefulWidget {
-  const BheMobileApp({super.key});
+  const BheMobileApp({super.key, this.appState});
+  final MobileAppState? appState;
 
   @override
   State<BheMobileApp> createState() => _BheMobileAppState();
 }
 
 class _BheMobileAppState extends State<BheMobileApp> {
-  final state = MobileAppState();
+  late final state = widget.appState ?? MobileAppState();
   final updater = AppUpdater();
   final _navigatorKey = GlobalKey<NavigatorState>();
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -50,6 +58,8 @@ class _BheMobileAppState extends State<BheMobileApp> {
   @override
   void initState() {
     super.initState();
+    _lastProjectId = state.project.id;
+    _lastAnalysisStatus = state.project.lastAnalysisStatus;
     state.addListener(_handleStateChange);
     unawaited(_loadLocale());
     _updateCheckTimer = Timer(const Duration(seconds: 5), _autoCheckUpdate);
@@ -163,9 +173,7 @@ class _BheMobileAppState extends State<BheMobileApp> {
               Navigator.pop(dialogContext);
               await SharePlus.instance.share(
                 ShareParams(
-                  text: context.bheText(
-                    '我在用 BHE 整理篮球比赛集锦，推荐你看看：',
-                  ),
+                  text: context.bheText('我在用 BHE 整理篮球比赛集锦，推荐你看看：'),
                   uri: Uri.parse(
                     'https://github.com/fly7632785/basketball-highlight-editor',
                   ),
@@ -198,7 +206,7 @@ class _BheMobileAppState extends State<BheMobileApp> {
     _updateCheckTimer?.cancel();
     updater.dispose();
     state.removeListener(_handleStateChange);
-    state.dispose();
+    if (widget.appState == null) { state.dispose(); }
     super.dispose();
   }
 
@@ -306,11 +314,14 @@ class _AppShell extends StatelessWidget {
         state: state,
         onOpenReview: () => onSectionChanged(_WorkspaceSection.review),
       ),
-      _WorkspaceSection.review => _ReviewView(
-        key: ValueKey(state.project.id),
+      _WorkspaceSection.review => VideoSourcePanel(
         state: state,
-        onOpenProject: () => onSectionChanged(_WorkspaceSection.project),
-        onOpenExport: () => onSectionChanged(_WorkspaceSection.export),
+        child: _ReviewView(
+          key: ValueKey(state.project.id),
+          state: state,
+          onOpenProject: () => onSectionChanged(_WorkspaceSection.project),
+          onOpenExport: () => onSectionChanged(_WorkspaceSection.export),
+        ),
       ),
       _WorkspaceSection.export => _ExportView(state: state),
     };
@@ -554,8 +565,9 @@ class _ProjectView extends StatelessWidget {
                   ? (l10n?.localCompleteDescription ?? '本地完成分析、审核和导出。')
                   : (l10n?.configureAnalysisDescription ?? '配置好分析区域后即可开始识别。'),
             ),
+            VideoSourceNotice(state: state),
             if (state.preparingVideo)
-              _VideoPreparationCard(message: state.preparingVideoMessage)
+              _VideoPreparationCard(message: state.preparingVideoMessage, onCancel: state.cancelVideoPreparation)
             else if (state.project.video == null)
               _EmptyProject(
                 onPick: () => unawaited(state.createNewProjectAndPickVideo()),
@@ -660,48 +672,6 @@ class _EmptyProject extends StatelessWidget {
   }
 }
 
-class _VideoPreparationCard extends StatelessWidget {
-  const _VideoPreparationCard({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
-        child: Row(
-          children: [
-            const SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2.5),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n?.prepareVideo ?? '正在准备视频',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${l10n?.text(message) ?? message}，${l10n?.text('大文件可能需要几秒') ?? '大文件可能需要几秒'}。',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _ProjectSetup extends StatelessWidget {
   const _ProjectSetup({required this.state, required this.onOpenReview});
   final MobileAppState state;
@@ -781,13 +751,6 @@ class _ProjectSetup extends StatelessWidget {
             ],
           ),
         ),
-        if (state.errorMessage != null) ...[
-          const SizedBox(height: 12),
-          _InlineNotice(
-            message: l10n?.text(state.errorMessage!) ?? state.errorMessage!,
-            error: true,
-          ),
-        ],
         if (state.project.lastAnalysisStatus == 'completed' &&
             state.project.candidates.isEmpty) ...[
           const SizedBox(height: 12),
@@ -892,322 +855,6 @@ Future<void> _confirmAndStartAnalysis(
   );
   if (confirmed == true && context.mounted) {
     await state.startAnalysis();
-  }
-}
-
-class _VideoPreview extends StatefulWidget {
-  const _VideoPreview({
-    required this.path,
-    required this.aspectRatio,
-    this.seekStepMs = 1500,
-    this.initialPositionMs,
-    this.requestedPositionMs,
-    this.stopAtMs,
-    this.onPositionChanged,
-  });
-  final String path;
-  final double aspectRatio;
-  final int seekStepMs;
-  final int? initialPositionMs;
-  final int? requestedPositionMs;
-  final int? stopAtMs;
-  final ValueChanged<int>? onPositionChanged;
-
-  @override
-  State<_VideoPreview> createState() => _VideoPreviewState();
-}
-
-class _VideoPreviewState extends State<_VideoPreview> {
-  VideoPlayerController? controller;
-  Future<void> _playerQueue = Future<void>.value();
-  Future<void>? _playerInitialization;
-  int _playerGeneration = 0;
-  int _lastReportedPosition = -1;
-  bool _positionCallbackScheduled = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _startPlayer(widget.path, widget.initialPositionMs);
-  }
-
-  @override
-  void didUpdateWidget(covariant _VideoPreview oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.path != oldWidget.path) {
-      unawaited(_replacePlayer());
-      return;
-    }
-    final position = widget.requestedPositionMs;
-    if (position != null && position != oldWidget.requestedPositionMs) {
-      unawaited(_seekTo(position));
-    }
-  }
-
-  @override
-  void dispose() {
-    _playerGeneration++;
-    controller?.removeListener(_changed);
-    final player = controller;
-    controller = null;
-    final queue = _playerQueue;
-    final initialization = _playerInitialization;
-    _playerQueue = Future<void>.value();
-    _playerInitialization = null;
-    unawaited(() async {
-      await queue;
-      await initialization;
-      await player?.dispose();
-    }());
-    super.dispose();
-  }
-
-  void _startPlayer(String path, int? initialPositionMs) {
-    final generation = ++_playerGeneration;
-    final player = VideoPlayerController.file(File(path));
-    controller = player;
-    player.addListener(_changed);
-    _playerInitialization = _initializePlayer(
-      player,
-      generation,
-      initialPositionMs,
-    );
-    unawaited(_playerInitialization!);
-  }
-
-  Future<void> _initializePlayer(
-    VideoPlayerController player,
-    int generation,
-    int? initialPositionMs,
-  ) async {
-    try {
-      await player.initialize();
-      if (initialPositionMs != null) {
-        await player.seekTo(Duration(milliseconds: initialPositionMs));
-      }
-      if (!mounted || generation != _playerGeneration || controller != player) {
-        return;
-      }
-      setState(() {});
-    } catch (error) {
-      if (generation != _playerGeneration || controller != player) return;
-      player.removeListener(_changed);
-      controller = null;
-      await player.dispose();
-      if (mounted) setState(() {});
-    }
-  }
-
-  Future<void> _replacePlayer() async {
-    final generation = ++_playerGeneration;
-    final previous = controller;
-    final initialization = _playerInitialization;
-    previous?.removeListener(_changed);
-    controller = null;
-    final queue = _playerQueue;
-    _playerQueue = Future<void>.value();
-    _playerInitialization = null;
-    if (mounted) setState(() {});
-    await queue;
-    await initialization;
-    await previous?.dispose();
-    if (!mounted || generation != _playerGeneration) return;
-    _startPlayer(widget.path, widget.initialPositionMs);
-  }
-
-  void _changed() {
-    final player = controller;
-    final stopAt = widget.stopAtMs;
-    if (player?.value.isInitialized == true &&
-        stopAt != null &&
-        player!.value.isPlaying &&
-        player.value.position.inMilliseconds >= stopAt) {
-      unawaited(player.pause());
-    }
-    final position = player?.value.position.inMilliseconds;
-    if (position != null && (position - _lastReportedPosition).abs() >= 100) {
-      _lastReportedPosition = position;
-      if (widget.onPositionChanged != null && !_positionCallbackScheduled) {
-        _positionCallbackScheduled = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _positionCallbackScheduled = false;
-          if (!mounted) return;
-          widget.onPositionChanged?.call(
-            controller?.value.position.inMilliseconds ?? position,
-          );
-        });
-      }
-    }
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _toggle() async {
-    await _enqueuePlayer((player) async {
-      if (player.value.isPlaying) {
-        await player.pause();
-      } else {
-        await player.play();
-      }
-    });
-  }
-
-  Future<void> _seek(int milliseconds) async {
-    await _enqueuePlayer((player) async {
-      final next = player.value.position + Duration(milliseconds: milliseconds);
-      final bounded = next < Duration.zero
-          ? Duration.zero
-          : next > player.value.duration
-          ? player.value.duration
-          : next;
-      await player.seekTo(bounded);
-    });
-  }
-
-  Future<void> _seekTo(int milliseconds) async {
-    await _enqueuePlayer(
-      (player) => player.seekTo(Duration(milliseconds: milliseconds)),
-    );
-  }
-
-  Future<void> _replay() async {
-    await _enqueuePlayer((player) async {
-      await player.seekTo(Duration.zero);
-      await player.play();
-    });
-  }
-
-  Future<void> _enqueuePlayer(
-    Future<void> Function(VideoPlayerController player) action,
-  ) {
-    final task = _playerQueue.then((_) async {
-      final player = controller;
-      if (player == null || !player.value.isInitialized) return;
-      await action(player);
-    });
-    _playerQueue = task.then<void>((_) {}, onError: (_, _) {});
-    return task;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final player = controller;
-    final ratio = widget.aspectRatio.isFinite && widget.aspectRatio > 0
-        ? widget.aspectRatio
-        : 16 / 9;
-    final initialized = player?.value.isInitialized == true;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
-          child: AspectRatio(
-            aspectRatio: ratio,
-            child: ColoredBox(
-              color: Colors.black,
-              child: initialized
-                  ? Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        GestureDetector(
-                          onTap: _toggle,
-                          child: VideoPlayer(player!),
-                        ),
-                        IgnorePointer(
-                          child: Align(
-                            alignment: Alignment.center,
-                            child: AnimatedOpacity(
-                              opacity: player.value.isPlaying ? .18 : .9,
-                              duration: const Duration(milliseconds: 150),
-                              child: Icon(
-                                player.value.isPlaying
-                                    ? LucideIcons.pause
-                                    : LucideIcons.play,
-                                color: Colors.white,
-                                size: 40,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    )
-                  : const Center(child: CircularProgressIndicator()),
-            ),
-          ),
-        ),
-        if (initialized)
-          Container(
-            decoration: const BoxDecoration(
-              color: BhePalette.surface3,
-              borderRadius: BorderRadius.vertical(bottom: Radius.circular(9)),
-            ),
-            padding: const EdgeInsets.fromLTRB(8, 2, 8, 4),
-            child: Column(
-              children: [
-                SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 4,
-                    thumbShape: const RoundSliderThumbShape(
-                      enabledThumbRadius: 6,
-                    ),
-                  ),
-                  child: Slider(
-                    value: player!.value.position.inMilliseconds
-                        .toDouble()
-                        .clamp(
-                          0,
-                          player.value.duration.inMilliseconds.toDouble().clamp(
-                            1,
-                            double.infinity,
-                          ),
-                        ),
-                    max: player.value.duration.inMilliseconds.toDouble().clamp(
-                      1,
-                      double.infinity,
-                    ),
-                    onChanged: (value) => _seekTo(value.round()),
-                  ),
-                ),
-                Row(
-                  children: [
-                    Text(
-                      '${_formatMs(player.value.position.inMilliseconds)} / ${_formatMs(player.value.duration.inMilliseconds)}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      onPressed: () => _seek(-widget.seekStepMs),
-                      icon: const Icon(LucideIcons.rotateCcw, size: 17),
-                      tooltip:
-                          '${context.bheText('后退')} ${context.bheText(_formatSeekStep(widget.seekStepMs))}',
-                    ),
-                    IconButton.filledTonal(
-                      onPressed: _toggle,
-                      icon: Icon(
-                        player.value.isPlaying
-                            ? LucideIcons.pause
-                            : LucideIcons.play,
-                        size: 18,
-                      ),
-                      tooltip: context.bheText('播放/暂停'),
-                    ),
-                    IconButton(
-                      onPressed: () => _seek(widget.seekStepMs),
-                      icon: const Icon(LucideIcons.rotateCw, size: 17),
-                      tooltip:
-                          '${context.bheText('前进')} ${context.bheText(_formatSeekStep(widget.seekStepMs))}',
-                    ),
-                    IconButton(
-                      onPressed: _replay,
-                      icon: const Icon(LucideIcons.refreshCw, size: 17),
-                      tooltip: context.bheText('重播'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
   }
 }
 
@@ -1382,65 +1029,6 @@ class _RecentProjectRow extends StatelessWidget {
   );
 }
 
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, this.action});
-  final String title;
-  final String? action;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Text(title, style: Theme.of(context).textTheme.titleMedium),
-      const Spacer(),
-      if (action != null)
-        Text(action!, style: Theme.of(context).textTheme.bodySmall),
-    ],
-  );
-}
-
-class _InlineNotice extends StatelessWidget {
-  const _InlineNotice({required this.message, this.error = false});
-  final String message;
-  final bool error;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: (error ? BhePalette.error : BhePalette.warning).withValues(
-          alpha: .10,
-        ),
-        border: Border(
-          left: BorderSide(
-            color: error ? BhePalette.error : BhePalette.warning,
-            width: 2,
-          ),
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            error ? LucideIcons.circleAlert : LucideIcons.info,
-            size: 16,
-            color: error ? BhePalette.error : BhePalette.warning,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              l10n?.text(message) ?? message,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _AnalysisView extends StatefulWidget {
   const _AnalysisView({required this.state});
   final MobileAppState state;
@@ -1598,14 +1186,7 @@ class _AnalysisViewState extends State<_AnalysisView> {
                     ],
                   ),
                 ),
-                if (state.errorMessage != null) ...[
-                  const SizedBox(height: 12),
-                  _InlineNotice(
-                    message:
-                        l10n?.text(state.errorMessage!) ?? state.errorMessage!,
-                    error: true,
-                  ),
-                ],
+                VideoSourceNotice(state: state),
               ],
             ),
           ),
@@ -1681,6 +1262,7 @@ class _ReviewViewState extends State<_ReviewView> {
     final first = selected;
     if (first != null) await _replay(first);
   }
+
   Candidate? get selected => candidates.isEmpty
       ? null
       : candidates[selectedIndex.clamp(0, candidates.length - 1)];
@@ -1697,23 +1279,22 @@ class _ReviewViewState extends State<_ReviewView> {
     _openVideo();
   }
 
-  Future<void> _openVideo() async {
-    final path = state.project.video?.path;
-    if (path == null) return;
-    final next = VideoPlayerController.file(File(path));
-    await next.initialize();
-    next.addListener(_videoChanged);
-    if (!mounted) {
-      await next.dispose();
-      return;
+  String? _openedVideoPath;
+  int _openedSourceRevision = -1;
+  int _videoOpenGeneration = 0;
+  @override
+  void didUpdateWidget(covariant _ReviewView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_openedVideoPath != state.project.video?.path || _openedSourceRevision != state.videoSourceRevision) {
+      unawaited(_openVideo());
     }
-    await controller?.dispose();
-    setState(() {
-      controller = next;
-      selectedIndex = 0;
-    });
-    if (candidates.isNotEmpty) await _replay(candidates.first);
   }
+
+  Future<void> _openVideo() => _loadReviewVideo(this);
+  void _installSourcePlayer(VideoPlayerController? next) => setState(() {
+    controller = next;
+    selectedIndex = 0;
+  });
 
   void _videoChanged() {
     if (!mounted) return;
@@ -3407,7 +2988,6 @@ class _CandidateRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
     final total = allCandidates.length;
     final reviewed = allCandidates.where((item) => item.reviewed).length;
     final filtering =
@@ -3420,51 +3000,8 @@ class _CandidateRail extends StatelessWidget {
       color: Theme.of(context).cardTheme.color ?? BhePalette.surface,
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 2, 4, 0),
-            child: Row(
-              children: [
-                Text(
-                  filtering
-                      ? '${context.bheText('显示 ${candidates.length} / $total')} · ${context.bheText('已审核 $reviewed / $total')}'
-                      : context.bheText('已审核 $reviewed / $total'),
-                  key: const Key('review-progress'),
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(2),
-                    child: LinearProgressIndicator(
-                      value: total == 0 ? 0 : reviewed / total,
-                      minHeight: 3,
-                      color: BhePalette.green,
-                      backgroundColor: BhePalette.border,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                TextButton.icon(
-                  onPressed: onBatchRange,
-                  icon: const Icon(LucideIcons.clock3, size: 16),
-                  label: Text(l10n?.clipDuration ?? '时长'),
-                  style: TextButton.styleFrom(
-                    minimumSize: const Size(44, 32),
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: onAdd,
-                  icon: const Icon(LucideIcons.plus, size: 16),
-                  label: Text(l10n?.addManualCandidate ?? '补漏'),
-                  style: TextButton.styleFrom(
-                    minimumSize: const Size(44, 32),
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          _ReviewProgressHeader(candidates: candidates, total: total, reviewed: reviewed,
+            filtering: filtering, onBatchRange: onBatchRange, onAdd: onAdd),
           _ReviewFilterBar(
             candidates: allCandidates,
             players: players,
@@ -3929,401 +3466,6 @@ class _ShortcutRow extends StatelessWidget {
     title: Text(title),
     subtitle: Text(detail),
   );
-}
-
-class _ReviewActionBar extends StatelessWidget {
-  const _ReviewActionBar({
-    required this.candidate,
-    required this.controller,
-    required this.annotations,
-    required this.autoReplay,
-    required this.clipOnly,
-    required this.speed,
-    required this.onToggle,
-    required this.onReplay,
-    required this.onSeekBack,
-    required this.onSeekForward,
-    required this.onSeekTo,
-    required this.onToggleAnnotations,
-    required this.onToggleAutoReplay,
-    required this.onToggleSource,
-    required this.onSpeed,
-    required this.onInclude,
-    required this.onExclude,
-    required this.onDetails,
-    required this.onEditRange,
-    required this.onPlayer,
-    required this.onExport,
-    required this.onShortcuts,
-  });
-  final Candidate candidate;
-  final VideoPlayerController? controller;
-  final bool annotations;
-  final bool autoReplay;
-  final bool clipOnly;
-  final double speed;
-  final VoidCallback onToggle;
-  final VoidCallback onReplay;
-  final VoidCallback onSeekBack;
-  final VoidCallback onSeekForward;
-  final ValueChanged<int> onSeekTo;
-  final VoidCallback onToggleAnnotations;
-  final VoidCallback onToggleAutoReplay;
-  final VoidCallback onToggleSource;
-  final ValueChanged<double> onSpeed;
-  final VoidCallback onInclude;
-  final VoidCallback onExclude;
-  final VoidCallback onDetails;
-  final VoidCallback onEditRange;
-  final VoidCallback onPlayer;
-  final VoidCallback onExport;
-  final VoidCallback onShortcuts;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
-    final value = controller?.value;
-    final fullDuration = value?.duration.inMilliseconds.toDouble() ?? 1;
-    final minPosition = clipOnly ? candidate.startMs.toDouble() : 0.0;
-    final duration = clipOnly ? candidate.endMs.toDouble() : fullDuration;
-    final position = (value?.position.inMilliseconds.toDouble() ?? minPosition)
-        .clamp(minPosition, duration)
-        .toDouble();
-    return Material(
-      color: Theme.of(context).cardTheme.color,
-      child: SafeArea(
-        top: false,
-        child: Column(
-          children: [
-            Slider(
-              min: minPosition,
-              value: position,
-              max: duration,
-              onChanged: controller == null
-                  ? null
-                  : (value) => onSeekTo(value.round()),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-              child: Row(
-                children: [
-                  Text(
-                    l10n?.currentTime(_formatMs(position.round())) ??
-                        '当前 ${_formatMs(position.round())}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const Spacer(),
-                  Text(
-                    clipOnly
-                        ? (l10n?.clipTime(
-                                _formatMs(candidate.startMs),
-                                _formatMs(candidate.endMs),
-                              ) ??
-                              '片段 ${_formatMs(candidate.startMs)} — ${_formatMs(candidate.endMs)}')
-                        : (l10n?.fullVideoTime(
-                                _formatMs(fullDuration.round()),
-                              ) ??
-                              '全片 ${_formatMs(fullDuration.round())}'),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 132,
-                    child: SegmentedButton<bool>(
-                      segments: [
-                        ButtonSegment(
-                          value: true,
-                          label: Text(l10n?.reviewMode ?? '审核'),
-                        ),
-                        ButtonSegment(
-                          value: false,
-                          label: Text(l10n?.originalVideo ?? '原视频'),
-                        ),
-                      ],
-                      selected: {clipOnly},
-                      onSelectionChanged: (selection) {
-                        if (selection.single != clipOnly) onToggleSource();
-                      },
-                      showSelectedIcon: false,
-                      style: ButtonStyle(
-                        side: const WidgetStatePropertyAll(BorderSide.none),
-                        shape: WidgetStatePropertyAll(
-                          RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(7),
-                          ),
-                        ),
-                        backgroundColor: WidgetStateProperty.resolveWith(
-                          (states) => states.contains(WidgetState.selected)
-                              ? Theme.of(
-                                  context,
-                                ).colorScheme.primary.withValues(alpha: .12)
-                              : Theme.of(
-                                  context,
-                                ).colorScheme.onSurface.withValues(alpha: .04),
-                        ),
-                        foregroundColor: WidgetStateProperty.resolveWith(
-                          (states) => states.contains(WidgetState.selected)
-                              ? Theme.of(context).colorScheme.primary
-                              : Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        textStyle: const WidgetStatePropertyAll(
-                          TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
-                        ),
-                        padding: const WidgetStatePropertyAll(
-                          EdgeInsets.symmetric(horizontal: 8),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: onToggleAnnotations,
-                    isSelected: annotations,
-                    icon: const Icon(LucideIcons.scanLine, size: 19),
-                    tooltip: annotations
-                        ? (l10n?.hideTrajectory ?? '隐藏轨迹')
-                        : (l10n?.showTrajectory ?? '显示轨迹'),
-                    style: IconButton.styleFrom(
-                      foregroundColor: annotations
-                          ? Theme.of(context).colorScheme.primary
-                          : Theme.of(context).colorScheme.onSurfaceVariant,
-                      backgroundColor: annotations
-                          ? Theme.of(
-                              context,
-                            ).colorScheme.primary.withValues(alpha: .10)
-                          : Colors.transparent,
-                      minimumSize: const Size(40, 40),
-                      padding: EdgeInsets.zero,
-                      side: BorderSide(
-                        color: Theme.of(context).colorScheme.primary.withValues(
-                          alpha: annotations ? .35 : .18,
-                        ),
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(7),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    onPressed: onShortcuts,
-                    icon: const Icon(LucideIcons.info, size: 19),
-                    tooltip: l10n?.shortcuts ?? '操作提示',
-                    style: IconButton.styleFrom(
-                      foregroundColor: Theme.of(
-                        context,
-                      ).colorScheme.onSurfaceVariant,
-                      backgroundColor: Theme.of(
-                        context,
-                      ).colorScheme.onSurface.withValues(alpha: .04),
-                      minimumSize: const Size(40, 40),
-                      padding: EdgeInsets.zero,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(7),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  SizedBox(
-                    width: 44,
-                    child: PopupMenuButton<String>(
-                      tooltip: l10n?.moreReviewActions ?? '更多审核操作',
-                      onSelected: _handleMore,
-                      color: Theme.of(context).cardTheme.color,
-                      elevation: 8,
-                      menuPadding: const EdgeInsets.symmetric(vertical: 6),
-                      constraints: const BoxConstraints(minWidth: 220),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        side: const BorderSide(color: BhePalette.borderStrong),
-                      ),
-                      itemBuilder: (_) => [
-                        PopupMenuItem(
-                          value: 'range',
-                          child: Text(l10n?.editClipRange ?? '调整片段范围'),
-                        ),
-                        const PopupMenuDivider(),
-                        PopupMenuItem(
-                          value: 'evidence',
-                          child: Text(l10n?.viewEvidence ?? '查看判断依据'),
-                        ),
-                        PopupMenuItem(
-                          value: 'export',
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 7,
-                            ),
-                            decoration: BoxDecoration(
-                              color: BhePalette.orange.withValues(alpha: .13),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  LucideIcons.download,
-                                  size: 17,
-                                  color: BhePalette.orange,
-                                ),
-                                SizedBox(width: 9),
-                                Text(l10n?.exportIncluded ?? '导出保留片段'),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                      icon: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.onSurface.withValues(alpha: .04),
-                          borderRadius: BorderRadius.circular(7),
-                        ),
-                        child: const Padding(
-                          padding: EdgeInsets.all(10),
-                          child: Icon(LucideIcons.ellipsis, size: 19),
-                        ),
-                      ),
-                      padding: EdgeInsets.zero,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    onPressed: onReplay,
-                    icon: const Icon(LucideIcons.refreshCw, size: 19),
-                    tooltip: l10n?.replay ?? '重播',
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    onPressed: onToggleAutoReplay,
-                    icon: Icon(
-                      autoReplay ? LucideIcons.repeat2 : LucideIcons.repeatOff,
-                      size: 19,
-                      color: autoReplay
-                          ? Theme.of(context).colorScheme.primary
-                          : null,
-                    ),
-                    tooltip: autoReplay
-                        ? (l10n?.closeAutoReplay ?? '关闭自动重播')
-                        : (l10n?.openAutoReplay ?? '打开自动重播'),
-                  ),
-                  PopupMenuButton<double>(
-                    tooltip: l10n?.playbackSpeed ?? '播放速度',
-                    initialValue: speed,
-                    onSelected: onSpeed,
-                    itemBuilder: (_) => [
-                      for (final rate in [.5, .75, 1.0, 1.5, 2.0])
-                        CheckedPopupMenuItem(
-                          value: rate,
-                          checked: rate == speed,
-                          child: Text(_formatSpeed(rate)),
-                        ),
-                    ],
-                    child: SizedBox(
-                      width: 58,
-                      height: 48,
-                      child: Center(child: Text(_formatSpeed(speed))),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  IconButton(
-                    onPressed: onSeekBack,
-                    icon: const Icon(LucideIcons.rotateCcw, size: 19),
-                    tooltip:
-                        '${context.bheText('后退')} 1.5 ${context.bheText('秒')}',
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton.filled(
-                    onPressed: onToggle,
-                    icon: Icon(
-                      value?.isPlaying == true
-                          ? LucideIcons.pause
-                          : LucideIcons.play,
-                      size: 20,
-                    ),
-                    tooltip: context.bheText(
-                      value?.isPlaying == true ? '暂停' : '播放',
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    onPressed: onSeekForward,
-                    icon: const Icon(LucideIcons.rotateCw, size: 19),
-                    tooltip:
-                        '${context.bheText('前进')} 1.5 ${context.bheText('秒')}',
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    onPressed: onPlayer,
-                    tooltip: context.bheText(
-                      candidate.player == null
-                          ? '球员标签'
-                          : '球员：${candidate.player}',
-                    ),
-                    icon: Icon(
-                      LucideIcons.tag,
-                      color: candidate.player == null
-                          ? BhePalette.textSecondary
-                          : _playerTagColor(candidate.player!),
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: onExclude,
-                      icon: const Icon(LucideIcons.x, size: 18),
-                      label: Text(context.bheText('不选')),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: onInclude,
-                      icon: const Icon(LucideIcons.check, size: 18),
-                      label: Text(context.bheText('选中')),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _handleMore(String value) {
-    switch (value) {
-      case 'range':
-        onEditRange();
-      case 'evidence':
-        onDetails();
-      case 'export':
-        onExport();
-    }
-  }
 }
 
 class _ReviewEmpty extends StatelessWidget {
@@ -5185,13 +4327,7 @@ class _ExportViewState extends State<_ExportView> {
                 ),
               ),
             ],
-            if (state.errorMessage != null) ...[
-              const SizedBox(height: 12),
-              _InlineNotice(
-                message: l10n?.text(state.errorMessage!) ?? state.errorMessage!,
-                error: true,
-              ),
-            ],
+            VideoSourceNotice(state: state),
           ],
         ),
       ),

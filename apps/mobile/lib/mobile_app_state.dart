@@ -16,6 +16,7 @@ import 'package:video_player/video_player.dart';
 import 'features/video_source/project_paths.dart';
 import 'features/video_source/project_file_commit.dart';
 import 'features/video_source/video_source_store.dart';
+import 'features/video_source/video_source_failure.dart';
 import 'media_bridge.dart';
 import 'native_analysis_engine.dart';
 
@@ -62,6 +63,52 @@ class MobileAppState extends ChangeNotifier {
   int? totalFrames;
   Duration? eta;
   String? errorMessage;
+  VideoSourceFailure? videoSourceFailure;
+  int videoSourceRevision = 0;
+  bool get videoMissing => videoSourceFailure == VideoSourceFailure.missing;
+  bool get canRelinkVideo => videoSourceFailure?.canRelink ?? false;
+  bool relinkingVideo = false;
+  bool relinkCancelling = false;
+  int _relinkSerial = 0;
+  bool _disposed = false;
+
+  void markVideoFailure(VideoSourceFailure failure) {
+    if (_disposed) return;
+    videoSourceFailure = failure;
+    errorMessage = failure.message;
+    notifyListeners();
+  }
+
+  void _recordVideoFailure(Object error, String? path) {
+    markVideoFailure(
+      error is VideoSourceMismatch
+          ? VideoSourceFailure.mismatch
+          : path != null && !File(path).existsSync()
+          ? VideoSourceFailure.missing
+          : VideoSourceFailure.unplayable,
+    );
+  }
+
+  void cancelVideoPreparation() {
+    if (!preparingVideo) return;
+    _invalidateVideoPreparation();
+    notifyListeners();
+  }
+
+  void cancelVideoRelink() {
+    if (!relinkingVideo || relinkCancelling) return;
+    _videoPreparationGeneration++;
+    relinkCancelling = true;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _videoPreparationGeneration++;
+    super.dispose();
+  }
+
   bool loading = true;
   bool preparingVideo = false;
   String preparingVideoMessage = '';
@@ -181,6 +228,7 @@ class MobileAppState extends ChangeNotifier {
             throw const VideoSourceCancelled();
           }
           project = next;
+          videoSourceRevision++;
         });
         _saveChain = task.then<void>(
           (_) {},
@@ -273,8 +321,13 @@ class MobileAppState extends ChangeNotifier {
     if (expected == null) return false;
     try {
       await _inspectVideo(File(expected.path), expected: expected);
+      if (project.video == expected) {
+        videoSourceFailure = null;
+        errorMessage = null;
+      }
       return true;
-    } on Object {
+    } on Object catch (error) {
+      if (project.video == expected) _recordVideoFailure(error, expected.path);
       return false;
     }
   }
@@ -297,11 +350,15 @@ class MobileAppState extends ChangeNotifier {
       // Existing records may share a legacy cache path. Migration is a copy;
       // only a fresh picker selection grants permission to move its cache.
       await _storeVideo(source, snapshot, generation);
+      if (_isCurrentVideoPreparation(generation, snapshot.id)) {
+        videoSourceFailure = null;
+        errorMessage = null;
+      }
     } on VideoSourceCancelled {
       return;
-    } on Object {
+    } on Object catch (error) {
       if (_isCurrentVideoPreparation(generation, snapshot.id)) {
-        errorMessage = '项目已打开，请重新选择原视频后继续。';
+        _recordVideoFailure(error, video.path);
       }
     }
   }
@@ -531,6 +588,7 @@ class MobileAppState extends ChangeNotifier {
   Future<void> _prepareVideo(String path, {String? name}) async {
     final projectId = project.id;
     final preparationGeneration = ++_videoPreparationGeneration;
+    videoSourceFailure = null;
     preparingVideo = true;
     preparingVideoMessage = '正在读取视频信息';
     errorMessage = null;
@@ -607,7 +665,9 @@ class MobileAppState extends ChangeNotifier {
         error: error,
         stackTrace: stack,
       );
-      errorMessage = '无法读取该视频，请换一个视频重试。';
+      if (_isCurrentVideoPreparation(preparationGeneration, projectId)) {
+        _recordVideoFailure(error, path);
+      }
     } finally {
       if (preparationGeneration == _videoPreparationGeneration) {
         preparingVideo = false;
@@ -618,15 +678,22 @@ class MobileAppState extends ChangeNotifier {
   }
 
   bool _isCurrentVideoPreparation(int generation, String projectId) =>
-      generation == _videoPreparationGeneration && project.id == projectId;
+      !_disposed &&
+      generation == _videoPreparationGeneration &&
+      project.id == projectId;
 
   void _invalidateVideoPreparation() {
     _videoPreparationGeneration++;
     preparingVideo = false;
     preparingVideoMessage = '';
+    _relinkSerial++;
+    relinkingVideo = false;
+    relinkCancelling = false;
   }
 
   void _resetTransientState() {
+    videoSourceFailure = null;
+    errorMessage = null;
     stage = AnalysisStage.idle;
     progress = 0;
     progressMessage = '';
@@ -676,20 +743,49 @@ class MobileAppState extends ChangeNotifier {
   }
 
   Future<void> relinkVideo() async {
-    if (analysing) await cancelAnalysis();
-    final result = await FilePicker.platform.pickFiles(type: FileType.video);
-    final file = result?.files.single;
-    final path = file?.path;
-    if (path == null) return;
-    await _storeVideo(
-      path,
-      project,
-      ++_videoPreparationGeneration,
-      fromPicker: true,
-      name: file?.name,
-    );
-    errorMessage = null;
+    if (relinkingVideo || preparingVideo || exporting) return;
+    var snapshot = project;
+    final generation = ++_videoPreparationGeneration;
+    final operation = ++_relinkSerial;
+    relinkingVideo = true;
+    relinkCancelling = false;
     notifyListeners();
+    String? path;
+    bool current() => _isCurrentVideoPreparation(generation, snapshot.id);
+    try {
+      if (analysing) {
+        await cancelAnalysis();
+        if (!current()) return;
+        snapshot = snapshot.copyWith(
+          lastAnalysisStatus: project.lastAnalysisStatus,
+          lastAnalysisMessage: project.lastAnalysisMessage,
+        );
+      }
+      if (!current()) return;
+      final picked = await _pickVideo();
+      if (picked == null || !current()) return;
+      path = picked.path;
+      await _storeVideo(
+        path,
+        snapshot,
+        generation,
+        fromPicker: true,
+        name: picked.name,
+      );
+      if (!current()) return;
+      videoSourceFailure = null;
+      errorMessage = null;
+    } on VideoSourceCancelled {
+      // Switching project, cancelling, or closing never changes the new page.
+    } on Object catch (error) {
+      if (current()) _recordVideoFailure(error, path);
+    } finally {
+      if (!_disposed && operation == _relinkSerial) {
+        relinkingVideo = false;
+        relinkCancelling = false;
+        notifyListeners();
+      }
+    }
   }
 
   void updateSettings(AnalysisSettings settings) {
@@ -924,7 +1020,7 @@ class MobileAppState extends ChangeNotifier {
   Future<void> exportClipsForPlayer(String? player) async {
     if (exporting) return;
     if (!await _matchesProjectVideo()) {
-      errorMessage = '请先重新选择原视频。';
+      errorMessage ??= '请先重新选择原视频。';
       notifyListeners();
       return;
     }
@@ -974,7 +1070,7 @@ class MobileAppState extends ChangeNotifier {
   Future<void> mergeClipsForPlayer(String? player) async {
     if (exporting) return;
     if (!await _matchesProjectVideo()) {
-      errorMessage = '请先重新选择原视频。';
+      errorMessage ??= '请先重新选择原视频。';
       notifyListeners();
       return;
     }
@@ -1157,8 +1253,14 @@ class MobileAppState extends ChangeNotifier {
 
   Future<void> cancelAnalysis() async {
     if (!analysing) return;
-    _analysisGeneration++;
+    final generation = ++_analysisGeneration;
+    final projectId = project.id;
     await analysisEngine.cancel();
+    if (generation != _analysisGeneration ||
+        project.id != projectId ||
+        _disposed) {
+      return;
+    }
     analysing = false;
     analysisStartedAt = null;
     stage = AnalysisStage.cancelled;
