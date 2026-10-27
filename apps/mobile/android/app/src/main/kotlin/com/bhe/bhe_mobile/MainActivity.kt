@@ -800,9 +800,7 @@ class MainActivity : FlutterActivity() {
             var transaction: MergeOutputTransaction? = null
             try {
                 val destination = File(outputPath).absoluteFile
-                val parent = destination.parentFile ?: throw IllegalArgumentException("无效的输出目录")
-                if (!parent.exists() && !parent.mkdirs() && !parent.isDirectory) throw IllegalStateException("无法创建输出目录")
-                val temporary = File.createTempFile(".bhe-merge-", ".mp4", parent)
+                val temporary = MergeOutputFiles.create(destination)
                 val currentTransaction = MergeOutputTransaction(temporary, destination, cancelled) { from, to ->
                     android.system.Os.rename(from.absolutePath, to.absolutePath)
                 }
@@ -819,8 +817,12 @@ class MainActivity : FlutterActivity() {
                 }
                 muxer = currentMuxer
                 val selection: ExportTrackSelection
+                val videoTracks: Set<Int>
                 try {
                     selection = addExportableTracks(firstExtractor, currentMuxer)
+                    videoTracks = selection.trackMap.keys.filter { index ->
+                        firstExtractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true
+                    }.toSet()
                     applySourceOrientation(firstExtractor, currentMuxer)
                 } finally {
                     firstExtractor.release()
@@ -832,6 +834,7 @@ class MainActivity : FlutterActivity() {
                 var buffer = ByteBuffer.allocate(16 * 1024 * 1024)
                 val info = android.media.MediaCodec.BufferInfo()
                 var outputBaseUs = 0L
+                var writtenVideoSamples = 0L
                 for ((startMs, endMs) in clips) {
                     if (cancelled.get()) throw InterruptedException("合并导出已取消")
                     val extractor = MediaExtractor()
@@ -841,7 +844,8 @@ class MainActivity : FlutterActivity() {
                         val endUs = endMs * 1000L
                         extractor.seekTo(startMs * 1000L, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                         val clipStartUs = extractor.sampleTime
-                        if (clipStartUs < 0L) continue
+                        MergeMediaFinalizer.requireLocation(clipStartUs)
+                        var intervalVideoSamples = 0L
                         while (true) {
                             if (cancelled.get()) throw InterruptedException("合并导出已取消")
                             val sourceTrack = extractor.sampleTrackIndex
@@ -861,24 +865,34 @@ class MainActivity : FlutterActivity() {
                                     (sampleTime - clipStartUs).coerceAtLeast(0L)
                                 info.flags = extractor.sampleFlags
                                 currentMuxer.writeSampleData(muxTrack, buffer, info)
+                                if (sourceTrack in videoTracks) {
+                                    intervalVideoSamples++
+                                    writtenVideoSamples++
+                                }
                             }
                             extractor.advance()
                         }
+                        MergeMediaFinalizer.requireVideoSamples(intervalVideoSamples)
                         outputBaseUs += (endUs - clipStartUs).coerceAtLeast(1L)
                     } finally {
                         extractor.release()
                     }
                 }
-                currentMuxer.stop()
-                muxerStarted = false
-                currentMuxer.release()
-                muxer = null
-                currentTransaction.publish()
+                MergeMediaFinalizer.finish(
+                    transaction = currentTransaction,
+                    writtenVideoSamples = writtenVideoSamples,
+                    stop = { currentMuxer.stop(); muxerStarted = false },
+                    release = { currentMuxer.release(); muxer = null },
+                    inspect = { file -> AndroidMergeMediaInspector.inspect(file, cancelled) },
+                )
                 AppDiagnostics.event("export.completed")
                 mainHandler.post { result.success(exportResult(outputPath, selection) + mapOf("mergedOverlapCount" to plan.mergedOverlapCount, "committed" to true)) }
             } catch (_: InterruptedException) {
                 AppDiagnostics.event("export.cancelled")
                 mainHandler.post { result.error("EXPORT_CANCELLED", "合并导出已取消", null) }
+            } catch (error: MergeRangeUnavailable) {
+                AppDiagnostics.event("export.failed", error = error)
+                mainHandler.post { result.error("EXPORT_RANGE_UNREADABLE", error.message, NativeFailureDetails.from(error)) }
             } catch (error: Exception) {
                 AppDiagnostics.event("export.failed", error = error)
                 mainHandler.post { result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error)) }

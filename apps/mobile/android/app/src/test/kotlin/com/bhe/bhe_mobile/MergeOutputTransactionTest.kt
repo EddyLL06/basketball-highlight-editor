@@ -21,7 +21,7 @@ class MergeOutputTransactionTest {
             val target = File(dir, "merged.mp4").apply { writeText("old") }
             val temp = File(dir, "temp.mp4").apply { writeText("new") }
             val tx = MergeOutputTransaction(temp, target, AtomicBoolean(false), ::atomicReplace)
-            tx.publish()
+            tx.publish { }
             assertFalse(tx.cancel())
             tx.cleanup()
             assertEquals("new", target.readText())
@@ -38,7 +38,7 @@ class MergeOutputTransactionTest {
                 val other = File(dir, "other.mp4").apply { writeText("other") }
                 val tx = MergeOutputTransaction(temp, target, AtomicBoolean(false)) { _, _ -> throw IOException("injected rename failure") }
                 if (cancel) assertTrue(tx.cancel())
-                assertThrows(if (cancel) InterruptedException::class.java else IOException::class.java) { tx.publish() }
+                assertThrows(if (cancel) InterruptedException::class.java else IOException::class.java) { tx.publish { } }
                 tx.cleanup()
                 assertEquals("old", target.readText())
                 assertEquals("other", other.readText())
@@ -53,7 +53,7 @@ class MergeOutputTransactionTest {
             val target = File(dir, "merged.mp4").apply { writeText("old") }
             val temp = File(dir, "temp.mp4").apply { createNewFile() }
             val tx = MergeOutputTransaction(temp, target, AtomicBoolean(false), ::atomicReplace)
-            assertThrows(IllegalStateException::class.java) { tx.publish() }
+            assertThrows(IllegalStateException::class.java) { tx.publish { } }
             tx.cleanup()
             assertEquals("old", target.readText())
         } finally { dir.deleteRecursively() }
@@ -71,7 +71,7 @@ class MergeOutputTransactionTest {
                 check(release.await(5, TimeUnit.SECONDS))
                 atomicReplace(from, to)
             }
-            val published = Thread { tx.publish() }.apply { start() }
+            val published = Thread { tx.publish { } }.apply { start() }
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             var cancelled: Boolean? = null
             val cancelling = Thread { cancelled = tx.cancel() }.apply { start() }

@@ -18,11 +18,15 @@ internal class MergeOutputTransaction(
         return true
     }
 
-    @Synchronized fun publish() {
+    fun publish(validate: (File) -> Unit) {
         if (cancelled.get()) throw InterruptedException("合并导出已取消")
         check(temporary.isFile && temporary.length() > 0) { "合并导出文件为空" }
-        replace(temporary, destination)
-        committed = true
+        validate(temporary)
+        synchronized(this) {
+            if (cancelled.get()) throw InterruptedException("合并导出已取消")
+            replace(temporary, destination)
+            committed = true
+        }
     }
 
     fun cleanup() {

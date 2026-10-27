@@ -15,7 +15,7 @@ class _ExportOverlapNotice extends StatelessWidget {
     }
     return Padding(
       padding: const EdgeInsets.only(top: 12),
-      child: _InlineNotice(message: context.bheText('有 $count 个重叠片段已合并为一段')),
+      child: _InlineNotice(message: context.bheText('合并后减少了 $count 个片段')),
     );
   }
 }

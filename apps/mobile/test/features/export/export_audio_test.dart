@@ -139,8 +139,8 @@ void main() {
           await tester.tap(find.byTooltip(l10n.text('导出')));
           await tester.pump();
           final message = language == 'zh'
-              ? '有 2 个重叠片段已合并为一段'
-              : '2 overlapping clips merged into continuous segments';
+              ? '合并后减少了 2 个片段'
+              : 'Merging reduced the clip count by 2.';
           await tester.scrollUntilVisible(find.text(message), 300);
           expect(find.text(message), findsOneWidget);
           expect(find.text(l10n.text('导出成功，部分音轨无法保留')), findsOneWidget);

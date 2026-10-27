@@ -82,6 +82,10 @@ String? _translateDynamic(String source) {
   final mobileFormat = RegExp(r'^这个视频的格式（(.+)）手机无法处理。$').firstMatch(source);
   if (mobileFormat != null) return 'This phone cannot process this video format (${mobileFormat.group(1)}).';
 
+  final reducedClips = RegExp(r'^合并后减少了 (\d+) 个片段$').firstMatch(source);
+  if (reducedClips != null) {
+    return 'Merging reduced the clip count by ${reducedClips.group(1)}.';
+  }
   final mergedOverlap = RegExp(r'^有 (\d+) 个重叠片段已合并为一段$').firstMatch(source);
   if (mergedOverlap != null) {
     return '${mergedOverlap.group(1)} overlapping clips merged into continuous segments';
