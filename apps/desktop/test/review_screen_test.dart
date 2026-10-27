@@ -8,11 +8,59 @@ import 'package:bhe_l10n/bhe_l10n.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:desktop/features/review/review_screen.dart';
+import 'package:desktop/components/cs_progress_track.dart';
 import 'package:desktop/features/review/media_readiness.dart';
 import 'package:desktop/providers/project_state.dart';
 import 'package:desktop/theme/tokens.dart';
 
 void main() {
+  for (final language in ['zh', 'en']) {
+    testWidgets('preflight stage and percentages stay consistent $language', (
+      tester,
+    ) async {
+      final notifier = _TagReviewNotifier(
+        const ProjectState(
+          job: {
+            'state': 'running',
+            'stage': 'engine_preflight',
+            'progress': 0.01,
+          },
+        ),
+      );
+      await _pumpReview(
+        tester,
+        notifier.initialState,
+        notifier: notifier,
+        locale: Locale(language),
+      );
+      await tester.pumpAndSettle();
+      for (final stage in [
+        ('engine_preflight', 0.01, '检查分析引擎', 'Checking analysis engine'),
+        ('prepare_proxy', 0.01, '生成预览视频', 'Generate preview video'),
+        ('coarse_scan', 0.35, '快速扫描候选', 'Scan for candidates'),
+      ]) {
+        notifier.replaceState(
+          notifier.current.copyWith(
+            job: {'state': 'running', 'stage': stage.$1, 'progress': stage.$2},
+          ),
+        );
+        await tester.pumpAndSettle();
+        final label = language == 'en' ? stage.$4 : stage.$3;
+        expect(
+          find.text('$label · ${(stage.$2 * 100).round()}%'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('engine_preflight'), findsNothing);
+        expect(
+          tester
+              .widget<CsProgressTrack>(find.byType(CsProgressTrack).first)
+              .value,
+          stage.$2,
+        );
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
   for (final locale in ['zh', 'en']) {
     for (final size in [const Size(1200, 800), const Size(760, 900)]) {
       testWidgets('range and overlap markers $locale $size', (tester) async {

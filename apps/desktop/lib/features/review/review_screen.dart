@@ -7238,6 +7238,7 @@ String _analysisDetailLabel(
       : const <String, dynamic>{};
   final parts = <String>[];
   for (final entry in const <String, String>{
+    'engine_preflight': '引擎自检',
     'prepare_proxy': '代理',
     'coarse_scan': '粗扫',
     'generate_candidates': '候选',
@@ -7275,6 +7276,7 @@ String _formatSeconds(double value) {
 String _stageLabel(String stage) =>
     const <String, String>{
       'validate_input': '检查视频输入',
+      'engine_preflight': '检查分析引擎',
       'prepare_proxy': '生成预览视频',
       'coarse_scan': '快速扫描候选',
       'generate_candidates': '生成候选',

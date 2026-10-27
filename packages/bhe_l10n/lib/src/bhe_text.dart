@@ -15,6 +15,14 @@ extension BheLocalizedText on BheLocalizations {
         : source;
     final normalizedDirect = _englishText[normalized];
     if (normalizedDirect != null) return normalizedDirect;
+    final newline = normalized.indexOf('\n');
+    if (newline >= 0) {
+      final first = normalized.substring(0, newline);
+      final translated = text(first);
+      if (translated != first) {
+        return '$translated${normalized.substring(newline)}';
+      }
+    }
   final codedError = RegExp(r'^([A-Z][A-Z0-9_]+): (.+)$').firstMatch(normalized);
   if (codedError != null) {
     return '${codedError.group(1)}: ${text(codedError.group(2)!)}';
@@ -371,6 +379,13 @@ String _englishDuration(String value) => value
     .trim();
 
 const _englishText = <String, String>{
+  '检查分析引擎': 'Checking analysis engine',
+  '引擎自检': 'Engine check',
+  '分析引擎在这台电脑上无法启动（运行库初始化失败）。请先安装最新的 VC++ 运行库后重启电脑，仍然不行请把 CPU 型号和诊断信息发给我们。':
+      'The analysis engine could not start on this computer (runtime initialization failed). Install the latest Visual C++ Redistributable and restart your computer. If the problem persists, send us your CPU model and diagnostic information.',
+  '分析引擎在这台电脑上无法启动（运行库初始化失败）。请检查或重新安装应用，仍然不行请把系统版本、CPU 型号和诊断信息发给我们。':
+      'The analysis engine could not start on this computer (runtime initialization failed). Check or reinstall the app. If the problem persists, send us your OS version, CPU model, and diagnostic information.',
+
   '已调整时长': 'Duration adjusted',
   '与上一段重叠': 'Overlaps the previous kept clip',
   '视频不可用': 'Video unavailable',
