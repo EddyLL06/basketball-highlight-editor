@@ -21,7 +21,12 @@ class FakeVideoPlatform extends VideoPlayerPlatform {
 
   @override
   Stream<VideoEvent> videoEventsFor(int playerId) => failInitialize
-      ? Stream.error(PlatformException(code: 'VideoError'))
+      ? Stream.error(
+          PlatformException(
+            code: 'VideoError',
+            message: 'injected initialization failure',
+          ),
+        )
       : Stream.value(
           VideoEvent(
             eventType: VideoEventType.initialized,

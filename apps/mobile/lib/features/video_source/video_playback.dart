@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:developer' as developer;
 
 import 'package:video_player/video_player.dart';
 
@@ -21,6 +22,14 @@ Future<VideoPlayerController?> openSourceVideo(
   } catch (_) {
     if (isCurrent()) onFailure(VideoSourceFailure.unplayable);
   }
-  await player.dispose();
+  try {
+    await player.dispose();
+  } catch (error, stack) {
+    developer.log(
+      'Video player disposal failed',
+      error: error,
+      stackTrace: stack,
+    );
+  }
   return null;
 }
