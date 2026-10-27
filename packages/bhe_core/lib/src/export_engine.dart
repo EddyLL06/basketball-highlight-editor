@@ -12,12 +12,14 @@ class ExportProgress {
     required this.message,
     this.outputPath,
     this.skippedAudioTracks = const [],
+    this.mergedOverlapCount,
   });
 
   final double progress;
   final String message;
   final String? outputPath;
   final List<SkippedAudioTrack> skippedAudioTracks;
+  final int? mergedOverlapCount;
 }
 
 abstract interface class MobileExportEngine {

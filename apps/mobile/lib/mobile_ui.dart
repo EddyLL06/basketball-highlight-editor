@@ -38,6 +38,7 @@ part 'features/project_rename/project_rename_dialog.dart';
 part 'features/player_roster/roster_confirmation.dart';
 part 'features/player_groups/player_groups_sheet.dart';
 part 'features/player_groups/player_group_editor.dart';
+part 'features/export/export_overlap_notice.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 
@@ -4279,6 +4280,7 @@ class _ExportViewState extends State<_ExportView> {
                 ),
               ),
             ],
+            _ExportOverlapNotice(state: state),
             _ExportAudioNotice(state: state),
             VideoSourceNotice(state: state),
           ],

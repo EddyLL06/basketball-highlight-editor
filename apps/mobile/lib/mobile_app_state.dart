@@ -192,6 +192,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   bool exporting = false;
   bool exportCancelled = false;
   bool exportAudioSkipped = false;
+  int? exportMergedOverlapCount;
   List<String> exportedPaths = const [];
   final ProjectMutationQueue _mutations = ProjectMutationQueue();
   Future<void> get pendingProjectWrites => _mutations.drained;
@@ -1083,6 +1084,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         errorMessage = null;
         exportedPaths = const [];
         exportAudioSkipped = false;
+        exportMergedOverlapCount = null;
         recentProjects = [
           project,
           ...recentProjects.where((item) => item.id != project.id),
@@ -1361,6 +1363,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     exporting = false;
     exportedPaths = const [];
     exportAudioSkipped = false;
+    exportMergedOverlapCount = null;
     analysisStartedAt = null;
   }
 
@@ -1620,6 +1623,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           project = recentProjects.first;
           exportedPaths = const [];
           exportAudioSkipped = false;
+          exportMergedOverlapCount = null;
         }
         final directory = await _dataDirectory();
         for (final name in ['project.bhe.json', 'project.bhe']) {
@@ -1963,6 +1967,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   Future<void> exportClipsForPlayer(String? player) async {
     if (exporting) return;
+    exportMergedOverlapCount = null;
+    notifyListeners();
     final projectId = project.id, session = _projectSession;
     bool current() =>
         !_disposed && project.id == projectId && _projectSession == session;
@@ -1989,6 +1995,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     exportCancelled = false;
     exportedPaths = const [];
     exportAudioSkipped = false;
+    exportMergedOverlapCount = null;
     final stopwatch = Stopwatch()..start();
     diagnosticError = null;
     errorMessage = null;
@@ -2035,6 +2042,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   Future<void> mergeClipsForPlayer(String? player) async {
     if (exporting) return;
+    exportMergedOverlapCount = null;
+    notifyListeners();
     final projectId = project.id, session = _projectSession;
     bool current() =>
         !_disposed && project.id == projectId && _projectSession == session;
@@ -2063,6 +2072,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     exportCancelled = false;
     exportedPaths = const [];
     exportAudioSkipped = false;
+    exportMergedOverlapCount = null;
     final stopwatch = Stopwatch()..start();
     diagnosticError = null;
     errorMessage = null;
@@ -2076,6 +2086,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       )) {
         if (!current()) return;
         exportAudioSkipped |= update.skippedAudioTracks.isNotEmpty;
+        exportMergedOverlapCount = update.mergedOverlapCount;
         progress = update.progress;
         progressMessage = update.message;
         if (update.outputPath != null) {
@@ -2090,11 +2101,13 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         inverse: (before) => _restoreOperationFields(before, {'export'}),
         operation: 'export',
       )) {
+        exportMergedOverlapCount = null;
         return;
       }
       MobileDiagnostics.instance.event('operation.completed');
     } on Object catch (error, stack) {
       if (current()) {
+        exportMergedOverlapCount = null;
         recordDiagnosticFailure(error, stack, operation: 'export');
         notifyListeners();
       } else {
@@ -2112,6 +2125,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   Future<void> cancelExport() async {
     if (!exporting) return;
     exportCancelled = true;
+    exportMergedOverlapCount = null;
     try {
       await exportEngine.cancel();
       progressMessage = '导出已取消';
