@@ -83,6 +83,8 @@ class MainActivity : FlutterActivity() {
                     "isAvailable" -> result.success(true)
                     "exportClip" -> exportClip(call, result)
                     "mergeClips" -> mergeClips(call, result)
+                    "registerMergeExport" -> registerMergeExport(call, result)
+                    "releaseMergeExport" -> releaseMergeExport(call, result)
                     "cancelExport" -> cancelExport(call, result)
                     "saveToLibrary" -> saveToLibrary(call, result)
                     else -> result.notImplemented()
@@ -747,6 +749,21 @@ class MainActivity : FlutterActivity() {
         }.start()
     }
 
+    private fun registerMergeExport(call: MethodCall, result: MethodChannel.Result) {
+        val id = call.argument<String>("exportId")
+        if (id.isNullOrBlank() || exportCancelled.putIfAbsent(id, AtomicBoolean(false)) != null) {
+            result.error("INVALID_ARGUMENT", "合并导出任务无效", null)
+            return
+        }
+        result.success(true)
+    }
+
+    private fun releaseMergeExport(call: MethodCall, result: MethodChannel.Result) {
+        val id = call.argument<String>("exportId")
+        if (id != null && !mergeTransactions.containsKey(id)) exportCancelled.remove(id)
+        result.success(null)
+    }
+
     private fun mergeClips(call: MethodCall, result: MethodChannel.Result) {
         AppDiagnostics.event("export.start", mapOf("operation" to "mergeClips"))
         val exportId = call.argument<String>("exportId") ?: "merge-${System.nanoTime()}"
@@ -767,8 +784,16 @@ class MainActivity : FlutterActivity() {
             return
         }
         val clips = plan.intervals
-        val cancelled = AtomicBoolean(false)
-        exportCancelled[exportId] = cancelled
+        val reserved = call.argument<Boolean>("reservationRequired") == true
+        val cancelled = if (reserved) {
+            exportCancelled[exportId] ?: run {
+                result.error("EXPORT_CANCELLED", "合并导出已取消", null)
+                return
+            }
+        } else {
+            val flag = AtomicBoolean(false)
+            exportCancelled.putIfAbsent(exportId, flag) ?: flag
+        }
         Thread {
             var muxer: MediaMuxer? = null
             var muxerStarted = false

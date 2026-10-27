@@ -2079,6 +2079,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     try {
       final outputPath =
           '${await _projectPath(project.id, area: 'exports')}/${project.id}_merged.mp4';
+      if (!current() || exportCancelled) return;
       await for (final update in exportEngine.mergeClips(
         video: project.video!,
         candidates: candidates,

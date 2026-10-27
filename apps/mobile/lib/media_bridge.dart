@@ -24,6 +24,7 @@ class NativeMediaExportEngine implements MobileExportEngine {
 
   static const _channel = MethodChannel('com.bhe.bhe/mobile_media');
   bool _cancelled = false;
+  String? _activeMergeId;
 
   static Future<bool> isAvailable() async {
     try {
@@ -121,10 +122,25 @@ class NativeMediaExportEngine implements MobileExportEngine {
   }) async* {
     if (candidates.isEmpty) return;
     _cancelled = false;
-    yield const ExportProgress(progress: 0, message: '正在准备合并导出');
+    final exportId = 'merge-${DateTime.now().microsecondsSinceEpoch}';
+    _activeMergeId = exportId;
+    var reserved = false;
     try {
+      try {
+        reserved =
+            await _channel.invokeMethod<bool>('registerMergeExport', {
+              'exportId': exportId,
+            }) ??
+            false;
+      } on MissingPluginException {
+        // Older platforms (including iOS) do not implement reservations.
+      }
+      if (_cancelled) throw const MobileExportException('导出已取消');
+      yield const ExportProgress(progress: 0, message: '正在准备合并导出');
+      if (_cancelled) throw const MobileExportException('导出已取消');
       final raw = await _channel.invokeMethod<Object?>('mergeClips', {
-        'exportId': 'merge-${DateTime.now().microsecondsSinceEpoch}',
+        'exportId': exportId,
+        'reservationRequired': reserved,
         'inputPath': video.path,
         'outputPath': outputPath,
         'clips': [
@@ -147,6 +163,21 @@ class NativeMediaExportEngine implements MobileExportEngine {
     } on PlatformException catch (error, stack) {
       MobileDiagnostics.instance.error(error, stack, operation: 'export');
       throw MobileDiagnosticException(error, 'export');
+    } finally {
+      if (reserved) {
+        try {
+          await _channel.invokeMethod<void>('releaseMergeExport', {
+            'exportId': exportId,
+          });
+        } on Object catch (error, stack) {
+          MobileDiagnostics.instance.error(
+            error,
+            stack,
+            operation: 'export.release',
+          );
+        }
+      }
+      if (_activeMergeId == exportId) _activeMergeId = null;
     }
   }
 
@@ -154,7 +185,10 @@ class NativeMediaExportEngine implements MobileExportEngine {
   Future<void> cancel() async {
     _cancelled = true;
     try {
-      await _channel.invokeMethod<void>('cancelExport');
+      await _channel.invokeMethod<void>(
+        'cancelExport',
+        _activeMergeId == null ? null : {'exportId': _activeMergeId},
+      );
     } on MissingPluginException {
       return;
     } on PlatformException catch (error, stack) {

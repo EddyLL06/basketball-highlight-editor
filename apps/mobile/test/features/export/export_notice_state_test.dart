@@ -75,4 +75,54 @@ void main() {
       expect(f.state.exportMergedOverlapCount, isNull);
     },
   );
+  test(
+    'cancel while resolving output path prevents native registration or merge',
+    () async {
+      final source = await f.file('original.mp4', 'original');
+      f.state.project = f.project(source.path);
+      final existing = await f.file(
+        'BHE Mobile/exports/A/A_merged.mp4',
+        'previous',
+      );
+      final entered = Completer<void>(), release = Completer<void>();
+      var first = true, calls = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/path_provider'),
+            (_) async {
+              if (first) {
+                first = false;
+                entered.complete();
+                await release.future;
+              }
+              return f.root.path;
+            },
+          );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'mergeClips' ||
+                call.method == 'registerMergeExport') {
+              calls++;
+            }
+            return null;
+          });
+      try {
+        final pending = f.state.mergeClips();
+        await entered.future;
+        await f.state.cancelExport();
+        release.complete();
+        await pending;
+        expect(calls, 0);
+        expect(await existing.readAsString(), 'previous');
+        expect(f.state.exportMergedOverlapCount, isNull);
+      } finally {
+        if (!release.isCompleted) release.complete();
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              const MethodChannel('plugins.flutter.io/path_provider'),
+              (_) async => f.root.path,
+            );
+      }
+    },
+  );
 }
