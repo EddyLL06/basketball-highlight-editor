@@ -36,6 +36,11 @@ void main() {
     expect(isNewerVersion('0.1.10', '0.1.10+234a9d7'), isFalse);
     expect(isNewerVersion('v0.2.0', '0.1.10'), isTrue);
     expect(isNewerVersion('0.1.11', 'dev'), isFalse);
+    // 平台热修复包的应用内版本带 + 构建标记：和同版本相等，比下一个正式版小。
+    expect(isNewerVersion('0.1.12', '0.1.12+android.1'), isFalse);
+    expect(isNewerVersion('0.1.13', '0.1.12+android.1'), isTrue);
+    // 带 - 的写法会解析失败，被当成开发版，悄悄关掉检查更新，所以发布流程必须转换。
+    expect(compareVersions('0.1.12-android.1', '0.1.12-android.1'), isNull);
   });
 
   test('accepts a manifest signed by the release key with openssl', () async {

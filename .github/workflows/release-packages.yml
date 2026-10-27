@@ -500,10 +500,13 @@ jobs:
         run: |
           set -euo pipefail
           version="${TAG_NAME#v}"
+          # 更新检查只认数字版本加 + 构建标记：0.1.12-android.1 会被当成无法解析的开发版，
+          # 悄悄关掉检查更新。发布标签和安装包文件名仍用 -android.N。
+          app_version="${version/-android./+android.}"
           flutter build apk --release \
             --build-name="$version" \
             --build-number="${GITHUB_RUN_NUMBER}" \
-            --dart-define=BHE_VERSION="$version"
+            --dart-define=BHE_VERSION="$app_version"
           apk="build/app/outputs/flutter-apk/app-release.apk"
           # 用固定证书显式签一次，避免依赖 Gradle 在 CI 里选中的调试密钥。
           apksigner_bin="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
