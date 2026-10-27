@@ -40,7 +40,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: desktop-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '-dryrun' || '' }}
+  group: desktop-release-${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'dryrun' || 'production' }}-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -612,6 +612,7 @@ jobs:
       cancel-in-progress: false
     outputs:
       publish_status: ${{ steps.publish.outputs.status }}
+      failure_stage: ${{ steps.failure_stage.outputs.stage }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -627,16 +628,20 @@ jobs:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
     steps:
       - name: Check out publishing tools
+        id: checkout_publisher
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           path: publisher
       - name: Check out exact release notes
+        id: checkout_source
         uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG_NAME }}
           path: source
       - name: Configure Alibaba Cloud credentials
+        id: credentials
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         uses: aliyun/configure-aliyun-credentials-action@v1
         with:
           role-to-assume: ${{ vars.ALIYUN_RAM_ROLE_ARN }}
@@ -645,6 +650,8 @@ jobs:
           role-session-expiration: 1800
           audience: sts.aliyuncs.com
       - name: Install ossutil
+        id: install
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         shell: bash
         run: |
           set -euo pipefail
@@ -652,6 +659,7 @@ jobs:
           go install "github.com/aliyun/ossutil@${OSSUTIL_VERSION}"
           echo "$go_bin" >> "$GITHUB_PATH"
       - name: Download exact release assets
+        id: download_release
         if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         shell: bash
         env:
@@ -670,18 +678,33 @@ jobs:
           for pattern in "${patterns[@]}"; do args+=(--pattern "$pattern"); done
           gh release download "${args[@]}"
       - name: Download built assets for rehearsal
+        id: download_build
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         uses: actions/download-artifact@v4
         with:
           pattern: BHE-*
           path: ${{ runner.temp }}/bhe-release-assets
           merge-multiple: true
+      - name: Configure ossutil credentials
+        id: config
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        shell: bash
+        run: |
+          set +x
+          set -euo pipefail
+          umask 077
+          config="$RUNNER_TEMP/bhe-ossutilconfig"
+          ossutil config --config-file "$config" --endpoint "$OSS_ENDPOINT" \
+            --access-key-id "$ALIBABA_CLOUD_ACCESS_KEY_ID" \
+            --access-key-secret "$ALIBABA_CLOUD_ACCESS_KEY_SECRET" \
+            --sts-token "$ALIBABA_CLOUD_SECURITY_TOKEN"
       - name: Publish verified update channel
         id: publish
         shell: bash
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.BHE_UPDATE_SIGNING_KEY }}
         run: |
+          set +x
           set -euo pipefail
           test -n "$UPDATE_SIGNING_KEY"
           config="$RUNNER_TEMP/bhe-ossutilconfig"
@@ -689,16 +712,17 @@ jobs:
           trap 'rm -f "$key" "$config"' EXIT
           umask 077
           printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key"
-          ossutil config --config-file "$config" --endpoint "$OSS_ENDPOINT" \
-            --access-key-id "$ALIBABA_CLOUD_ACCESS_KEY_ID" \
-            --access-key-secret "$ALIBABA_CLOUD_ACCESS_KEY_SECRET" \
-            --sts-token "$ALIBABA_CLOUD_SECURITY_TOKEN"
-          dry_run_arg=
-          if [[ "$DRY_RUN" == "true" ]]; then dry_run_arg=--dry-run; fi
+          transport_args=(--oss-root "$OSS_BUCKET")
+          if [[ "$DRY_RUN" == "true" ]]; then
+            dry_run_arg=--dry-run
+          else
+            dry_run_arg=
+            transport_args+=(--oss-config "$config")
+          fi
           python3 publisher/scripts/publish_release_update.py \
             --tag "$TAG_NAME" --platform "$RELEASE_PLATFORM" \
             --assets-dir "$RUNNER_TEMP/bhe-release-assets" \
-            --oss-root "$OSS_BUCKET" --oss-config "$config" \
+            "${transport_args[@]}" \
             --prefix "$OSS_PREFIX" --android-key "$OSS_ANDROID_KEY" \
             --base-url "https://shengshengniannian.oss-cn-beijing.aliyuncs.com/$OSS_PREFIX" \
             --android-base-url "https://oss.shengshengniannian.com/$OSS_PREFIX" \
@@ -706,7 +730,14 @@ jobs:
             --readme-zh source/README.md --readme-en source/README.en.md \
             --signing-key "$key" --work-dir "$RUNNER_TEMP/bhe-update-channel" ${dry_run_arg:+--dry-run}
           python3 -c 'import json,os; s=json.load(open(os.path.join(os.environ["RUNNER_TEMP"],"bhe-update-channel","publish-summary.json"))); print("status="+s["status"])' >> "$GITHUB_OUTPUT"
+      - name: Remove temporary credentials
+        if: always()
+        shell: bash
+        run: |
+          set +x
+          rm -f "$RUNNER_TEMP/bhe-update-signing-key.pem" "$RUNNER_TEMP/bhe-ossutilconfig"
       - name: Preserve outcome and manifest files (see verification status)
+        id: backup
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -716,9 +747,33 @@ jobs:
             ${{ runner.temp }}/bhe-update-channel/*.json.sig
           if-no-files-found: warn
 
+
+      - name: Record failure stage
+        id: failure_stage
+        if: always()
+        shell: bash
+        env:
+          CHECKOUT_PUBLISHER: ${{ steps.checkout_publisher.outcome }}
+          CHECKOUT_SOURCE: ${{ steps.checkout_source.outcome }}
+          CREDENTIALS: ${{ steps.credentials.outcome }}
+          INSTALL: ${{ steps.install.outcome }}
+          DOWNLOAD_RELEASE: ${{ steps.download_release.outcome }}
+          DOWNLOAD_BUILD: ${{ steps.download_build.outcome }}
+          CONFIG: ${{ steps.config.outcome }}
+          BACKUP: ${{ steps.backup.outcome }}
+          PUBLISH: ${{ steps.publish.outcome }}
+        run: |
+          stage=none
+          for pair in "checkout_publisher:$CHECKOUT_PUBLISHER" "checkout_source:$CHECKOUT_SOURCE" \
+            "credentials:$CREDENTIALS" "install:$INSTALL" "download_release:$DOWNLOAD_RELEASE" \
+            "download_build:$DOWNLOAD_BUILD" "config:$CONFIG" "publish:$PUBLISH" "backup:$BACKUP"; do
+            case "$pair" in *:failure|*:cancelled) stage="${pair%%:*}"; break ;; esac
+          done
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
+
   publication-status:
     name: Report production channel outcome
-    needs: [release-plan, oss-upload]
+    needs: [release-plan, macos, windows, android, release, oss-upload]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -727,15 +782,28 @@ jobs:
           OUTCOME: ${{ needs.oss-upload.result }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
           PUBLISH_STATUS: ${{ needs.oss-upload.outputs.publish_status }}
+          FAILURE_STAGE: ${{ needs.oss-upload.outputs.failure_stage }}
+          PLAN_OUTCOME: ${{ needs.release-plan.result }}
+          MACOS_OUTCOME: ${{ needs.macos.result }}
+          WINDOWS_OUTCOME: ${{ needs.windows.result }}
+          ANDROID_OUTCOME: ${{ needs.android.result }}
+          RELEASE_OUTCOME: ${{ needs.release.result }}
         run: |
           if [[ "$DRY_RUN" == "true" ]]; then
-            case "$OUTCOME:$PUBLISH_STATUS" in
-              success:dry-run-ok) result='演练完成 dry-run-ok' ;;
-              failure:*) result='演练失败' ;;
-              cancelled:*) result='演练取消' ;;
+            case "$PLAN_OUTCOME:$OUTCOME:$PUBLISH_STATUS" in
+              failure:*) result='计划阶段拒绝'; FAILURE_STAGE=release-plan ;;
+              cancelled:*) result='计划阶段取消'; FAILURE_STAGE=release-plan ;;
+              *:success:dry-run-ok) result='演练完成 dry-run-ok' ;;
+              *:failure:*) result='演练失败（OSS job）' ;;
+              *:cancelled:*) result='演练取消（OSS job）' ;;
               *) result='演练未执行' ;;
             esac
-            printf '### 更新通道演练\n\n%s。未写入 OSS 发布对象；Actions 产物中保存演练文件（若已生成）。dry-run-ok 不代表正式发布成功。\n' "$result" >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$result" == '演练未执行' ]]; then
+              for pair in "macos:${MACOS_OUTCOME:-}" "windows:${WINDOWS_OUTCOME:-}" "android:${ANDROID_OUTCOME:-}" "release:${RELEASE_OUTCOME:-}"; do
+                case "$pair" in *:failure|*:cancelled) FAILURE_STAGE="${pair%%:*}"; break ;; esac
+              done
+            fi
+            printf '### 更新通道演练\n\n计划阶段：%s；OSS job：%s；失败阶段：%s；结果：%s。未写入 OSS 发布对象；Actions 产物中保存演练文件（若已生成）。dry-run-ok 不代表正式发布成功。反映的是读取当时的通道状态，不保证之后发布一定成功；如有并行的正式发布请重跑。\n' "$PLAN_OUTCOME" "$OUTCOME" "${FAILURE_STAGE:-none}" "$result" >> "$GITHUB_STEP_SUMMARY"
           else
             printf '### 生产更新通道结果\n\nOSS job: **%s**\n\n只有 success 表示发布完成；cancelled 包括排队被替换，不能视为已发布。\n' "$OUTCOME" >> "$GITHUB_STEP_SUMMARY"
           fi

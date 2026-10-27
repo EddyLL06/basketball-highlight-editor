@@ -128,7 +128,7 @@ def test_release_plan_dry_run_input_matrix(tmp_path):
                     fields = dict(line.split('=', 1) for line in output.read_text().splitlines())
                     assert fields['build_android'] == 'true' and fields['build_macos'] == fields['build_windows'] == 'false'
                     assert fields['publish_oss'] == ('true' if event == 'push' or (publish == oss == 'true') else 'false')
-    assert "inputs.dry_run && '-dryrun'" in workflow['concurrency']['group']
+    assert "inputs.dry_run && 'dryrun' || 'production'" in workflow['concurrency']['group']
     assert workflow['jobs']['oss-upload']['concurrency']['group'] == "${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'bhe-dryrun-update-channel-v1' || 'bhe-production-update-channel-v1' }}"
 
 
@@ -143,7 +143,95 @@ def test_publication_status_uses_actual_script_output(tmp_path):
                                           ('failure','','演练失败'), ('cancelled','','演练取消')]:
             target = tmp_path / 'status'
             target.write_text('')
-            env = dict(os.environ, OUTCOME=outcome, PUBLISH_STATUS=status, DRY_RUN='true', GITHUB_STEP_SUMMARY=str(target))
+            env = dict(os.environ, OUTCOME=outcome, PUBLISH_STATUS=status, DRY_RUN='true', PLAN_OUTCOME='success', FAILURE_STAGE='publish', GITHUB_STEP_SUMMARY=str(target))
             subprocess.run(['bash', '-euo', 'pipefail', '-c', script], env=env, check=True)
             assert expected in target.read_text()
             assert 'dry-run-ok 不代表正式发布成功' in target.read_text()
+
+
+def test_top_level_group_prefixes_separate_all_tags_case_insensitively():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/release-packages.yml').read_text())
+    expression = workflow['concurrency']['group']
+    assert expression == "desktop-release-${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'dryrun' || 'production' }}-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+    def group(tag, event, dry):
+        kind = 'dryrun' if event == 'workflow_dispatch' and dry else 'production'
+        return f'desktop-release-{kind}-{tag}'
+    assert group('v0.1.13', 'workflow_dispatch', True) == 'desktop-release-dryrun-v0.1.13'
+    assert group('v0.1.13-dryrun', 'workflow_dispatch', False) == 'desktop-release-production-v0.1.13-dryrun'
+    assert group('v0.1.13', 'push', True) == 'desktop-release-production-v0.1.13'
+    assert group('V0.1.13', 'workflow_dispatch', True).casefold() == group('v0.1.13', 'workflow_dispatch', True).casefold()
+    tags = ['v0.1.13', 'V0.1.13', 'v0.1.13-dryrun', 'v0.1.14']
+    assert not ({group(t, 'workflow_dispatch', True).casefold() for t in tags} &
+                {group(t, 'workflow_dispatch', False).casefold() for t in tags})
+    assert group(tags[0], 'workflow_dispatch', True).casefold() != group(tags[-1], 'workflow_dispatch', True).casefold()
+    for path in (ROOT / '.github/workflows').glob('*.yml'):
+        if path.name == 'release-packages.yml': continue
+        other = yaml.safe_load(path.read_text())
+        assert 'desktop-release-' not in str(other.get('concurrency', {}))
+        assert all('desktop-release-' not in str(job.get('concurrency', {})) for job in other['jobs'].values())
+
+
+def test_credentials_steps_are_gated_and_no_secrets_leak(tmp_path):
+    secrets = ['fake-key-first-ABC', 'fake-key-second-XYZ', 'fake-access-123', 'fake-secret-456', 'fake-token-789']
+    for filename in ('release-packages.yml', 'upload-release-assets-oss.yml'):
+        workflow = yaml.safe_load((ROOT / '.github/workflows' / filename).read_text())
+        job = workflow['jobs']['oss-upload' if filename.startswith('release-') else 'upload']
+        guard = "${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}" if filename.startswith('release-') else '${{ !inputs.dry_run }}'
+        for name in ('Configure Alibaba Cloud credentials', 'Install ossutil', 'Configure ossutil credentials'):
+            assert next(s for s in job['steps'] if s.get('name') == name)['if'] == guard
+        config = next(s['run'] for s in job['steps'] if s.get('name') == 'Configure ossutil credentials')
+        publish = next(s['run'] for s in job['steps'] if s.get('name') == 'Publish verified update channel')
+        base = tmp_path / filename
+        base.mkdir()
+        for binary, body in [('ossutil', 'exit 0'), ('python3', 'if [[ "$FAIL" == true && "$1" != -c ]]; then exit 1; fi; if [[ "$1" == -c ]]; then echo status=dry-run-ok; else printf "%s\\n" "$@" > "$ARG_LOG"; fi')]:
+            p = base / binary; p.write_text('#!/bin/bash\n' + body + '\n'); p.chmod(0o755)
+        for dry in ('true', 'false'):
+            for fail in ('true', 'false'):
+                for debug in (False, True):
+                    env = dict(os.environ, PATH=str(base)+':'+os.environ['PATH'], RUNNER_TEMP=str(base),
+                               UPDATE_SIGNING_KEY=secrets[0]+'\n'+secrets[1], ALIBABA_CLOUD_ACCESS_KEY_ID=secrets[2],
+                               ALIBABA_CLOUD_ACCESS_KEY_SECRET=secrets[3], ALIBABA_CLOUD_SECURITY_TOKEN=secrets[4],
+                               OSS_ENDPOINT='fake', TAG_NAME='v0.1.13', RELEASE_PLATFORM='all', OSS_BUCKET='oss://fake',
+                               OSS_PREFIX='releases', OSS_ANDROID_KEY='android/latest.apk', DRY_RUN=dry, FAIL=fail,
+                               ARG_LOG=str(base/'args'), GITHUB_OUTPUT=str(base/'output'))
+                    command = ['bash', '-x' if debug else '-e', '-c']
+                    results = []
+                    if dry == 'false': results.append(subprocess.run(command+[config], env=env, capture_output=True, text=True))
+                    results.append(subprocess.run(command+[publish], env=env, capture_output=True, text=True))
+                    assert (results[-1].returncode != 0) == (fail == 'true')
+                    for result in results:
+                        assert all(secret not in result.stdout + result.stderr for secret in secrets)
+                    args = (base/'args').read_text() if fail == 'false' else ''
+                    if args:
+                        assert ('--oss-config' in args) == (dry == 'false')
+                    assert not (base/'bhe-update-signing-key.pem').exists()
+                    assert not (base/'bhe-ossutilconfig').exists()
+
+
+def test_plan_rejection_is_reported_with_stage(tmp_path):
+    workflow = yaml.safe_load((ROOT / '.github/workflows/release-packages.yml').read_text())
+    script = workflow['jobs']['publication-status']['steps'][0]['run']
+    target = tmp_path / 'summary'
+    env = dict(os.environ, OUTCOME='skipped', PLAN_OUTCOME='failure', PUBLISH_STATUS='', FAILURE_STAGE='', DRY_RUN='true', GITHUB_STEP_SUMMARY=str(target))
+    subprocess.run(['bash', '-euo', 'pipefail', '-c', script], env=env, check=True)
+    text = target.read_text()
+    assert '计划阶段拒绝' in text and '计划阶段：failure' in text
+    assert '反映的是读取当时的通道状态' in text
+
+
+def test_report_identifies_failed_build_and_publish_stage(tmp_path):
+    workflow = yaml.safe_load((ROOT / '.github/workflows/release-packages.yml').read_text())
+    status = workflow['jobs']['publication-status']['steps'][0]['run']
+    target = tmp_path / 'summary'
+    env = dict(os.environ, DRY_RUN='true', PLAN_OUTCOME='success', OUTCOME='skipped', PUBLISH_STATUS='',
+               FAILURE_STAGE='', MACOS_OUTCOME='skipped', WINDOWS_OUTCOME='skipped', ANDROID_OUTCOME='failure',
+               RELEASE_OUTCOME='skipped', GITHUB_STEP_SUMMARY=str(target))
+    subprocess.run(['bash', '-euo', 'pipefail', '-c', status], env=env, check=True)
+    assert '演练未执行' in target.read_text() and '失败阶段：android' in target.read_text()
+    stage_script = next(s['run'] for s in workflow['jobs']['oss-upload']['steps'] if s.get('id') == 'failure_stage')
+    output = tmp_path / 'output'
+    env = dict(os.environ, CHECKOUT_PUBLISHER='success', CHECKOUT_SOURCE='success', CREDENTIALS='skipped',
+               INSTALL='skipped', DOWNLOAD_RELEASE='skipped', DOWNLOAD_BUILD='success', CONFIG='skipped',
+               PUBLISH='failure', BACKUP='success', GITHUB_OUTPUT=str(output))
+    subprocess.run(['bash', '-euo', 'pipefail', '-c', stage_script], env=env, check=True)
+    assert output.read_text().strip() == 'stage=publish'

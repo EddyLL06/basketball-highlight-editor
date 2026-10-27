@@ -176,6 +176,39 @@ def test_dry_run_rejects_summary_symlink_resolved_inside_store(offline, monkeypa
     assert tree_snapshot(store) == before
 
 
+@pytest.mark.parametrize('mode', ['direct', 'symlink', 'hardlink'])
+def test_dry_run_rejects_store_summary_aliases(offline, monkeypatch, mode):
+    release, store = offline
+    seed(release, store)
+    args, work = command(release, store, 'v0.1.13-android.1')
+    probe = store.path('report.md')
+    probe.write_bytes(b'private existing object')
+    alias = probe if mode == 'direct' else release.root / 'summary-alias'
+    if mode == 'symlink': alias.symlink_to(probe)
+    if mode == 'hardlink': os.link(probe, alias)
+    monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(alias))
+    before = tree_snapshot(store)
+    with pytest.raises(SystemExit): publisher.main([*args, '--dry-run'])
+    assert not work.exists()
+    assert tree_snapshot(store) == before
+
+
+def test_oss_dry_run_also_rejects_hardlinked_summary(tmp_path, monkeypatch):
+    release = ReleaseFixture(tmp_path / 'fixture')
+    store = publisher.DirectoryStore(tmp_path / 'fake-oss')
+    seed(release, store)
+    args, work = command(release, store, 'v0.1.13-android.1')
+    args[:2] = ['--oss-root', 'oss://fake']
+    probe = store.path('report.md')
+    probe.write_bytes(b'unchanged')
+    alias = release.root / 'summary-link'
+    os.link(probe, alias)
+    monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(alias))
+    before = tree_snapshot(store)
+    with pytest.raises(SystemExit): publisher.main([*args, '--dry-run'])
+    assert not work.exists() and tree_snapshot(store) == before
+
+
 def test_full_013_publish_keeps_four_platforms_notes_signature_and_website_aliases(offline):
     release, store = offline
     old = copy.deepcopy(release.previous)
@@ -336,7 +369,7 @@ def test_oss_dry_run_only_get_and_never_calls_ossutil(tmp_path, monkeypatch, fau
         assets = Path(args[args.index('--assets-dir') + 1])
         next(assets.glob('*.sha256')).write_text('bad checksum')
     if fault == 'wrong-platform': args[args.index('--platform') + 1] = 'all'
-    args[:2] = ['--oss-root', 'oss://fake', '--oss-config', 'fake-config']
+    args[:2] = ['--oss-root', 'oss://fake']
     args += ['--dry-run']
     monkeypatch.setenv('GITHUB_ACTIONS', 'true')
     calls = []
@@ -371,3 +404,13 @@ def test_oss_dry_run_only_get_and_never_calls_ossutil(tmp_path, monkeypatch, fau
     assert tree_snapshot(store) == before
     assert all(command[0] == 'openssl' for command in commands)
     assert calls or fault == 'wrong-platform'
+
+
+def test_real_oss_publish_still_requires_config(tmp_path, monkeypatch):
+    release = ReleaseFixture(tmp_path / 'fixture')
+    store = publisher.DirectoryStore(tmp_path / 'fake')
+    args, work = command(release, store, 'v0.1.13-android.1')
+    args[:2] = ['--oss-root', 'oss://fake']
+    monkeypatch.setenv('GITHUB_ACTIONS', 'true')
+    assert publisher.main(args) == 1
+    assert json.loads((work / 'publish-summary.json').read_text())['status'] == 'failed'

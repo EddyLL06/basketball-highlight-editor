@@ -63,7 +63,7 @@ class DirectoryStore:
 
 class OssStore:
     def __init__(self, args):
-        if os.environ.get('GITHUB_ACTIONS') != 'true' or not args.oss_config:
+        if os.environ.get('GITHUB_ACTIONS') != 'true' or (not args.dry_run and not args.oss_config):
             raise ValueError('生产写入仅允许受共同锁保护的 GitHub Actions，并须显式指定配置')
         if not args.oss_root.startswith('oss://'):
             raise ValueError('OSS 根路径无效')
@@ -238,11 +238,17 @@ def main(argv=None):
     args.prefix = safe_key(args.prefix)
     args.android_key = safe_key(args.android_key)
     args.android_base_url = args.android_base_url or args.base_url
+    step_summary = os.environ.get('GITHUB_STEP_SUMMARY')
+    if args.dry_run and step_summary:
+        try:
+            if Path(step_summary).stat().st_nlink > 1:
+                parser.error('演练摘要目标不能是硬链接')
+        except FileNotFoundError:
+            pass
     if args.dry_run and args.store_dir is not None:
         store_root = args.store_dir.resolve()
         if args.work_dir.resolve().is_relative_to(store_root):
             parser.error('演练工作目录不能位于模拟存储目录内')
-        step_summary = os.environ.get('GITHUB_STEP_SUMMARY')
         if step_summary and Path(step_summary).resolve().is_relative_to(store_root):
             parser.error('演练摘要不能位于模拟存储目录内')
         try:
@@ -272,9 +278,12 @@ def main(argv=None):
         step_summary = os.environ.get('GITHUB_STEP_SUMMARY')
         if step_summary:
             with open(step_summary, 'a', encoding='utf-8') as output:
+                if args.dry_run and os.fstat(output.fileno()).st_nlink > 1:
+                    raise ValueError('演练摘要目标不能是硬链接')
                 output.write(f'\n### 更新通道发布 {args.tag}\n\n状态：**{summary.data["status"]}**；最后阶段：`{summary.data["stage"]}`。\n\n')
                 if args.dry_run:
                     output.write('**未写入 OSS 发布对象；Actions 产物中保存演练文件**。dry-run-ok 不代表正式发布成功。\n\n')
+                    output.write('反映的是读取当时的通道状态，不保证之后发布一定成功；如有并行的正式发布请重跑。\n\n')
                     output.write(f'旧清单验签：{summary.data["previous_verified"]}；候选签名验签：{summary.data["candidate_verified"]}。未通过验签的 previous.json 是待验证输入。\n\n')
                     for key in summary.data.get('would_upload', []):
                         output.write(f'- `{key}`\n')
