@@ -6,11 +6,14 @@ import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
+import 'core/app_errors.dart';
 import 'providers/session_provider.dart';
 import 'providers/theme_provider.dart';
 import 'theme/app_colors.dart';
 
-Future<void> main() async {
+void main() => runWithAppErrorLogging(_startApp);
+
+Future<void> _startApp() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   final themeMode = await loadSavedThemeMode();

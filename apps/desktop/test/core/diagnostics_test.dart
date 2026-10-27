@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:desktop/core/diagnostics.dart';
-import 'package:desktop/core/engine_client.dart';
+import 'package:desktop/core/app_log.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

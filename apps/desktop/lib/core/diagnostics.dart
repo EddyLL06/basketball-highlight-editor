@@ -1,7 +1,7 @@
 import 'dart:ffi' show Abi;
 import 'dart:io';
 
-import 'engine_client.dart';
+import 'app_log.dart';
 
 /// 打包时由 `--dart-define=BHE_VERSION=<版本>` 注入，本地开发显示 dev。
 const appVersion = String.fromEnvironment('BHE_VERSION', defaultValue: 'dev');
