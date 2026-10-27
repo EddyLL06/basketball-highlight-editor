@@ -1126,6 +1126,51 @@ void main() {
     expect(find.byTooltip('切换视频来源'), findsOneWidget);
   });
 
+  testWidgets('multi-part review can switch to the original video after import', (
+    tester,
+  ) async {
+    // 导入多段视频时 applyWorkflowDraft 会清空 previewPath 和 reviewVideoPath，
+    // 审核页仍然要能用“原视频”开关切到当前段的整段片子。
+    await _pumpReview(
+      tester,
+      const ProjectState(
+        job: {'state': 'completed'},
+        video: {
+          'id': 'v1',
+          'source_path': '/v/part1.mp4',
+          'duration_ms': 300000,
+        },
+        videoPath: '/v/part1.mp4',
+        videos: [
+          {'id': 'v1', 'source_path': '/v/part1.mp4', 'duration_ms': 300000},
+          {'id': 'v2', 'source_path': '/v/part2.mp4', 'duration_ms': 300000},
+        ],
+        candidates: [
+          {
+            'id': 'candidate-1',
+            'video_id': 'v1',
+            'segment': 1,
+            'event_time_ms': 12000,
+            'default_start_ms': 9000,
+            'default_end_ms': 13000,
+          },
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final pane = find.byWidgetPredicate(
+      (widget) => widget.runtimeType.toString() == '_VideoPane',
+    );
+    expect((tester.widget(pane) as dynamic).isOriginalVideo, isFalse);
+
+    await tester.tap(find.text('原视频'));
+    await tester.pumpAndSettle();
+
+    expect((tester.widget(pane) as dynamic).isOriginalVideo, isTrue);
+    expect((tester.widget(pane) as dynamic).videoPath, '/v/part1.mp4');
+  });
+
   test('review playback never falls back to the import preview image', () {
     expect(
       resolveReviewPlaybackPath(

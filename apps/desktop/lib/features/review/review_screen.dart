@@ -122,10 +122,10 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   }
 
   void _toggleVideoSource() {
-    final state = ref.read(projectProvider);
-    final hasReviewSource =
-        (state.reviewVideoPath ?? state.previewPath)?.isNotEmpty == true;
-    if (!hasReviewSource) return;
+    // 能否切换只看实际会播放的源。导入页静帧(previewPath)不参与审核播放，
+    // 多段项目导入后它已经被清空，不能用它判断可切换状态。
+    final playbackPath = _reviewPlaybackPath(ref.read(projectProvider));
+    if (playbackPath == null || playbackPath.isEmpty) return;
     setState(() {
       _showOriginalVideo = !_showOriginalVideo;
       _videoSourceSwitchToken++;
@@ -722,11 +722,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
         .clamp(0.0, 1.0)
         .toDouble();
     final originalVideoPath = _resolveOriginalVideoPath(state);
-    final reviewVideoPath = resolveReviewPlaybackPath(
-      multiVideo: state.multiVideo,
-      originalVideoPath: originalVideoPath,
-      reviewVideoPath: state.reviewVideoPath,
-    );
+    final reviewVideoPath = _reviewPlaybackPath(state);
     final showingOriginalVideo =
         _showOriginalVideo ||
         reviewVideoPath == null ||
@@ -7092,6 +7088,14 @@ String? resolveReviewPlaybackPath({
   }
   return reviewVideoPath;
 }
+
+/// 审核页实际会播放的源。播放器和“候选预览 / 原视频”开关用它判断是否可切换，
+/// 不要再用 `previewPath`(导入页静帧，多段项目导入后为 null)。
+String? _reviewPlaybackPath(ProjectState state) => resolveReviewPlaybackPath(
+  multiVideo: state.multiVideo,
+  originalVideoPath: _resolveOriginalVideoPath(state),
+  reviewVideoPath: state.reviewVideoPath,
+);
 
 /// Returns the seek/playback bounds for the review timeline.
 ///
