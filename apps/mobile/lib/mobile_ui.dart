@@ -1266,6 +1266,7 @@ class _ReviewViewState extends State<_ReviewView> {
   Future<void> _playerQueue = Future<void>.value();
   bool _disposed = false;
   int selectedIndex = 0;
+  String? _selectedId;
   bool annotations = false;
   bool autoReplay = true;
   bool clipOnly = true;
@@ -1308,15 +1309,19 @@ class _ReviewViewState extends State<_ReviewView> {
       rimFilter = rim ?? rimFilter;
       playerFilter = player ?? playerFilter;
       selectedIndex = 0;
+      _selectedId = null;
       _completionPromptShown = false;
     });
     final first = selected;
     if (first != null) await _replay(first);
   }
 
-  Candidate? get selected => candidates.isEmpty
-      ? null
-      : candidates[selectedIndex.clamp(0, candidates.length - 1)];
+  Candidate? get selected {
+    final items = candidates;
+    if (items.isEmpty) return null;
+    final index = items.indexWhere((candidate) => candidate.id == _selectedId);
+    return items[index >= 0 ? index : selectedIndex.clamp(0, items.length - 1)];
+  }
 
   @override
   void initState() {
@@ -1340,6 +1345,10 @@ class _ReviewViewState extends State<_ReviewView> {
       if (playerFilter == 'player:${state.lastPlayerOldName}') {
         setState(() => playerFilter = state.lastPlayerNewName == null ? 'all' : 'player:${state.lastPlayerNewName}');
       }
+    }
+    final visibleIndex = candidates.indexWhere((item) => item.id == _selectedId);
+    if (visibleIndex >= 0 && visibleIndex != selectedIndex) {
+      setState(() => selectedIndex = visibleIndex);
     }
     if (_undoRevision == state.undoRevision) return;
     _undoRevision = state.undoRevision;
@@ -1427,9 +1436,10 @@ class _ReviewViewState extends State<_ReviewView> {
   Future<void> _select(int index) async {
     if (index < 0 || index >= candidates.length) return;
     _stoppingAtCandidateEnd = false;
-    setState(() => selectedIndex = index);
+    final candidate = candidates[index];
+    setState(() { selectedIndex = index; _selectedId = candidate.id; });
     unawaited(_scrollToSelected());
-    await _replay(candidates[index]);
+    await _replay(candidate);
   }
 
   Future<void> _replay(Candidate candidate) async {
@@ -1528,7 +1538,7 @@ class _ReviewViewState extends State<_ReviewView> {
             onSeekTo: _seekTo,
             onSeek: _seek,
             onSelect: (index) => _select(index),
-            onReview: (index, selection) => _reviewAt(index, selection),
+            onReview: (id, selection) => _reviewAt(id, selection),
             currentCandidates: () => candidates,
             onExit: () => Navigator.of(pageContext).pop(),
             onToggleAnnotations: () =>
@@ -1903,33 +1913,28 @@ class _ReviewViewState extends State<_ReviewView> {
 
   void _review(CandidateSelection selection) {
     final candidate = selected;
-    if (candidate == null) return;
-    unawaited(_reviewAt(selectedIndex, selection));
+    if (candidate != null) _reviewAt(candidate.id, selection);
   }
 
-  Future<int?> _reviewAt(int index, CandidateSelection selection) async {
+  ({String id, bool last, Future<bool> saved})? _reviewAt(String id, CandidateSelection selection) {
     final items = candidates;
-    if (index < 0 || index >= items.length) return null;
-    final candidate = items[index];
-    unawaited(state.toggleCandidate(candidate.id, selection));
-    if (selection == CandidateSelection.included ||
-        selection == CandidateSelection.excluded) {
-      // A status filter can hide the candidate just reviewed; the next one
-      // then moves into its place.
-      final remaining = items;
-      final next = index + 1;
-      if (next < remaining.length) {
-        await _select(next);
-        return next;
-      } else if (!_completionPromptShown) {
-        _completionPromptShown = true;
-        final revision = state.reviewRevision;
-        Future<void>.delayed(const Duration(seconds: 5), () {
-          if (mounted && revision == state.reviewRevision) unawaited(_showReviewCompletePrompt(context));
-        });
-      }
+    final index = items.indexWhere((item) => item.id == id);
+    if (index < 0) return null;
+    // Choose the next stable ID before the queued edit can change visibility.
+    final nextId = index + 1 < items.length ? items[index + 1].id : null;
+    final saved = state.toggleCandidate(id, selection);
+    if (nextId != null) {
+      unawaited(_select(index + 1));
+      return (id: nextId, last: false, saved: saved);
     }
-    return index;
+    if (!_completionPromptShown) {
+      _completionPromptShown = true;
+      final revision = state.reviewRevision;
+      Future<void>.delayed(const Duration(seconds: 5), () {
+        if (mounted && revision == state.reviewRevision) unawaited(_showReviewCompletePrompt(context));
+      });
+    }
+    return (id: id, last: true, saved: saved);
   }
 
   Future<void> _showReviewCompletePrompt(BuildContext context) async {
@@ -2325,7 +2330,7 @@ class _FullscreenReviewPage extends StatefulWidget {
   final ValueChanged<int> onSeek;
   final ValueChanged<int> onSeekTo;
   final Future<void> Function(int index) onSelect;
-  final Future<int?> Function(int index, CandidateSelection selection) onReview;
+  final ({String id, bool last, Future<bool> saved})? Function(String id, CandidateSelection selection) onReview;
   final List<Candidate> Function() currentCandidates;
   final VoidCallback onExit;
   final VoidCallback onToggleAnnotations;
@@ -2339,6 +2344,7 @@ class _FullscreenReviewPage extends StatefulWidget {
 class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
   late List<Candidate> _candidates;
   late int _selectedIndex;
+  String? _selectedId;
   late bool _annotations;
   late bool _autoReplay;
   late double _speed;
@@ -2356,6 +2362,7 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
       0,
       math.max(0, _candidates.length - 1),
     );
+    _selectedId = _candidates.isEmpty ? null : _candidates[_selectedIndex].id;
     _annotations = widget.annotations;
     _autoReplay = widget.autoReplay;
     _speed = widget.speed;
@@ -2372,14 +2379,24 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
   }
 
   void _onState() {
-    if (!mounted || _undoRevision == widget.state.undoRevision) return;
-    _undoRevision = widget.state.undoRevision;
+    if (!mounted) return;
     final next = widget.currentCandidates();
-    final focus = widget.state.undoFocusId;
+    if (next.isEmpty) {
+      setState(() => _selectedId = null);
+      return;
+    }
+    final undoChanged = _undoRevision != widget.state.undoRevision;
+    _undoRevision = widget.state.undoRevision;
+    final focus = undoChanged ? widget.state.undoFocusId : _selectedId;
     setState(() {
       _candidates = next;
       final index = next.indexWhere((item) => item.id == focus);
-      if (index >= 0) _selectedIndex = index;
+      if (index >= 0) {
+        _selectedIndex = index;
+      } else {
+        _selectedIndex = _selectedIndex.clamp(0, next.length - 1);
+      }
+      _selectedId = next[_selectedIndex].id;
     });
   }
 
@@ -2389,19 +2406,26 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
 
   Future<void> _selectCandidate(int index) async {
     if (index < 0 || index >= _candidates.length) return;
-    setState(() => _selectedIndex = index);
+    setState(() { _selectedIndex = index; _selectedId = _candidates[index].id; });
     await widget.onSelect(index);
   }
 
-  Future<void> _reviewCandidate(CandidateSelection selection) async {
-    final next = await widget.onReview(_selectedIndex, selection);
-    if (!mounted) return;
+  void _reviewCandidate(CandidateSelection selection) {
+    final id = _selectedId;
+    if (id == null) return;
+    final next = widget.onReview(id, selection);
+    if (!mounted || next == null) return;
     setState(() {
       _candidates = widget.currentCandidates();
-      if (next != null) {
-        _selectedIndex = next.clamp(0, math.max(0, _candidates.length - 1));
-      }
+      final index = _candidates.indexWhere((item) => item.id == next.id);
+      if (index >= 0) _selectedIndex = index;
+      _selectedId = next.id;
     });
+    if (next.last) {
+      unawaited(next.saved.then((saved) {
+        if (mounted && saved && widget.currentCandidates().isEmpty) widget.onExit();
+      }));
+    }
   }
 
   @override
