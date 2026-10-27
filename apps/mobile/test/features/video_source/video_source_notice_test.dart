@@ -3,6 +3,7 @@ import 'package:bhe_mobile/features/video_source/video_source_failure.dart';
 import 'package:bhe_mobile/mobile_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:video_player/video_player.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 
 import '../../support/fake_video_platform.dart';
@@ -45,7 +46,9 @@ void main() {
                       padding: const EdgeInsets.all(16),
                       child: VideoSourcePanel(
                         state: fixture.state,
-                        child: const SizedBox(),
+                        child: const SizedBox(
+                          key: ValueKey('content-after-notice'),
+                        ),
                       ),
                     ),
                   ),
@@ -59,6 +62,33 @@ void main() {
                 final size = tester.getSize(button);
                 expect(size.height, greaterThanOrEqualTo(48));
                 expect(size.width, greaterThanOrEqualTo(48));
+                final notice = find.byKey(
+                  const ValueKey('video-source-notice'),
+                );
+                final message = find
+                    .descendant(of: notice, matching: find.byType(Text))
+                    .first;
+                final label = find
+                    .descendant(of: button, matching: find.byType(Text))
+                    .first;
+                expect(
+                  tester.getTopLeft(label).dx,
+                  closeTo(tester.getTopLeft(message).dx, .1),
+                );
+                expect(
+                  tester.getBottomLeft(notice).dy -
+                      tester.getBottomLeft(button).dy,
+                  closeTo(4, .1),
+                );
+                expect(
+                  tester
+                          .getTopLeft(
+                            find.byKey(const ValueKey('content-after-notice')),
+                          )
+                          .dy -
+                      tester.getBottomLeft(notice).dy,
+                  closeTo(12, .1),
+                );
               }
               if (language == 'en') {
                 for (final text in tester.widgetList<Text>(find.byType(Text))) {
@@ -114,20 +144,27 @@ void main() {
       await tester.tap(find.text('审核 1'));
       await tester.pump();
       await tester.runAsync(() async {
-        await Future<void>.delayed(Duration.zero);
+        await pumpEventQueue();
       });
       await tester.pump();
       expect(find.byType(VideoSourcePanel), findsOneWidget);
       expect(find.text(VideoSourceFailure.missing.message), findsOneWidget);
+      expect(find.text('视频不可用'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
       await tester.runAsync(() async {
         fixture.choose(await fixture.file('recovered.mp4', 'original'));
         await fixture.state.relinkVideo();
       });
       await tester.pump();
       await tester.runAsync(() async {
-        await Future<void>.delayed(Duration.zero);
+        await pumpEventQueue();
       });
       await tester.pump();
+      await tester.pumpAndSettle();
+      final firstPlayer = tester
+          .widget<VideoPlayer>(find.byType(VideoPlayer))
+          .controller;
+      expect(firstPlayer.value.isInitialized, isTrue);
       final path = fixture.state.project.video!.path;
       expect(
         platform.sources.values.any(
@@ -151,10 +188,28 @@ void main() {
         await pumpEventQueue();
       });
       await tester.pump();
+      await tester.pumpAndSettle();
       expect(platform.sources.length, greaterThan(beforeReload));
-      expect(platform.disposed, isNotEmpty);
+      final replacement = tester
+          .widget<VideoPlayer>(find.byType(VideoPlayer))
+          .controller;
+      expect(replacement.value.isInitialized, isTrue);
+      expect(replacement.playerId, isNot(firstPlayer.playerId));
+      await tester.runAsync(() => pumpEventQueue());
+      expect(platform.disposed, contains(firstPlayer.playerId));
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
+    },
+  );
+  test(
+    'complete preparation status messages use English punctuation',
+    () async {
+      final l10n = await BheLocalizations.delegate.load(const Locale('en'));
+      for (final status in ['正在读取视频信息', '正在保存视频到本机', '正在识别篮筐区域']) {
+        final translated = l10n.text('$status，大文件可能需要几秒。');
+        expect(translated, isNot(matches(RegExp(r'[\u4e00-\u9fff，。]'))));
+        expect(translated, endsWith('Large files may take a few seconds.'));
+      }
     },
   );
 }

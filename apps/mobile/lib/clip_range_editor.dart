@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:video_player/video_player.dart';
 
 import 'mobile_theme.dart';
+import 'features/video_source/video_unavailable.dart';
 
 enum ClipRangeHandle { start, end }
 
@@ -96,6 +97,7 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
   late int _windowEndMs;
   int _positionMs = 0;
   bool _ready = false;
+  bool _failed = false;
   // Playback started inside the range stays inside it: it loops, or stops
   // at the end for an ending preview. Playback started outside the range
   // browses freely so an earlier or later moment can be found.
@@ -129,7 +131,14 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
       await player.seekTo(Duration(milliseconds: _startMs));
       if (mounted && identical(player, _player)) setState(() => _ready = true);
     } catch (_) {
-      if (mounted) setState(() {});
+      player.removeListener(_onPlayerChanged);
+      if (identical(player, _player)) _player = null;
+      try {
+        await player.dispose();
+      } catch (_) {
+        /* Keep the failure UI available. */
+      }
+      if (mounted) setState(() => _failed = true);
     }
   }
 
@@ -372,7 +381,10 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
               Row(
                 children: [
                   Expanded(
-                    child: Text(widget.title, style: theme.textTheme.titleLarge),
+                    child: Text(
+                      widget.title,
+                      style: theme.textTheme.titleLarge,
+                    ),
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
@@ -397,7 +409,11 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
                         children: [
                           if (_ready && player != null) VideoPlayer(player),
                           if (!_ready)
-                            const Center(child: CircularProgressIndicator()),
+                            _failed
+                                ? const VideoUnavailablePlaceholder()
+                                : const Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
                           if (_ready && !playing)
                             const Center(
                               child: Icon(

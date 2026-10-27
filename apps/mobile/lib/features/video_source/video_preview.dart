@@ -2,8 +2,12 @@ part of '../../mobile_ui.dart';
 
 class _VideoPreview extends StatefulWidget {
   const _VideoPreview({
+    super.key,
     required this.path,
     required this.aspectRatio,
+    this.sourceRevision = 0,
+    this.unavailable = false,
+    this.onFailure,
     this.seekStepMs = 1500,
     this.initialPositionMs,
     this.requestedPositionMs,
@@ -11,6 +15,9 @@ class _VideoPreview extends StatefulWidget {
     this.onPositionChanged,
   });
   final String path;
+  final int sourceRevision;
+  final bool unavailable;
+  final ValueChanged<VideoSourceFailure>? onFailure;
   final double aspectRatio;
   final int seekStepMs;
   final int? initialPositionMs;
@@ -29,6 +36,7 @@ class _VideoPreviewState extends State<_VideoPreview> {
   int _playerGeneration = 0;
   int _lastReportedPosition = -1;
   bool _positionCallbackScheduled = false;
+  bool _failed = false;
 
   @override
   void initState() {
@@ -39,7 +47,9 @@ class _VideoPreviewState extends State<_VideoPreview> {
   @override
   void didUpdateWidget(covariant _VideoPreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.path != oldWidget.path) {
+    if (widget.path != oldWidget.path ||
+        widget.sourceRevision != oldWidget.sourceRevision ||
+        widget.unavailable != oldWidget.unavailable) {
       unawaited(_replacePlayer());
       return;
     }
@@ -55,6 +65,7 @@ class _VideoPreviewState extends State<_VideoPreview> {
     controller?.removeListener(_changed);
     final player = controller;
     controller = null;
+    _failed = false;
     final queue = _playerQueue;
     final initialization = _playerInitialization;
     _playerQueue = Future<void>.value();
@@ -62,12 +73,14 @@ class _VideoPreviewState extends State<_VideoPreview> {
     unawaited(() async {
       await queue;
       await initialization;
-      await player?.dispose();
+      await _releasePlayer(player);
     }());
     super.dispose();
   }
 
   void _startPlayer(String path, int? initialPositionMs) {
+    if (widget.unavailable) return;
+    _failed = false;
     final generation = ++_playerGeneration;
     final player = VideoPlayerController.file(File(path));
     controller = player;
@@ -98,8 +111,19 @@ class _VideoPreviewState extends State<_VideoPreview> {
       if (generation != _playerGeneration || controller != player) return;
       player.removeListener(_changed);
       controller = null;
-      await player.dispose();
-      if (mounted) setState(() {});
+      _failed = true;
+      await _releasePlayer(player);
+      if (!mounted || generation != _playerGeneration) return;
+      setState(() {});
+      widget.onFailure?.call(VideoSourceFailure.unplayable);
+    }
+  }
+
+  Future<void> _releasePlayer(VideoPlayerController? player) async {
+    try {
+      await player?.dispose();
+    } catch (_) {
+      // A failed platform cleanup must not strand the replacement preview.
     }
   }
 
@@ -109,13 +133,14 @@ class _VideoPreviewState extends State<_VideoPreview> {
     final initialization = _playerInitialization;
     previous?.removeListener(_changed);
     controller = null;
+    _failed = false;
     final queue = _playerQueue;
     _playerQueue = Future<void>.value();
     _playerInitialization = null;
     if (mounted) setState(() {});
     await queue;
     await initialization;
-    await previous?.dispose();
+    await _releasePlayer(previous);
     if (!mounted || generation != _playerGeneration) return;
     _startPlayer(widget.path, widget.initialPositionMs);
   }
@@ -123,6 +148,17 @@ class _VideoPreviewState extends State<_VideoPreview> {
   void _changed() {
     final player = controller;
     final stopAt = widget.stopAtMs;
+    if (player?.value.hasError == true && !_failed) {
+      _failed = true;
+      final generation = _playerGeneration;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted &&
+            generation == _playerGeneration &&
+            controller == player) {
+          widget.onFailure?.call(VideoSourceFailure.unplayable);
+        }
+      });
+    }
     if (player?.value.isInitialized == true &&
         stopAt != null &&
         player!.value.isPlaying &&
@@ -199,7 +235,9 @@ class _VideoPreviewState extends State<_VideoPreview> {
     final ratio = widget.aspectRatio.isFinite && widget.aspectRatio > 0
         ? widget.aspectRatio
         : 16 / 9;
-    final initialized = player?.value.isInitialized == true;
+    final unavailable =
+        widget.unavailable || _failed || player?.value.hasError == true;
+    final initialized = !unavailable && player?.value.isInitialized == true;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -235,6 +273,8 @@ class _VideoPreviewState extends State<_VideoPreview> {
                         ),
                       ],
                     )
+                  : unavailable
+                  ? const VideoUnavailablePlaceholder()
                   : const Center(child: CircularProgressIndicator()),
             ),
           ),

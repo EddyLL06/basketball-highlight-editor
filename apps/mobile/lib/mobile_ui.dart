@@ -16,6 +16,7 @@ import 'app_updater.dart';
 import 'clip_range_editor.dart';
 import 'features/video_source/video_playback.dart';
 import 'features/video_source/video_source_failure.dart';
+import 'features/video_source/video_unavailable.dart';
 import 'features/roi_editor/roi_video_preview.dart';
 import 'mobile_app_state.dart';
 import 'mobile_theme.dart';
@@ -689,6 +690,10 @@ class _ProjectSetup extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _VideoPreview(
+          key: const ValueKey('project-video-preview'),
+          sourceRevision: state.videoSourceRevision,
+          unavailable: state.videoSourceFailure != null,
+          onFailure: state.markVideoFailure,
           path: video.path,
           aspectRatio: video.width / video.height,
           seekStepMs: 1500,
@@ -772,9 +777,10 @@ class _ProjectSetup extends StatelessWidget {
           children: [
             Expanded(
               child: FilledButton.icon(
-                onPressed: state.analysing
-                    ? null
-                    : () => unawaited(_confirmAndStartAnalysis(context, state)),
+                key: const ValueKey('start-analysis'),
+                onPressed: state.canStartAnalysis
+                    ? () => unawaited(_confirmAndStartAnalysis(context, state))
+                    : null,
                 icon: const Icon(LucideIcons.play, size: 18),
                 label: Text(
                   state.project.candidates.isEmpty
@@ -1653,29 +1659,25 @@ class _ReviewViewState extends State<_ReviewView> {
       builder: (context, constraints) => Column(
         children: [
           Expanded(
-            child: Column(
-              children: [
-                Expanded(flex: 4, child: rail),
-                Expanded(
-                  flex: 6,
-                  child: _ReviewVideoStage(
-                    controller: controller,
-                    candidate: candidate,
-                    rim: state.project.rimRoi,
-                    annotations: annotations,
-                    clipOnly: clipOnly,
-                    aspectRatio: video.width / video.height,
-                    onToggle: () => _togglePlay(),
-                    onPause: _pausePlayback,
-                    onScrubTo: _seekTo,
-                    onResume: _resumePlayback,
-                    onFullscreen: () => _openFullscreen(candidate),
-                    onSwipeVertical: (velocity) => _select(
-                      velocity < 0 ? selectedIndex + 1 : selectedIndex - 1,
-                    ),
-                  ),
+            child: _ReviewSourceBody(
+              rail: rail,
+              video: _ReviewVideoStage(
+                controller: controller,
+                unavailable: state.videoSourceFailure != null,
+                candidate: candidate,
+                rim: state.project.rimRoi,
+                annotations: annotations,
+                clipOnly: clipOnly,
+                aspectRatio: video.width / video.height,
+                onToggle: () => _togglePlay(),
+                onPause: _pausePlayback,
+                onScrubTo: _seekTo,
+                onResume: _resumePlayback,
+                onFullscreen: () => _openFullscreen(candidate),
+                onSwipeVertical: (velocity) => _select(
+                  velocity < 0 ? selectedIndex + 1 : selectedIndex - 1,
                 ),
-              ],
+              ),
             ),
           ),
           _ReviewActionBar(
@@ -1900,6 +1902,7 @@ class _ReviewViewState extends State<_ReviewView> {
 class _ReviewVideoStage extends StatefulWidget {
   const _ReviewVideoStage({
     required this.controller,
+    this.unavailable = false,
     required this.candidate,
     required this.rim,
     required this.annotations,
@@ -1913,6 +1916,7 @@ class _ReviewVideoStage extends StatefulWidget {
     required this.onSwipeVertical,
   });
   final VideoPlayerController? controller;
+  final bool unavailable;
   final Candidate candidate;
   final Roi? rim;
   final bool annotations;
@@ -2012,6 +2016,7 @@ class _ReviewVideoStageState extends State<_ReviewVideoStage> {
   @override
   Widget build(BuildContext context) {
     final player = widget.controller;
+    final unavailable = widget.unavailable || player?.value.hasError == true;
     final ratio = widget.aspectRatio.isFinite && widget.aspectRatio > 0
         ? widget.aspectRatio
         : 16 / 9;
@@ -2021,7 +2026,7 @@ class _ReviewVideoStageState extends State<_ReviewVideoStage> {
         borderRadius: BorderRadius.circular(8),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: _toggle,
+          onTap: unavailable ? null : _toggle,
           onHorizontalDragStart: _startScrub,
           onHorizontalDragUpdate: (details) =>
               _updateScrub(details, MediaQuery.sizeOf(context).width),
@@ -2036,7 +2041,7 @@ class _ReviewVideoStageState extends State<_ReviewVideoStage> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                if (player?.value.isInitialized == true)
+                if (!unavailable && player?.value.isInitialized == true)
                   Center(
                     child: AspectRatio(
                       aspectRatio: ratio,
@@ -2060,6 +2065,8 @@ class _ReviewVideoStageState extends State<_ReviewVideoStage> {
                       ),
                     ),
                   )
+                else if (unavailable)
+                  const VideoUnavailablePlaceholder()
                 else
                   const Center(child: CircularProgressIndicator()),
                 Positioned(
@@ -2080,7 +2087,7 @@ class _ReviewVideoStageState extends State<_ReviewVideoStage> {
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: IconButton(
-                          onPressed: widget.onFullscreen,
+                          onPressed: unavailable ? null : widget.onFullscreen,
                           icon: const Icon(
                             LucideIcons.maximize,
                             color: Colors.white,
@@ -2374,6 +2381,8 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
                         ],
                       ),
                     )
+                  : widget.controller.value.hasError
+                  ? const VideoUnavailablePlaceholder()
                   : const Center(child: CircularProgressIndicator()),
             ),
           ),
@@ -4526,79 +4535,86 @@ Future<void> _showRangeSheet(BuildContext context, MobileAppState state) async {
   final value = await showModalBottomSheet<({int start, int end})>(
     context: context,
     isScrollControlled: true,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setSheetState) => _SheetFrame(
-        title: context.bheText('分析范围'),
-        child: Column(
-          children: [
-            SizedBox(
-              width: double.infinity,
-              child: _VideoPreview(
-                path: video.path,
-                aspectRatio: video.width / video.height,
-                seekStepMs: 1500,
-                initialPositionMs: start.round(),
-                requestedPositionMs: requestedPosition,
-                stopAtMs: end.round(),
-                onPositionChanged: (position) {
-                  if (context.mounted) {
-                    setSheetState(() => previewPosition = position);
-                  }
+    builder: (context) => AnimatedBuilder(
+      animation: state,
+      builder: (context, _) => StatefulBuilder(
+        builder: (context, setSheetState) => _SheetFrame(
+          title: context.bheText('分析范围'),
+          child: Column(
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: _VideoPreview(
+                  key: const ValueKey('analysis-range-preview'),
+                  sourceRevision: state.videoSourceRevision,
+                  unavailable: state.videoSourceFailure != null,
+                  onFailure: state.markVideoFailure,
+                  path: video.path,
+                  aspectRatio: video.width / video.height,
+                  seekStepMs: 1500,
+                  initialPositionMs: start.round(),
+                  requestedPositionMs: requestedPosition,
+                  stopAtMs: end.round(),
+                  onPositionChanged: (position) {
+                    if (context.mounted) {
+                      setSheetState(() => previewPosition = position);
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '${_formatMs(start.round())} — ${_formatMs(end.round())}',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              _RangeEditorSlider(
+                max: video.durationMs.toDouble().clamp(1, double.infinity),
+                start: start,
+                end: end,
+                position: previewPosition.toDouble(),
+                onChanged: (values) {
+                  if (values.end - values.start < 1000) return;
+                  final seekTo = _movedRangeHandle(
+                    values: values,
+                    previousStart: start,
+                    previousEnd: end,
+                  );
+                  setSheetState(() {
+                    start = values.start;
+                    end = values.end;
+                    previewPosition = seekTo;
+                    requestedPosition = seekTo;
+                  });
                 },
               ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '${_formatMs(start.round())} — ${_formatMs(end.round())}',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            _RangeEditorSlider(
-              max: video.durationMs.toDouble().clamp(1, double.infinity),
-              start: start,
-              end: end,
-              position: previewPosition.toDouble(),
-              onChanged: (values) {
-                if (values.end - values.start < 1000) return;
-                final seekTo = _movedRangeHandle(
-                  values: values,
-                  previousStart: start,
-                  previousEnd: end,
-                );
-                setSheetState(() {
-                  start = values.start;
-                  end = values.end;
-                  previewPosition = seekTo;
-                  requestedPosition = seekTo;
-                });
-              },
-            ),
-            Row(
-              children: [
-                TextButton(
-                  onPressed: () => setSheetState(() {
-                    start = 0;
-                    end = video.durationMs.toDouble();
-                    previewPosition = 0;
-                    requestedPosition = 0;
-                  }),
-                  child: Text(context.bheText('使用全片')),
-                ),
-                const Spacer(),
-                FilledButton(
-                  onPressed: () => Navigator.pop(context, (
-                    start: start.round(),
-                    end: end.round(),
-                  )),
-                  child: Text(context.bheText('完成')),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              context.bheText('跳过热身或无关片段，修改会自动保存。'),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: () => setSheetState(() {
+                      start = 0;
+                      end = video.durationMs.toDouble();
+                      previewPosition = 0;
+                      requestedPosition = 0;
+                    }),
+                    child: Text(context.bheText('使用全片')),
+                  ),
+                  const Spacer(),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(context, (
+                      start: start.round(),
+                      end: end.round(),
+                    )),
+                    child: Text(context.bheText('完成')),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                context.bheText('跳过热身或无关片段，修改会自动保存。'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
         ),
       ),
     ),

@@ -1,7 +1,12 @@
 part of '../../mobile_ui.dart';
 
 class _InlineNotice extends StatelessWidget {
-  const _InlineNotice({required this.message, this.error = false, this.action});
+  const _InlineNotice({
+    super.key,
+    required this.message,
+    this.error = false,
+    this.action,
+  });
   final String message;
   final bool error;
   final Widget? action;
@@ -11,7 +16,7 @@ class _InlineNotice extends StatelessWidget {
     final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: EdgeInsets.fromLTRB(12, 10, 12, action == null ? 10 : 4),
       decoration: BoxDecoration(
         color: (error ? BhePalette.error : BhePalette.warning).withValues(
           alpha: .10,
@@ -34,6 +39,7 @@ class _InlineNotice extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
@@ -62,39 +68,53 @@ class VideoSourceNotice extends StatelessWidget {
         return const SizedBox.shrink();
       }
       final busy = state.relinkingVideo;
+      final actionStyle = TextButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        padding: EdgeInsets.zero,
+        alignment: Alignment.centerLeft,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      );
       return Padding(
-        padding: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         child: _InlineNotice(
+          key: const ValueKey('video-source-notice'),
           message: context.bheText(state.errorMessage ?? '正在重新选择视频'),
           error: true,
           action: !state.canRelinkVideo && !busy
               ? null
               : Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    TextButton.icon(
+                    TextButton(
                       key: const ValueKey('video-relink'),
                       onPressed: busy || state.preparingVideo || state.exporting
                           ? null
                           : () => unawaited(state.relinkVideo()),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                      ),
-                      icon: busy
-                          ? const SizedBox(
+                      style: actionStyle,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (busy) ...[
+                            const SizedBox(
                               width: 18,
                               height: 18,
                               child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(LucideIcons.folderOpen, size: 18),
-                      label: Text(
-                        context.bheText(
-                          state.relinkCancelling
-                              ? '正在取消'
-                              : busy
-                              ? '正在重新选择视频'
-                              : '重新选择视频',
-                        ),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          Flexible(
+                            child: Text(
+                              context.bheText(
+                                state.relinkCancelling
+                                    ? '正在取消'
+                                    : busy
+                                    ? '正在重新选择视频'
+                                    : '重新选择视频',
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     if (busy)
@@ -103,9 +123,7 @@ class VideoSourceNotice extends StatelessWidget {
                         onPressed: state.relinkCancelling
                             ? null
                             : state.cancelVideoRelink,
-                        style: TextButton.styleFrom(
-                          minimumSize: const Size(48, 48),
-                        ),
+                        style: actionStyle,
                         child: Text(context.bheText('取消')),
                       ),
                   ],
@@ -159,7 +177,7 @@ class _VideoPreparationCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${l10n?.text(message) ?? message}，${l10n?.text('大文件可能需要几秒') ?? '大文件可能需要几秒'}。',
+                    context.bheText('$message，大文件可能需要几秒。'),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   TextButton(

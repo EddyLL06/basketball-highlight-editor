@@ -33,3 +33,27 @@ Future<void> _loadReviewVideo(_ReviewViewState view) async {
     }
   }
 }
+
+class _ReviewSourceBody extends StatelessWidget {
+  const _ReviewSourceBody({required this.rail, required this.video});
+  final Widget rail;
+  final Widget video;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      // Existing progress controls: 48dp + 2dp padding; filter strip: 34dp.
+      // Keep these visible when a source notice reduces the available height.
+      final railHeight = math.max(
+        constraints.maxHeight * .4,
+        math.min(84.0, constraints.maxHeight),
+      );
+      return Column(
+        children: [
+          SizedBox(height: railHeight, child: rail),
+          Expanded(child: video),
+        ],
+      );
+    },
+  );
+}

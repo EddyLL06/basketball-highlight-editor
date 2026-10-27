@@ -367,6 +367,11 @@ String _englishDuration(String value) => value
     .trim();
 
 const _englishText = <String, String>{
+  '视频不可用': 'Video unavailable',
+  '正在读取视频信息，大文件可能需要几秒。': 'Reading video information. Large files may take a few seconds.',
+  '正在保存视频到本机，大文件可能需要几秒。': 'Saving the video locally. Large files may take a few seconds.',
+  '正在识别篮筐区域，大文件可能需要几秒。': 'Detecting the hoop region. Large files may take a few seconds.',
+
   '导出成功，部分音轨无法保留': 'Export complete. Some audio tracks could not be kept.',
   '视频文件找不到了，请重新选择原视频。': 'The video file is missing. Choose the original video again.',
   '这个视频无法播放，请重新选择原视频。': 'This video cannot be played. Choose the original video again.',

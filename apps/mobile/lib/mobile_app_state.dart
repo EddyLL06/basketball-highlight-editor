@@ -122,6 +122,13 @@ class MobileAppState extends ChangeNotifier {
   int _videoPreparationGeneration = 0;
   DateTime? analysisStartedAt;
 
+  bool get canStartAnalysis =>
+      hasVideo &&
+      !analysing &&
+      !preparingVideo &&
+      !relinkingVideo &&
+      !exporting &&
+      videoSourceFailure == null;
   bool get hasVideo => project.video != null;
   bool get sourceVideoExists =>
       project.video != null && File(project.video!.path).existsSync();
