@@ -30,6 +30,8 @@ internal object ExportPathRegistry {
         return true
     }
 
+    @Synchronized fun contains(id: String): Boolean = entries.containsKey(id)
+
     @Synchronized fun finish(id: String) {
         val entry = entries.remove(id) ?: return
         paths.remove(entry.path, id)

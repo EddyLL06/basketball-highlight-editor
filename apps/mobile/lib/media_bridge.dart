@@ -23,6 +23,7 @@ class _ExportRun {
   bool cancelled = false;
   bool admitted = false;
   String? mergeId;
+  String? nativeId;
   final Completer<void> cancelledSignal = Completer<void>();
 }
 
@@ -35,11 +36,23 @@ class _ExportTicket {
     // A timed-out or cancelled waiter must not release its predecessor.
     previous.then((_) {
       if (!release.isCompleted) release.complete();
+      if (identical(_ExportGate.owner?.ticket, this)) _ExportGate.owner = null;
     });
   }
 }
 
+class _ExportOwner {
+  _ExportOwner(this.ticket, this.run);
+  final _ExportTicket ticket;
+  final _ExportRun run;
+}
+
+class ExportDrainTimeout extends MobileExportException {
+  const ExportDrainTimeout() : super('上一次导出尚未结束，请稍后重试。');
+}
+
 class _ExportGate {
+  static _ExportOwner? owner;
   static Future<void> _tail = Future.value();
   static int _pending = 0;
   static _ExportTicket enter() {
@@ -105,6 +118,7 @@ class NativeMediaExportEngine implements MobileExportEngine {
         final index = candidates.indexOf(candidate) + 1;
         final outputPath = '$outputDirectory/${clipFileName(index, candidate)}';
         try {
+          run.nativeId = candidate.id;
           final raw = await _channel.invokeMethod<Object?>('exportClip', {
             'exportId': candidate.id,
             'inputPath': video.path,
@@ -168,12 +182,14 @@ class NativeMediaExportEngine implements MobileExportEngine {
     final exportId = 'merge-${DateTime.now().microsecondsSinceEpoch}';
     run.mergeId = exportId;
     var reserved = false;
+    var releaseUncertain = false;
     final ticket = _ExportGate.enter();
     try {
       if (ticket.waiting) {
         yield const ExportProgress(progress: 0, message: '正在结束上一次导出');
       }
       await _waitForTurn(ticket, run);
+      run.nativeId = exportId;
       try {
         reserved =
             await _channel.invokeMethod<bool>('registerMergeExport', {
@@ -218,34 +234,65 @@ class NativeMediaExportEngine implements MobileExportEngine {
     } finally {
       if (reserved) {
         try {
-          await _channel.invokeMethod<void>('releaseMergeExport', {
-            'exportId': exportId,
-          });
+          await _channel
+              .invokeMethod<void>('releaseMergeExport', {'exportId': exportId})
+              .timeout(drainTimeout);
+        } on TimeoutException {
+          releaseUncertain = true;
+          throw const ExportDrainTimeout();
         } on Object catch (error, stack) {
           MobileDiagnostics.instance.error(
             error,
             stack,
             operation: 'export.release',
           );
+          releaseUncertain = true;
+          throw const ExportDrainTimeout();
         }
       }
-      ticket.finish();
+      if (!releaseUncertain) ticket.finish();
       if (identical(_activeRun, run)) _activeRun = null;
     }
   }
 
   Future<void> _waitForTurn(_ExportTicket ticket, _ExportRun run) async {
-    final available =
-        await Future.any([
-          ticket.previous.then((_) => true),
-          run.cancelledSignal.future.then((_) => false),
-        ]).timeout(
-          drainTimeout,
-          onTimeout: () =>
-              throw const MobileExportException('上一次导出尚未结束，请稍后重试。'),
-        );
+    final available = await Future.any([
+      ticket.previous.then((_) => true),
+      run.cancelledSignal.future.then((_) => false),
+    ]).timeout(drainTimeout, onTimeout: () => throw const ExportDrainTimeout());
     if (!available || run.cancelled) throw const MobileExportException('导出已取消');
     run.admitted = true;
+    _ExportGate.owner = _ExportOwner(ticket, run);
+  }
+
+  static Future<void>? get activeDrain =>
+      _ExportGate.owner?.ticket.release.future;
+
+  /// A status response is authoritative only after the native channel has
+  /// processed the original request and its worker has released its path.
+  Future<bool> checkPreviousExport({bool stopFirst = false}) async {
+    final owner = _ExportGate.owner;
+    if (owner == null) return true;
+    final id = owner.run.nativeId;
+    if (id == null) return false;
+    if (stopFirst) {
+      await _channel
+          .invokeMethod<void>('cancelExport', {'exportId': id})
+          .timeout(const Duration(seconds: 5));
+    }
+    final active = await _channel
+        .invokeMethod<bool>('isExportActive', {'exportId': id})
+        .timeout(const Duration(seconds: 5));
+    if (active == null) throw const MobileExportException('无法确认上次导出是否停止。');
+    if (!active && identical(_ExportGate.owner, owner)) {
+      owner.run.cancelled = true;
+      if (!owner.run.cancelledSignal.isCompleted) {
+        owner.run.cancelledSignal.complete();
+      }
+      owner.ticket.finish();
+      return true;
+    }
+    return false;
   }
 
   @override

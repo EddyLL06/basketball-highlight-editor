@@ -188,6 +188,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   void dispose() {
     _disposed = true;
     _exportDrainTimer?.cancel();
+    _uncertainExportWatch?.cancel();
     _videoPreparationGeneration++;
     super.dispose();
   }
@@ -201,6 +202,82 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   int _exportRun = 0;
   bool _exportPreflight = false;
   Timer? _exportDrainTimer;
+  Timer? _uncertainExportWatch;
+  Future<void>? _uncertainExportDrain;
+  DiagnosticErrorRecord? uncertainExportDiagnostic;
+  String? uncertainExportStatus;
+  bool checkingUncertainExport = false;
+  bool get hasUncertainExport => _uncertainExportDrain != null;
+
+  void _watchOldExport() {
+    final drain = NativeMediaExportEngine.activeDrain;
+    if (drain == null) return;
+    _uncertainExportWatch?.cancel();
+    final timer = Timer(exportDrainTimeout, () {
+      if (!_disposed && identical(NativeMediaExportEngine.activeDrain, drain)) {
+        _markExportUncertain(TimeoutException('上一次导出尚未结束'), StackTrace.current);
+        notifyListeners();
+      }
+    });
+    _uncertainExportWatch = timer;
+    drain.then((_) {
+      if (identical(_uncertainExportWatch, timer)) timer.cancel();
+    });
+  }
+
+  void _markExportUncertain(Object error, StackTrace stack) {
+    final drain = NativeMediaExportEngine.activeDrain;
+    if (drain == null || _disposed) return;
+    _uncertainExportDrain = drain;
+    uncertainExportStatus = null;
+    uncertainExportDiagnostic = MobileDiagnostics.instance.error(
+      error,
+      stack,
+      operation: 'export',
+    );
+    drain.then((_) {
+      if (identical(_uncertainExportDrain, drain)) {
+        _uncertainExportDrain = null;
+        uncertainExportDiagnostic = null;
+        uncertainExportStatus = null;
+        if (!_disposed) notifyListeners();
+      }
+    });
+  }
+
+  Future<bool> checkUncertainExport({bool stopFirst = false}) async {
+    final drain = _uncertainExportDrain;
+    final engine = exportEngine;
+    if (drain == null) return true;
+    if (_disposed ||
+        engine is! NativeMediaExportEngine ||
+        checkingUncertainExport) {
+      return false;
+    }
+    checkingUncertainExport = true;
+    notifyListeners();
+    try {
+      final stopped = await engine.checkPreviousExport(stopFirst: stopFirst);
+      if (identical(_uncertainExportDrain, drain)) {
+        uncertainExportStatus = stopped ? null : '上次任务仍在运行，请稍候或再次尝试停止。';
+      }
+      return stopped;
+    } on Object catch (error, stack) {
+      if (identical(_uncertainExportDrain, drain)) {
+        uncertainExportStatus = '无法确认上次任务是否停止。';
+        uncertainExportDiagnostic = MobileDiagnostics.instance.error(
+          error,
+          stack,
+          operation: 'export',
+        );
+      }
+      return false;
+    } finally {
+      checkingUncertainExport = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
   bool _mergeCommitted = false;
   bool exportAudioSkipped = false;
   int? exportMergedOverlapCount;
@@ -1356,6 +1433,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   void _resetTransientState() {
     _exportDrainTimer?.cancel();
     if (exporting && !_exportPreflight && !_mergeCommitted) {
+      _watchOldExport();
       unawaited(
         exportEngine.cancel().catchError((Object error, StackTrace stack) {
           MobileDiagnostics.instance.error(
@@ -1992,7 +2070,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   int? _beginExport() {
-    if (exporting) return null;
+    if (exporting || hasUncertainExport) return null;
     _exportDrainTimer?.cancel();
     final run = ++_exportRun;
     exporting = true;
@@ -2073,6 +2151,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       }
       MobileDiagnostics.instance.event('operation.completed');
     } on Object catch (error, stack) {
+      if (error is ExportDrainTimeout) _markExportUncertain(error, stack);
       if (current()) {
         recordDiagnosticFailure(error, stack, operation: 'export');
         notifyListeners();
@@ -2166,8 +2245,9 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       }
       MobileDiagnostics.instance.event('operation.completed');
     } on Object catch (error, stack) {
+      if (error is ExportDrainTimeout) _markExportUncertain(error, stack);
       if (current()) {
-        exportMergedOverlapCount = null;
+        if (!_mergeCommitted) exportMergedOverlapCount = null;
         recordDiagnosticFailure(error, stack, operation: 'export');
         notifyListeners();
       } else {
@@ -2207,6 +2287,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       exporting = false;
       _exportPreflight = false;
       final error = TimeoutException('上一次导出尚未结束，请稍后重试。');
+      _markExportUncertain(error, StackTrace.current);
       recordDiagnosticFailure(error, StackTrace.current, operation: 'export');
       errorMessage = '上一次导出尚未结束，请稍后重试。';
       progressMessage = errorMessage!;

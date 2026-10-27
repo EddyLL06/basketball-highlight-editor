@@ -38,6 +38,7 @@ part 'features/project_rename/project_rename_dialog.dart';
 part 'features/player_roster/roster_confirmation.dart';
 part 'features/player_groups/player_groups_sheet.dart';
 part 'features/player_groups/player_group_editor.dart';
+part 'features/operation_status/uncertain_task_notice.dart';
 part 'features/export/export_overlap_notice.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
@@ -637,6 +638,7 @@ class _ProjectView extends StatelessWidget {
                   : (l10n?.configureAnalysisDescription ?? '配置好分析区域后即可开始识别。'),
             ),
             VideoSourceNotice(state: state),
+            if (state.hasUncertainExport) _UncertainExportNotice(state: state),
             if (state.preparingVideo)
               _VideoPreparationCard(message: state.preparingVideoMessage, onCancel: state.cancelVideoPreparation)
             else if (state.project.video == null)
@@ -4094,6 +4096,7 @@ class _ExportViewState extends State<_ExportView> {
               subtitle:
                   l10n?.exportPageSubtitle ?? '按审核结果导出保留片段，可分别导出或合并为一条视频。',
             ),
+            if (state.hasUncertainExport) _UncertainExportNotice(state: state),
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -4133,7 +4136,7 @@ class _ExportViewState extends State<_ExportView> {
                     _PlayerChoiceChip(
                       player: player,
                       selected: selectedPlayer == player,
-                      onSelected: state.exporting
+                      onSelected: (state.exporting || state.hasUncertainExport)
                           ? (_) {}
                           : (selected) => setState(
                               () => selectedPlayer = selected ? player : null,
@@ -4146,7 +4149,7 @@ class _ExportViewState extends State<_ExportView> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: state.exporting
+                    onPressed: (state.exporting || state.hasUncertainExport)
                         ? null
                         : () => unawaited(
                             state.exportClipsForPlayer(selectedPlayer),
@@ -4181,7 +4184,7 @@ class _ExportViewState extends State<_ExportView> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: state.exporting
+                        onPressed: (state.exporting || state.hasUncertainExport)
                             ? null
                             : () => unawaited(state.exportClips()),
                         icon: const Icon(LucideIcons.files, size: 18),
@@ -4192,7 +4195,7 @@ class _ExportViewState extends State<_ExportView> {
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: state.exporting
+                        onPressed: (state.exporting || state.hasUncertainExport)
                             ? null
                             : () => unawaited(
                                 state.mergeClipsForPlayer(selectedPlayer),

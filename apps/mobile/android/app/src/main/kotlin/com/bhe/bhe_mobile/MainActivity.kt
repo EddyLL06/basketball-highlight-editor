@@ -86,6 +86,7 @@ class MainActivity : FlutterActivity() {
                     "registerMergeExport" -> registerMergeExport(call, result)
                     "releaseMergeExport" -> releaseMergeExport(call, result)
                     "cancelExport" -> cancelExport(call, result)
+                    "isExportActive" -> result.success(call.argument<String>("exportId")?.let(ExportPathRegistry::contains))
                     "saveToLibrary" -> saveToLibrary(call, result)
                     else -> result.notImplemented()
                 }
@@ -674,14 +675,24 @@ class MainActivity : FlutterActivity() {
             result.error("INVALID_ARGUMENT", "视频片段参数无效", null)
             return
         }
-        val reserved = try { ExportPathRegistry.reserve(exportId, outputPath) && ExportPathRegistry.start(exportId, outputPath) } catch (error: Exception) { false }
+        val reserved = try {
+            ExportStart.acquire(
+                { ExportPathRegistry.reserve(exportId, outputPath) },
+                { ExportPathRegistry.start(exportId, outputPath) },
+                { ExportPathRegistry.releaseIdle(exportId) },
+            )
+        } catch (error: Exception) { false }
         if (!reserved) {
             result.error("EXPORT_BUSY", "这个输出文件正在导出，请稍后重试。", null)
             return
         }
-        val cancelled = AtomicBoolean(false)
-        exportCancelled[exportId] = cancelled
-        Thread {
+        val cancelled = ExportStart.claimFlag(exportCancelled, exportId)
+        if (cancelled == null) {
+            ExportPathRegistry.finish(exportId)
+            result.error("EXPORT_BUSY", "这个输出文件正在导出，请稍后重试。", null)
+            return
+        }
+        val worker = Thread {
             var completion: (() -> Unit)? = null
             var extractor: MediaExtractor? = null
             var muxer: MediaMuxer? = null
@@ -754,7 +765,16 @@ class MainActivity : FlutterActivity() {
                 ExportPathRegistry.finish(exportId)
                 mainHandler.post { completion?.invoke() }
             }
-        }.start()
+        }
+        try {
+            ExportStart.launch({ worker.start() }, {
+                exportCancelled.remove(exportId, cancelled)
+                ExportPathRegistry.finish(exportId)
+            })
+        } catch (error: Throwable) {
+            AppDiagnostics.event("export.failed", error = error)
+            result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error))
+        }
     }
 
     private fun registerMergeExport(call: MethodCall, result: MethodChannel.Result) {
@@ -812,18 +832,24 @@ class MainActivity : FlutterActivity() {
                 return
             }
         } else {
-            val flag = AtomicBoolean(false)
-            exportCancelled.putIfAbsent(exportId, flag) ?: flag
+            ExportStart.claimFlag(exportCancelled, exportId) ?: run {
+                result.error("EXPORT_BUSY", "这个输出文件正在导出，请稍后重试。", null)
+                return
+            }
         }
         val started = try {
-            (reserved || ExportPathRegistry.reserve(exportId, outputPath)) && ExportPathRegistry.start(exportId, outputPath)
+            ExportStart.acquire(
+                { reserved || ExportPathRegistry.reserve(exportId, outputPath) },
+                { ExportPathRegistry.start(exportId, outputPath) },
+                { if (ExportPathRegistry.releaseIdle(exportId)) exportCancelled.remove(exportId, cancelled) },
+            )
         } catch (error: Exception) { false }
         if (!started) {
             if (!reserved) exportCancelled.remove(exportId, cancelled)
             result.error("EXPORT_BUSY", "这个输出文件正在导出，请稍后重试。", null)
             return
         }
-        Thread {
+        val worker = Thread {
             var completion: (() -> Unit)? = null
             var muxer: MediaMuxer? = null
             var muxerStarted = false
@@ -948,7 +974,16 @@ class MainActivity : FlutterActivity() {
                 ExportPathRegistry.finish(exportId)
                 mainHandler.post { completion?.invoke() }
             }
-        }.start()
+        }
+        try {
+            ExportStart.launch({ worker.start() }, {
+                exportCancelled.remove(exportId, cancelled)
+                ExportPathRegistry.finish(exportId)
+            })
+        } catch (error: Throwable) {
+            AppDiagnostics.event("export.failed", error = error)
+            result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error))
+        }
     }
 
     private fun outputPathId(call: MethodCall): String =
