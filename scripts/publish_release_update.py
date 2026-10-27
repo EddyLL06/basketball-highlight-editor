@@ -37,6 +37,7 @@ class DirectoryStore:
     """Filesystem-only OSS substitute; there is no network fallback."""
     def __init__(self, root: Path):
         self.root = root.resolve()
+        self.exclusive_download = False
 
     def path(self, key):
         path = (self.root / safe_key(key)).resolve()
@@ -50,7 +51,8 @@ class DirectoryStore:
             if missing_ok:
                 return False
             raise ValueError(f'存储对象缺失：{key}')
-        shutil.copyfile(source, target)
+        with source.open('rb') as input_file, target.open('xb' if self.exclusive_download else 'wb') as output:
+            shutil.copyfileobj(input_file, output)
         return True
 
     def upload(self, source: Path, key: str, *, mutable=False):
@@ -82,7 +84,7 @@ class OssStore:
             url = base.rstrip('/') + '/' + name
         request = urllib.request.Request(url, headers={'Cache-Control': 'no-cache'})
         try:
-            with urllib.request.urlopen(request, timeout=60) as response, target.open('wb') as output:
+            with urllib.request.urlopen(request, timeout=60) as response, target.open('xb' if self.args.dry_run else 'wb') as output:
                 shutil.copyfileobj(response, output)
         except urllib.error.HTTPError as error:
             if missing_ok and error.code == 404:
@@ -108,7 +110,7 @@ class Summary:
         self.path = path
         self.data = {'tag': tag, 'platform': platform, 'status': 'running', 'stage': 'starting',
                      'run_url': os.environ.get('GITHUB_SERVER_URL', '') + '/' + os.environ.get('GITHUB_REPOSITORY', '') + '/actions/runs/' + os.environ.get('GITHUB_RUN_ID', ''),
-                     'events': []}
+                     'events': [], 'previous_verified': False, 'candidate_verified': False}
         self.save()
 
     def save(self):
@@ -136,6 +138,8 @@ def publish(args, store, summary):
     store.download(manifest_key, previous_path)
     store.download(manifest_key + '.sig', previous_signature)
     previous = read_signed_manifest(previous_path, previous_signature, args.public_key)
+    summary.data['previous_verified'] = True
+    summary.save()
     # Already-shipped Windows clients send this exact string to the strict helper.
     if previous['version'] != release_parts(previous['version'])[0]:
         raise ValueError('生产清单顶层版本必须为不带 v 前缀的标准完整版本')
@@ -148,6 +152,8 @@ def publish(args, store, summary):
     subprocess.run(['openssl', 'pkeyutl', '-sign', '-rawin', '-inkey', str(args.signing_key),
                     '-in', str(candidate_path), '-out', str(candidate_signature)], check=True, capture_output=True)
     verify_signature(candidate_path, candidate_signature, args.public_key)
+    summary.data['candidate_verified'] = True
+    summary.save()
     # Unknown platform extensions remain in the manifest but are never republished.
     targets = list(FAMILIES[family] if family else PLATFORMS)
     files = []
@@ -232,15 +238,27 @@ def main(argv=None):
     args.prefix = safe_key(args.prefix)
     args.android_key = safe_key(args.android_key)
     args.android_base_url = args.android_base_url or args.base_url
-    if args.dry_run and args.store_dir is not None and args.work_dir.resolve().is_relative_to(args.store_dir.resolve()):
-        parser.error('演练工作目录不能位于模拟存储目录内')
-    args.work_dir.mkdir(parents=True, exist_ok=True)
+    if args.dry_run and args.store_dir is not None:
+        store_root = args.store_dir.resolve()
+        if args.work_dir.resolve().is_relative_to(store_root):
+            parser.error('演练工作目录不能位于模拟存储目录内')
+        step_summary = os.environ.get('GITHUB_STEP_SUMMARY')
+        if step_summary and Path(step_summary).resolve().is_relative_to(store_root):
+            parser.error('演练摘要不能位于模拟存储目录内')
+        try:
+            args.work_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
+        except FileExistsError:
+            parser.error('离线演练工作目录必须是新建的空目录，请指定新的路径')
+    else:
+        args.work_dir.mkdir(parents=True, exist_ok=True)
     summary = Summary(args.work_dir / 'publish-summary.json', args.tag, args.platform)
     def cancel(_signal, _frame):
         raise PublishCancelled('发布被取消，检查最后阶段；不得假定官网与更新清单已同时切换')
     previous_handler = signal.signal(signal.SIGTERM, cancel)
     try:
         store = DirectoryStore(args.store_dir) if args.store_dir is not None else OssStore(args)
+        if isinstance(store, DirectoryStore):
+            store.exclusive_download = args.dry_run
         publish(args, store, summary)
         return 0
     except (Exception, KeyboardInterrupt, SystemExit) as error:
@@ -256,7 +274,8 @@ def main(argv=None):
             with open(step_summary, 'a', encoding='utf-8') as output:
                 output.write(f'\n### 更新通道发布 {args.tag}\n\n状态：**{summary.data["status"]}**；最后阶段：`{summary.data["stage"]}`。\n\n')
                 if args.dry_run:
-                    output.write('**演练，未写入任何对象**。\n\n')
+                    output.write('**未写入 OSS 发布对象；Actions 产物中保存演练文件**。dry-run-ok 不代表正式发布成功。\n\n')
+                    output.write(f'旧清单验签：{summary.data["previous_verified"]}；候选签名验签：{summary.data["candidate_verified"]}。未通过验签的 previous.json 是待验证输入。\n\n')
                     for key in summary.data.get('would_upload', []):
                         output.write(f'- `{key}`\n')
                 output.write('同组只保留一个运行项和一个排队项，新的排队项可能取消旧排队项；只有 success 才代表发布完成。\n')

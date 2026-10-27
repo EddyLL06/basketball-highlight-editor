@@ -38,8 +38,10 @@ jobs:
   upload:
     name: Upload release assets to OSS
     concurrency:
-      group: bhe-production-update-channel-v1
+      group: ${{ inputs.dry_run && 'bhe-dryrun-update-channel-v1' || 'bhe-production-update-channel-v1' }}
       cancel-in-progress: false
+    outputs:
+      publish_status: ${{ steps.publish.outputs.status }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -97,6 +99,7 @@ jobs:
           for pattern in "${patterns[@]}"; do args+=(--pattern "$pattern"); done
           gh release download "${args[@]}"
       - name: Publish verified update channel
+        id: publish
         shell: bash
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.BHE_UPDATE_SIGNING_KEY }}
@@ -124,7 +127,8 @@ jobs:
             --android-alias-url "https://oss.shengshengniannian.com/$OSS_ANDROID_KEY" \
             --readme-zh source/README.md --readme-en source/README.en.md \
             --signing-key "$key" --work-dir "$RUNNER_TEMP/bhe-update-channel" ${dry_run_arg:+--dry-run}
-      - name: Preserve publication outcome and trusted manifest backups
+          python3 -c 'import json,os; s=json.load(open(os.path.join(os.environ["RUNNER_TEMP"],"bhe-update-channel","publish-summary.json"))); print("status="+s["status"])' >> "$GITHUB_OUTPUT"
+      - name: Preserve outcome and manifest files (see verification status)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -144,9 +148,16 @@ jobs:
         env:
           OUTCOME: ${{ needs.upload.result }}
           DRY_RUN: ${{ inputs.dry_run }}
+          PUBLISH_STATUS: ${{ needs.upload.outputs.publish_status }}
         run: |
           if [[ "$DRY_RUN" == "true" ]]; then
-            printf '### 更新通道演练\n\n演练，未写入任何对象。OSS job: **%s**\n' "$OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+            case "$OUTCOME:$PUBLISH_STATUS" in
+              success:dry-run-ok) result='演练完成 dry-run-ok' ;;
+              failure:*) result='演练失败' ;;
+              cancelled:*) result='演练取消' ;;
+              *) result='演练未执行' ;;
+            esac
+            printf '### 更新通道演练\n\n%s。未写入 OSS 发布对象；Actions 产物中保存演练文件（若已生成）。dry-run-ok 不代表正式发布成功。\n' "$result" >> "$GITHUB_STEP_SUMMARY"
           else
             printf '### 生产更新通道结果\n\nOSS job: **%s**\n\n同组只保留一个运行项和一个排队项；新排队项会取消旧排队项。只有 success 表示发布完成。\n' "$OUTCOME" >> "$GITHUB_STEP_SUMMARY"
           fi

@@ -96,7 +96,8 @@ def test_dry_run_verifies_and_lists_exact_writes_without_touching_store(offline,
     expected.update(('releases/latest.json.sig', 'releases/latest.json'))
     assert len(summary['would_upload']) == len(expected)
     assert set(summary['would_upload']) == expected
-    assert '演练，未写入任何对象' in step_summary.read_text()
+    assert '未写入 OSS 发布对象；Actions 产物中保存演练文件' in step_summary.read_text()
+    assert summary['previous_verified'] and summary['candidate_verified']
     assert all(key in step_summary.read_text() for key in expected)
 
 
@@ -122,8 +123,10 @@ def test_dry_run_has_same_preflight_failures_as_publish(offline, fault, monkeypa
     assert publisher.main(args) == 1
     normal = json.loads((work / 'publish-summary.json').read_text())
     assert tree_snapshot(store) == before
+    dry_work = work.with_name(work.name + '-dry')
+    args[args.index('--work-dir') + 1] = str(dry_work)
     assert publisher.main([*args, '--dry-run']) == 1
-    rehearsal = json.loads((work / 'publish-summary.json').read_text())
+    rehearsal = json.loads((dry_work / 'publish-summary.json').read_text())
     assert (rehearsal['status'], rehearsal['stage'], rehearsal['error']) == (normal['status'], normal['stage'], normal['error'])
     assert tree_snapshot(store) == before
 
@@ -136,6 +139,40 @@ def test_dry_run_rejects_work_dir_inside_store_before_writing(offline):
     before = tree_snapshot(store)
     with pytest.raises(SystemExit):
         publisher.main([*args, '--dry-run'])
+    assert tree_snapshot(store) == before
+
+
+def test_dry_run_rejects_existing_symlink_target_and_directory_store_uses_exclusive_create(offline):
+    release, store = offline
+    seed(release, store)
+    args, work = command(release, store, 'v0.1.13-android.1')
+    probe = store.path('probe-object')
+    probe.write_bytes(b'unchanged')
+    work.mkdir()
+    (work / 'previous.json').symlink_to(probe)
+    before = tree_snapshot(store)
+    with pytest.raises(SystemExit):
+        publisher.main([*args, '--dry-run'])
+    assert tree_snapshot(store) == before
+    store.exclusive_download = True
+    with pytest.raises(FileExistsError):
+        store.download('releases/latest.json', work / 'previous.json')
+    assert tree_snapshot(store) == before
+
+
+def test_dry_run_rejects_summary_symlink_resolved_inside_store(offline, monkeypatch):
+    release, store = offline
+    seed(release, store)
+    args, work = command(release, store, 'v0.1.13-android.1')
+    probe = store.path('report.md')
+    probe.write_bytes(b'unchanged')
+    link = release.root / 'summary-link'
+    link.symlink_to(probe)
+    monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(link))
+    before = tree_snapshot(store)
+    with pytest.raises(SystemExit):
+        publisher.main([*args, '--dry-run'])
+    assert not work.exists()
     assert tree_snapshot(store) == before
 
 
@@ -273,3 +310,64 @@ def test_offline_command_line_entry_runs_without_network_or_cloud_environment(of
     subprocess.run([sys.executable, str(root / 'scripts/publish_release_update.py'), *args], check=True, env=env, capture_output=True)
     assert json.loads((work / 'publish-summary.json').read_text())['status'] == 'success'
     assert read(store, release)['packages']['android-arm64-v8a']['version'].endswith('android.1')
+
+
+@pytest.mark.parametrize('fault', ['ok', 'missing', '403', '500', 'timeout', 'signature', 'signing-key',
+                                   'bad-json', 'bad-checksum', 'wrong-platform', 'cancel'])
+def test_oss_dry_run_only_get_and_never_calls_ossutil(tmp_path, monkeypatch, fault):
+    import io
+    from urllib.error import HTTPError
+    from urllib.parse import urlparse
+
+    release = ReleaseFixture(tmp_path / 'fixture')
+    store = publisher.DirectoryStore(tmp_path / 'fake-oss')
+    seed(release, store)
+    args, work = command(release, store, 'v0.1.13-android.1')
+    if fault == 'signature': store.path('releases/latest.json.sig').write_bytes(b'bad')
+    if fault == 'bad-json':
+        old = release.root / 'broken.json'
+        old.write_bytes(b'{broken json')
+        store.upload(old, 'releases/latest.json')
+        store.upload(release.sign(old), 'releases/latest.json.sig')
+    if fault == 'signing-key':
+        other = ReleaseFixture(release.root / 'other')
+        args[args.index('--signing-key') + 1] = str(other.key)
+    if fault == 'bad-checksum':
+        assets = Path(args[args.index('--assets-dir') + 1])
+        next(assets.glob('*.sha256')).write_text('bad checksum')
+    if fault == 'wrong-platform': args[args.index('--platform') + 1] = 'all'
+    args[:2] = ['--oss-root', 'oss://fake', '--oss-config', 'fake-config']
+    args += ['--dry-run']
+    monkeypatch.setenv('GITHUB_ACTIONS', 'true')
+    calls = []
+    def fake_urlopen(request, timeout):
+        assert request.get_method() == 'GET' and timeout == 60
+        calls.append(request.full_url)
+        name = urlparse(request.full_url).path.rsplit('/', 1)[-1]
+        if name == 'latest.json':
+            if fault in ('missing', '403', '500'):
+                code = 404 if fault == 'missing' else int(fault)
+                raise HTTPError(request.full_url, code, 'fake', {}, None)
+            if fault == 'timeout': raise TimeoutError('fake timeout')
+            if fault == 'cancel': raise publisher.PublishCancelled('fake cancellation')
+        source = store.path('releases/' + name)
+        if not source.is_file(): raise HTTPError(request.full_url, 404, 'fake', {}, None)
+        return io.BytesIO(source.read_bytes())
+    monkeypatch.setattr(publisher.urllib.request, 'urlopen', fake_urlopen)
+    real_run = subprocess.run
+    commands = []
+    def fake_run(command, *a, **kw):
+        commands.append(command)
+        assert command[0] == 'openssl', command
+        return real_run(command, *a, **kw)
+    monkeypatch.setattr(publisher.subprocess, 'run', fake_run)
+    before = tree_snapshot(store)
+    result = publisher.main(args)
+    assert result == (0 if fault == 'ok' else 130 if fault == 'cancel' else 1)
+    summary = json.loads((work / 'publish-summary.json').read_text())
+    assert summary['status'] == ('dry-run-ok' if fault == 'ok' else 'cancelled' if fault == 'cancel' else 'failed')
+    assert summary['previous_verified'] == (fault in ('ok', 'signing-key', 'bad-checksum'))
+    assert summary['candidate_verified'] == (fault == 'ok')
+    assert tree_snapshot(store) == before
+    assert all(command[0] == 'openssl' for command in commands)
+    assert calls or fault == 'wrong-platform'

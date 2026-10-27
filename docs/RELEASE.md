@@ -253,7 +253,11 @@ macOS 继续手动替换安装包，不传严格版本请求；Android 继续仅
 
 #### 共同发布入口与串行保护
 
-自动发布的 `oss-upload` job 与 **Upload existing release assets to OSS** 的手动 job 都调用 `scripts/publish_release_update.py`，并使用同一个 job 级锁 `bhe-production-update-channel-v1`。完整版本与各平台补丁共用，范围包含读取、验签、合并和全部通道写入。构建可并行，生产通道写入串行。
+自动发布的 `oss-upload` job 与 **Upload existing release assets to OSS** 的手动 job 都调用 `scripts/publish_release_update.py`。正式发布共用 job 级锁 `bhe-production-update-channel-v1`，覆盖读取、验签、合并和全部通道写入；演练使用独立组 `bhe-dryrun-update-channel-v1`，主工作流同标签演练也使用独立并发组，避免挤掉排队中的正式发布。构建可并行，生产通道写入串行。
+
+手动选择 `dry_run=true` 会读取、验签、合并、签名并预检同名对象，但不会写入 OSS 发布对象；Actions 会保存已生成的演练文件。主工作流还须同时启用 `publish` 和 `publish_oss`，否则计划阶段报错。`dry-run-ok` 不代表正式发布成功。检查备份中的 `publish-summary.json`：`previous_verified` 或 `candidate_verified` 为 false 时，对应文件只是待验证输入或未通过验签的候选；脚本未启动时可能没有备份，恢复前始终重新验签。
+
+**真实发布进行中不要跑演练。** 独立并发组不保证读取到一致快照：如果演练恰好读到正式发布切换签名与清单之间的状态，可能验签失败；演练失败时，先确认没有正式发布在进行，再重新演练。
 
 **GitHub concurrency 同组最多保留 1 个运行项和 1 个排队项，后来的排队项会取消更早的排队项；即使 `cancel-in-progress: false` 也不会保留所有排队项。** 它不是先入先出的可靠发布队列。需要逐个确认成功；多个任务入队后必须检查是否有 `cancelled`，不能认为它们最终都会发布。被取消的任务由监督者决定是否以手动入口重新发布，不自动重发。
 
