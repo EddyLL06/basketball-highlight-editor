@@ -165,6 +165,7 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      enableDrag: false,
       builder: (_) => _PlayerGroupsSheet(state: widget.state),
     );
     if (mounted) setState(() => _players = [...widget.state.project.players]);

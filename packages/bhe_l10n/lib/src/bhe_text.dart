@@ -991,6 +991,12 @@ const _englishText = <String, String>{
   '还没有分组。把当前项目的球员存为分组后，其他项目可以一键导入。':
       'No groups yet. Save this project\'s players as a group to import them into other projects in one tap.',
   '把当前球员存为分组': 'Save current players as a group',
+  '默认': 'Default',
+  '管理分组': 'Manage groups',
+  '确认删除分组？': 'Delete this group?',
+  '已有同名分组，是否替换？': 'Replace the existing group?',
+  '替换': 'Replace',
+  '分组操作未完成': 'Group operation was not completed',
   '这个分组还没有球员': 'This group has no players yet',
   '球员名单': 'Player roster',
   '正在读取球员分组…': 'Loading player groups…',

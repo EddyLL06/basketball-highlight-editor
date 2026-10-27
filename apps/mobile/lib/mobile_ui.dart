@@ -36,6 +36,7 @@ part 'features/review_undo/review_notice.dart';
 part 'features/player_tags/player_tag_sheet.dart';
 part 'features/project_rename/project_rename_dialog.dart';
 part 'features/player_roster/roster_confirmation.dart';
+part 'features/player_groups/player_groups_sheet.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 
@@ -886,6 +887,11 @@ Future<void> _confirmAndStartAnalysis(
   final projectId = state.project.id;
   final session = state.projectSession;
   final videoGeneration = state.videoPreparationGeneration;
+  if (!state.groupsLoaded) await state.groupsReady;
+  if (!context.mounted || state.project.id != projectId || state.projectSession != session ||
+      state.videoPreparationGeneration != videoGeneration) {
+    return;
+  }
   final confirmed = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
@@ -3990,96 +3996,6 @@ Future<void> _showPlayerPicker(
   }
 }
 
-class _PlayerGroupsSheet extends StatelessWidget {
-  const _PlayerGroupsSheet({required this.state});
-  final MobileAppState state;
-
-  Future<void> _saveCurrent(BuildContext context) async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(context.bheText('存为分组')),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: InputDecoration(
-            hintText: context.bheText('例如：周六球队'),
-          ),
-          onSubmitted: (value) => Navigator.pop(dialogContext, value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text(context.bheText('取消')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, controller.text),
-            child: Text(context.bheText('保存')),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (name == null || name.trim().isEmpty) return;
-    await state.savePlayerGroup(name.trim());
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: state,
-    builder: (context, _) => _SheetFrame(
-      title: context.bheText('球员分组'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (state.playerGroups.isEmpty)
-            Text(
-              context.bheText('还没有分组。把当前项目的球员存为分组后，其他项目可以一键导入。'),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          for (final group in state.playerGroups)
-            ListTile(
-              key: ValueKey('player-group-${group.name}'),
-              contentPadding: EdgeInsets.zero,
-              title: Text(group.name),
-              subtitle: Text(
-                group.players.join('、'),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextButton(
-                    onPressed: () {
-                      state.importPlayers(group.players);
-                      Navigator.pop(context);
-                    },
-                    child: Text(context.bheText('导入')),
-                  ),
-                  IconButton(
-                    tooltip: '${context.bheText('删除')}${group.name}',
-                    onPressed: () =>
-                        unawaited(state.deletePlayerGroup(group.name)),
-                    icon: const Icon(LucideIcons.trash2, size: 17),
-                  ),
-                ],
-              ),
-            ),
-          const SizedBox(height: 14),
-          OutlinedButton.icon(
-            onPressed: state.project.players.isEmpty
-                ? null
-                : () => _saveCurrent(context),
-            icon: const Icon(LucideIcons.save, size: 17),
-            label: Text(context.bheText('把当前球员存为分组')),
-          ),
-        ],
-      ),
-    ),
-  );
-}
 
 String _verdictLabel(String value) => switch (value) {
   'made' => '疑似进球',

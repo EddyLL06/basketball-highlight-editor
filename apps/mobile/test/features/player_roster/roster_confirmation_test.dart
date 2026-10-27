@@ -8,9 +8,11 @@ import '../../support/mobile_video_fixture.dart';
 
 void main() {
   late MobileVideoFixture f;
+  late String videoPath;
   setUp(() async {
     f = MobileVideoFixture();
     await f.init();
+    videoPath = (await f.file('original.mp4', 'original')).path;
   });
   tearDown(() => f.close());
   for (final width in [360.0, 412.0]) {
@@ -26,7 +28,7 @@ void main() {
           tester.binding.platformDispatcher.textScaleFactorTestValue = 1.3;
           try {
             f.state.project = f
-                .project('${f.root.path}/missing.mp4')
+                .project(videoPath)
                 .copyWith(players: []);
             f.state.playerGroups = [
               (name: 'Team', players: ['Alice', 'Bob', 'Carol']),

@@ -10,12 +10,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 
 import 'features/review_undo/review_history.dart';
 import 'features/review_undo/review_action_result.dart';
 import 'features/player_roster/roster_selection.dart';
+import 'features/player_groups/player_group_store.dart';
 
 export 'features/review_undo/review_action_result.dart';
 import 'features/project_mutation/project_mutation_queue.dart';
@@ -62,8 +62,31 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     video: null,
   );
   List<ProjectSnapshot> recentProjects = const [];
-  List<({String name, List<String> players})> playerGroups = const [];
-  String? defaultPlayerGroupName;
+  late final PlayerGroupStore _groupStore = PlayerGroupStore(
+    onChanged: () {
+      if (!_disposed) notifyListeners();
+    },
+    onFailure: (error, stack) {
+      if (_disposed) {
+        MobileDiagnostics.instance.error(
+          error,
+          stack,
+          operation: 'player.groups',
+        );
+      } else {
+        recordDiagnosticFailure(error, stack, operation: 'player.groups');
+        playerGroupError = diagnosticError;
+        notifyListeners();
+      }
+    },
+  );
+  List<PlayerGroup> get playerGroups => _groupStore.groups;
+  set playerGroups(List<PlayerGroup> value) => _groupStore.groups = value;
+  String? get defaultPlayerGroupName => _groupStore.defaultName;
+  set defaultPlayerGroupName(String? value) => _groupStore.defaultName = value;
+  Future<void> get groupsReady => _groupStore.ready;
+  bool get groupsLoaded => _groupStore.loaded;
+  DiagnosticErrorRecord? playerGroupError;
   RosterSelection? _rosterSelection;
   int get videoPreparationGeneration => _videoPreparationGeneration;
 
@@ -1697,60 +1720,99 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     });
   }
 
-  Future<void> _loadPlayerGroups() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(playerGroupsPrefsKey);
-      final defaultName = prefs.getString(defaultPlayerGroupPrefsKey);
-      if (raw == null) {
-        defaultPlayerGroupName = null;
-        return;
+  Future<void> _loadPlayerGroups() => _groupStore.ready;
+
+  Future<bool> savePlayerGroup(String name, {bool replaceExisting = true}) {
+    final value = name.trim();
+    final players = List<String>.of(project.players);
+    if (value.isEmpty) return Future.value(false);
+    return _groupStore.change((groups, currentDefault) {
+      final exists = groups.any((group) => group.name == value);
+      if (exists && !replaceExisting) return null;
+      return (
+        groups: [
+          for (final group in groups)
+            if (group.name == value) (name: value, players: players) else group,
+          if (!exists) (name: value, players: players),
+        ],
+        defaultName: currentDefault,
+      );
+    });
+  }
+
+  Future<bool> deletePlayerGroup(String name) =>
+      _groupStore.change((groups, currentDefault) {
+        if (!groups.any((group) => group.name == name)) return null;
+        return (
+          groups: [
+            for (final group in groups)
+              if (group.name != name) group,
+          ],
+          defaultName: currentDefault == name ? null : currentDefault,
+        );
+      });
+
+  Future<bool> setDefaultPlayerGroup(String? name) => _groupStore.change((
+    groups,
+    currentDefault,
+  ) {
+    if (name != null && !groups.any((group) => group.name == name)) return null;
+    return (groups: groups, defaultName: name);
+  });
+
+  Future<bool> renamePlayerGroup(String original, String name) {
+    final value = name.trim();
+    if (value.isEmpty) return Future.value(false);
+    return _groupStore.change((groups, currentDefault) {
+      if (!groups.any((group) => group.name == original) ||
+          groups.any(
+            (group) => group.name == value && group.name != original,
+          )) {
+        return null;
       }
-      playerGroups = [
-        for (final item in jsonDecode(raw) as List)
-          (
-            name: (item as Map)['name'].toString(),
-            players: [for (final name in item['players'] as List) '$name'],
-          ),
-      ];
-      defaultPlayerGroupName =
-          playerGroups.any((group) => group.name == defaultName)
-          ? defaultName
-          : null;
-      notifyListeners();
-    } on Object catch (error, stack) {
-      MobileDiagnostics.instance.error(error, stack, operation: 'project');
-      developer.log('player groups unreadable: $error', name: 'BHE-Project');
+      return (
+        groups: [
+          for (final group in groups)
+            if (group.name == original)
+              (name: value, players: group.players)
+            else
+              group,
+        ],
+        defaultName: currentDefault == original ? value : currentDefault,
+      );
+    });
+  }
+
+  Future<bool> editPlayerGroup(
+    String original,
+    String name,
+    List<String> players,
+  ) {
+    final value = name.trim();
+    final cleaned = players.map((player) => player.trim()).toList();
+    if (value.isEmpty ||
+        cleaned.any((player) => player.isEmpty) ||
+        cleaned.toSet().length != cleaned.length) {
+      return Future.value(false);
     }
-  }
-
-  Future<void> _persistPlayerGroups() async {
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      playerGroupsPrefsKey,
-      jsonEncode([
-        for (final group in playerGroups)
-          {'name': group.name, 'players': group.players},
-      ]),
-    );
-  }
-
-  Future<void> savePlayerGroup(String name) async {
-    playerGroups = [
-      for (final group in playerGroups)
-        if (group.name != name) group,
-      (name: name, players: [...project.players]),
-    ];
-    await _persistPlayerGroups();
-  }
-
-  Future<void> deletePlayerGroup(String name) async {
-    playerGroups = [
-      for (final group in playerGroups)
-        if (group.name != name) group,
-    ];
-    await _persistPlayerGroups();
+    return _groupStore.change((groups, currentDefault) {
+      if (!groups.any((group) => group.name == original) ||
+          groups.any(
+            (group) => group.name == value && group.name != original,
+          )) {
+        return null;
+      }
+      return (
+        groups: [
+          for (final group in groups)
+            if (group.name == original)
+              (name: value, players: cleaned)
+            else
+              group,
+        ],
+        defaultName: currentDefault == original ? value : currentDefault,
+      );
+    });
   }
 
   Future<bool> importPlayers(List<String> players) {

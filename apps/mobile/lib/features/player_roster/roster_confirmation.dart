@@ -132,6 +132,25 @@ class _RosterConfirmationState extends State<_RosterConfirmation> {
                           ),
                       ],
                     ],
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                      ),
+                      onPressed: () async {
+                        await showModalBottomSheet<void>(
+                          context: context,
+                          isScrollControlled: true,
+                          useSafeArea: true,
+                          enableDrag: false,
+                          builder: (_) => _PlayerGroupsSheet(
+                            state: state,
+                            allowImport: false,
+                          ),
+                        );
+                      },
+                      child: Text(context.bheText('管理分组')),
+                    ),
                     if (state.project.players.isNotEmpty)
                       Text(context.bheText('项目已有球员。选择分组可追加名单，不会删除或调整现有球员。')),
                   ],
