@@ -10,7 +10,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
         android:label="BHE"
-        android:name="${applicationName}"
+        android:name=".BheApplication"
         android:icon="@mipmap/ic_launcher">
         <uses-native-library
             android:name="libcdsprpc.so"

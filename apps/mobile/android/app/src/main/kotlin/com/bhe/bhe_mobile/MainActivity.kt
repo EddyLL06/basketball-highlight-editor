@@ -73,6 +73,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        com.bhe.bhe_mobile.diagnostics.DiagnosticsChannel.register(flutterEngine, applicationContext)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, mediaChannelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
