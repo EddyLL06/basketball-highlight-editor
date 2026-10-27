@@ -11,8 +11,10 @@ from engine.python.basketball_engine.service import EngineService
 
 
 def test_unexpected_engine_error_is_logged_with_traceback(monkeypatch, capsys):
+    message = "disk gone"
+
     def explode(self, command, payload):
-        raise RuntimeError("disk gone")
+        raise RuntimeError(message)
 
     monkeypatch.setattr(EngineService, "handle", explode)
     request = json.dumps({
@@ -28,7 +30,8 @@ def test_unexpected_engine_error_is_logged_with_traceback(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert json.loads(captured.out.splitlines()[0])["error"]["code"] == "ENGINE_ERROR"
-    assert "[bhe] request list_candidates failed: disk gone" in captured.err
+    assert "[bhe] request list_candidates failed:" in captured.err
+    assert captured.err.count("disk gone") == 1
     assert "Traceback" in captured.err
 
 

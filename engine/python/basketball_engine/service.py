@@ -1846,7 +1846,7 @@ class EngineService:
                 checkpoint=checkpoint_with_elapsed(),
             )
         except Exception as exc:
-            log_end("failed", "ANALYSIS_FAILED", f"{exc}\n{traceback.format_exc(limit=-4)}")
+            log_end("failed", "ANALYSIS_FAILED", traceback.format_exc(limit=-4))
             store.update_job(
                 job_id,
                 state="failed",
@@ -2735,7 +2735,7 @@ class EngineService:
                 error_message=exc.message,
             )
         except Exception as exc:
-            log_end("failed", "EXPORT_FAILED", f"{exc}\n{traceback.format_exc(limit=-4)}")
+            log_end("failed", "EXPORT_FAILED", traceback.format_exc(limit=-4))
             store.update_job(
                 job_id,
                 state="failed",

@@ -11,7 +11,7 @@ const appVersion = String.fromEnvironment('BHE_VERSION', defaultValue: 'dev');
 Future<String> buildDiagnosticReport({
   String? error,
   Map<String, String>? environment,
-  int logLines = 200,
+  int logLines = 300,
 }) async {
   final env = environment ?? Platform.environment;
   final buffer = StringBuffer()
@@ -39,19 +39,25 @@ Future<String> buildDiagnosticReport({
 
 /// 读 engine.log 的最后几行；不够时从轮换出去的 engine.log.1 补。
 Future<String> readLogTail(String directory, int lines) async {
+  if (lines <= 0) return '';
   final collected = <String>[];
-  for (final name in const ['engine.log', 'engine.log.1']) {
-    if (collected.length >= lines) break;
-    final file = File('$directory${Platform.pathSeparator}$name');
-    if (!await file.exists()) continue;
-    final content = await file.readAsLines().catchError((_) => <String>[]);
-    final need = lines - collected.length;
-    collected.insertAll(
-      0,
-      content.length > need ? content.sublist(content.length - need) : content,
-    );
+  for (final name in const ['engine.log.1', 'engine.log']) {
+    try {
+      final file = File('$directory${Platform.pathSeparator}$name');
+      if (await file.exists()) collected.addAll(await file.readAsLines());
+    } on Object {
+      // A missing or unreadable log must not break diagnostic copying.
+    }
   }
-  return collected.join('\n');
+  final tail = collected.length > lines
+      ? collected.sublist(collected.length - lines)
+      : List<String>.from(collected);
+  final environment = collected.where(isEngineEnvironmentLine).lastOrNull;
+  if (environment != null && !tail.contains(environment)) {
+    if (tail.length == lines) tail.removeAt(0);
+    tail.insert(0, environment);
+  }
+  return tail.join('\n');
 }
 
 String redactUserPaths(String text, Map<String, String> env) {
