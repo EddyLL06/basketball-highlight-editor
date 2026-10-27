@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 
+import 'features/video_source/project_paths.dart';
 import 'media_bridge.dart';
 import 'native_analysis_engine.dart';
 
@@ -71,18 +72,21 @@ class MobileAppState extends ChangeNotifier {
     return directory;
   }
 
-  Future<Directory> _projectsDirectory() async {
-    final directory = Directory('${(await _dataDirectory()).path}/projects');
-    await directory.create(recursive: true);
-    return directory;
-  }
+  Future<String> _projectPath(
+    String id, {
+    String area = '',
+    String suffix = '',
+  }) async => projectStoragePath(
+    await _dataDirectory(),
+    id,
+    area: area,
+    suffix: suffix,
+  );
 
   Future<String> _materializeVideoPath(String path, String projectId) async {
     if (!Platform.isIOS) return path;
     final source = File(path);
-    final directory = Directory(
-      '${(await _dataDirectory()).path}/videos/$projectId',
-    );
+    final directory = Directory(await _projectPath(projectId, area: 'videos'));
     await directory.create(recursive: true);
     final extension = path.contains('.')
         ? path.substring(path.lastIndexOf('.')).toLowerCase()
@@ -119,13 +123,19 @@ class MobileAppState extends ChangeNotifier {
   }
 
   Future<File> _projectFile(String id) async {
-    final directory = await _projectsDirectory();
-    return File('${directory.path}/$id.json');
+    final file = File(
+      await _projectPath(id, area: 'projects', suffix: '.json'),
+    );
+    await file.parent.create(recursive: true);
+    return file;
   }
 
   Future<File> _coverFile(String id) async {
-    final directory = await _projectsDirectory();
-    return File('${directory.path}/${id}_cover.jpg');
+    final file = File(
+      await _projectPath(id, area: 'projects', suffix: '_cover.jpg'),
+    );
+    await file.parent.create(recursive: true);
+    return file;
   }
 
   Future<void> _loadCovers() async {
@@ -227,9 +237,7 @@ class MobileAppState extends ChangeNotifier {
       return;
     }
     final video = project.video!;
-    final directory = Directory(
-      '${(await _dataDirectory()).path}/videos/${project.id}',
-    );
+    final directory = Directory(await _projectPath(project.id, area: 'videos'));
     final existing = await _existingMaterializedVideo(directory);
     final persistentPath =
         existing?.path ?? await _materializeVideoPath(video.path, project.id);
@@ -265,6 +273,7 @@ class MobileAppState extends ChangeNotifier {
         final ids =
             (jsonDecode(await indexFile.readAsString()) as List?)
                 ?.whereType<String>()
+                .where(isSafeProjectId)
                 .toSet()
                 .toList() ??
             const <String>[];
@@ -663,13 +672,15 @@ class MobileAppState extends ChangeNotifier {
       final content = path.toLowerCase().endsWith('.bhe')
           ? _readProjectFromArchive(await file.readAsBytes())
           : await file.readAsString();
-      final imported = const ProjectPackageCodec().decode(content);
-      final importedId =
-          project.id == imported.id ||
-              recentProjects.any((item) => item.id == imported.id)
-          ? _newProjectId()
-          : imported.id;
-      project = imported.copyWith(id: importedId);
+      final imported = const ProjectPackageCodec().decode(
+        content,
+        existingIds: [
+          project.id,
+          ...recentProjects.map((item) => item.id),
+          ...await existingProjectStorageIds(await _dataDirectory()),
+        ],
+      );
+      project = imported;
       _resetTransientState();
       errorMessage = null;
       await _validateImportedVideoIfPresent();
@@ -792,12 +803,16 @@ class MobileAppState extends ChangeNotifier {
       if (await legacy.exists()) await legacy.delete();
     }
     for (final name in ['exports', 'package_staging']) {
-      final artifactDirectory = Directory('${directory.path}/$name/$deletedId');
+      final artifactDirectory = Directory(
+        await _projectPath(deletedId, area: name),
+      );
       if (await artifactDirectory.exists()) {
         await artifactDirectory.delete(recursive: true);
       }
     }
-    final videoDirectory = Directory('${directory.path}/videos/$deletedId');
+    final videoDirectory = Directory(
+      await _projectPath(deletedId, area: 'videos'),
+    );
     if (await videoDirectory.exists()) {
       await videoDirectory.delete(recursive: true);
     }
@@ -932,9 +947,8 @@ class MobileAppState extends ChangeNotifier {
   }
 
   Future<void> exportProjectPackage() async {
-    final directory = await _dataDirectory();
     final staging = Directory(
-      '${directory.path}/package_staging/${project.id}',
+      await _projectPath(project.id, area: 'package_staging'),
     );
     if (await staging.exists()) await staging.delete(recursive: true);
     await staging.create(recursive: true);
@@ -942,7 +956,7 @@ class MobileAppState extends ChangeNotifier {
     await projectJson.writeAsString(
       const ProjectPackageCodec().encode(project),
     );
-    final file = File('${directory.path}/${project.id}.bhe');
+    final file = File(await _projectPath(project.id, suffix: '.bhe'));
     final encoder = ZipFileEncoder()
       ..create(file.path, level: ZipFileEncoder.store);
     encoder.addFileSync(projectJson, 'project.json');
@@ -966,7 +980,6 @@ class MobileAppState extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final directory = await _dataDirectory();
     final candidates = project.candidates
         .where(
           (candidate) => candidate.selection == CandidateSelection.included,
@@ -987,7 +1000,7 @@ class MobileAppState extends ChangeNotifier {
       await for (final update in exportEngine.exportClips(
         video: project.video!,
         candidates: candidates,
-        outputDirectory: '${directory.path}/exports/${project.id}',
+        outputDirectory: await _projectPath(project.id, area: 'exports'),
       )) {
         progress = update.progress;
         progressMessage = update.message;
@@ -1036,9 +1049,8 @@ class MobileAppState extends ChangeNotifier {
     final stopwatch = Stopwatch()..start();
     errorMessage = null;
     try {
-      final directory = await _dataDirectory();
       final outputPath =
-          '${directory.path}/exports/${project.id}/${project.id}_merged.mp4';
+          '${await _projectPath(project.id, area: 'exports')}/${project.id}_merged.mp4';
       await for (final update in exportEngine.mergeClips(
         video: project.video!,
         candidates: candidates,

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'models.dart';
+import 'project_identity.dart';
 
 class ProjectPackageCodec {
   const ProjectPackageCodec();
@@ -18,20 +19,28 @@ class ProjectPackageCodec {
     });
   }
 
-  ProjectSnapshot decode(String content) {
+  ProjectSnapshot decode(
+    String content, {
+    Iterable<String> existingIds = const [],
+  }) {
     final decoded = jsonDecode(content);
     if (decoded is! Map) throw const FormatException('项目包格式无效');
     if (decoded['format'] != 'bhe-project')
       throw const FormatException('不是 BHE 项目包');
     final version = (decoded['version'] as num?)?.toInt() ?? 1;
-    if (version == 1) return _decodeV1(decoded);
+    if (version == 1) {
+      final project = _decodeV1(decoded);
+      return project.copyWith(
+        id: importedProjectId(project.id, existingIds: existingIds),
+      );
+    }
     if (version != 2) throw FormatException('不支持的项目包版本：$version');
     final manifest = decoded['manifest'] is Map
         ? (decoded['manifest'] as Map).cast<String, dynamic>()
         : decoded.cast<String, dynamic>();
     return _snapshotFromManifest(
       manifest,
-      id: decoded['project_id'] as String? ?? 'project',
+      id: importedProjectId(decoded['project_id'], existingIds: existingIds),
       name: decoded['project_name'] as String? ?? '未命名项目',
     );
   }
@@ -74,7 +83,10 @@ class ProjectPackageCodec {
   static ProjectSnapshot _decodeV1(Map decoded) {
     final project = decoded['project'];
     if (project is! Map) throw const FormatException('项目数据缺失');
-    return ProjectSnapshot.fromJson(project.cast<String, dynamic>());
+    return ProjectSnapshot.fromJson({
+      ...project.cast<String, dynamic>(),
+      'id': importedProjectId(project['id']),
+    });
   }
 
   static ProjectSnapshot _snapshotFromManifest(
