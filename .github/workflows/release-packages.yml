@@ -90,7 +90,7 @@ jobs:
             case "$tag" in
               *-macos.*) platform=macos ;;
               *-windows.*) platform=windows ;;
-              *-android.*) platform=android ;;
+              *-android.*) platform=android; publish_oss=false ;;
               *) platform=all ;;
             esac
           fi
