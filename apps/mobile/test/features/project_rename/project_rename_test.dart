@@ -19,6 +19,7 @@ void main() {
         expect(await f.state.renameProject('x' * 41), isFalse);
         final value = '👨‍👩‍👧‍👦' * 40;
         final operation = f.state.renameProject(' $value ');
+        await Future<void>.delayed(Duration.zero);
         expect(f.state.project.name, value);
         expect(f.state.recentProjects.single.name, value);
         expect(await operation, isTrue);

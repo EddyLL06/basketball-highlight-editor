@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 import '../../support/fake_video_platform.dart';
 import '../../support/mobile_video_fixture.dart';
+import '../../support/wait_project_writes.dart';
 
 void main() {
   late MobileVideoFixture f;
@@ -71,6 +72,7 @@ void main() {
             await tester.tap(find.text(l10n.text('保存')).last);
             await tester.pump();
             await tester.pump(const Duration(milliseconds: 300));
+            await waitProjectWrites(tester, f.state.pendingProjectWrites);
             expect(f.state.project.players, ['Carol', 'Bob']);
             await tester.tap(find.byKey(const ValueKey('player-menu-Carol')));
             await tester.pump();
@@ -83,6 +85,7 @@ void main() {
             await tester.tap(find.text(l10n.text('删除')).last);
             await tester.pump();
             await tester.pump(const Duration(milliseconds: 300));
+            await waitProjectWrites(tester, f.state.pendingProjectWrites);
             expect(f.state.project.candidates.single.player, isNull);
             await tester.tap(find.byKey(const ValueKey('player-menu-Bob')));
             await tester.pump();

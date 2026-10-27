@@ -1275,6 +1275,7 @@ class _ReviewViewState extends State<_ReviewView> {
   bool _completionPromptShown = false;
   bool _fullscreen = false;
   int _undoRevision = 0;
+  int _playerMutationRevision = 0;
   DateTime _lastVideoPaint = DateTime.fromMillisecondsSinceEpoch(0);
   String statusFilter = 'all';
   String rimFilter = 'all';
@@ -1327,12 +1328,20 @@ class _ReviewViewState extends State<_ReviewView> {
       ]),
     );
     _undoRevision = state.undoRevision;
+    _playerMutationRevision = state.playerMutationRevision;
     state.addListener(_onUndo);
     _openVideo();
   }
 
   void _onUndo() {
-    if (!mounted || _undoRevision == state.undoRevision) return;
+    if (!mounted) return;
+    if (_playerMutationRevision != state.playerMutationRevision) {
+      _playerMutationRevision = state.playerMutationRevision;
+      if (playerFilter == 'player:${state.lastPlayerOldName}') {
+        setState(() => playerFilter = state.lastPlayerNewName == null ? 'all' : 'player:${state.lastPlayerNewName}');
+      }
+    }
+    if (_undoRevision == state.undoRevision) return;
     _undoRevision = state.undoRevision;
     final id = state.undoFocusId;
     if (!candidates.any((item) => item.id == id)) {
@@ -3124,7 +3133,8 @@ class _CandidateRail extends StatelessWidget {
       child: Column(
         children: [
           _ReviewProgressHeader(candidates: candidates, total: total, reviewed: reviewed,
-            filtering: filtering, onBatchRange: onBatchRange, onAdd: onAdd),
+            filtering: filtering, onBatchRange: onBatchRange, onAdd: onAdd,
+            onClearFilters: () => onFiltersChanged(status: 'all', rim: 'all', player: 'all')),
           _ReviewFilterBar(
             candidates: allCandidates,
             players: players,
@@ -3318,7 +3328,7 @@ class _ReviewFilterBar extends StatelessWidget {
           const {'made', 'unsure', 'rejected'}.contains(item.rimCheckStatus),
     );
     final hasPlayers =
-        players.isNotEmpty || candidates.any((item) => item.player != null);
+        playerFilter != 'all' || players.isNotEmpty || candidates.any((item) => item.player != null);
     final playerLabel = switch (playerFilter) {
       'all' => context.bheText('球员'),
       'tagged' => context.bheText('已标注'),

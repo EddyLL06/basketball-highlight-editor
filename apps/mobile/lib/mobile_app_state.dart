@@ -156,6 +156,9 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   bool get canUndoReview => reviewHistory.canUndo;
 
   int _projectSession = 0;
+  int playerMutationRevision = 0;
+  String? lastPlayerOldName;
+  String? lastPlayerNewName;
 
   Future<bool> _changeReview({
     required ReviewChange kind,
@@ -691,37 +694,55 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     ];
   }
 
-  Future<bool> renameProject(String name) async {
+  Future<bool> renameProject(String name) {
     final value = name.trim();
-    if (value.isEmpty || value.characters.length > 40) return false;
-    if (value == project.name) return true;
-    final id = project.id;
-    final oldName = project.name;
-    project = project.copyWith(name: value);
-    if (recentProjects.any((item) => item.id == id)) {
+    if (value.isEmpty || value.characters.length > 40) {
+      return Future.value(false);
+    }
+    final id = project.id, session = _projectSession;
+    return _mutations.run(() async {
+      if (_disposed || project.id != id || _projectSession != session) {
+        return false;
+      }
+      final oldName = project.name;
+      if (value == oldName) return true;
+      final wasRecent = recentProjects.any((item) => item.id == id);
+      final evicted =
+          !wasRecent && project.video != null && recentProjects.length >= 12
+          ? recentProjects.last
+          : null;
+      project = project.copyWith(name: value);
       recentProjects = [
         for (final item in recentProjects)
           item.id == id ? item.copyWith(name: value) : item,
       ];
-    } else if (project.video != null) {
-      recentProjects = [project, ...recentProjects].take(12).toList();
-    }
-    final pending = _queueSave();
-    notifyListeners();
-    try {
-      await pending;
-      return true;
-    } catch (_) {
-      if (!_disposed && project.id == id && project.name == value) {
-        project = project.copyWith(name: oldName);
-        recentProjects = [
-          for (final item in recentProjects)
-            item.id == id ? item.copyWith(name: oldName) : item,
-        ];
-        notifyListeners();
+      if (!wasRecent && project.video != null) {
+        recentProjects = [project, ...recentProjects].take(12).toList();
       }
-      return false;
-    }
+      notifyListeners();
+      try {
+        await _writeProject(project);
+        return true;
+      } catch (error, stack) {
+        if (!_disposed && project.id == id && _projectSession == session) {
+          project = project.copyWith(name: oldName);
+          recentProjects = [
+            for (final item in recentProjects)
+              if (item.id != id || wasRecent)
+                item.id == id ? item.copyWith(name: oldName) : item,
+          ];
+          if (evicted != null &&
+              recentProjects.every((item) => item.id != evicted.id)) {
+            recentProjects = [...recentProjects, evicted];
+          }
+          recordDiagnosticFailure(error, stack, operation: 'project');
+          notifyListeners();
+        } else {
+          MobileDiagnostics.instance.error(error, stack, operation: 'project');
+        }
+        return false;
+      }
+    });
   }
 
   Future<void> _persistProjects() async {
@@ -1156,43 +1177,62 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     notifyListeners();
   }
 
-  bool renamePlayer(String oldName, String newName) {
+  Future<bool> renamePlayer(String oldName, String newName) {
     final value = newName.trim();
-    if (!project.players.contains(oldName) ||
-        value.isEmpty ||
-        (value != oldName && project.players.contains(value))) {
-      return false;
-    }
-    if (value == oldName) return true;
-    reviewHistory.remapPlayer(oldName, value);
-    project = project.copyWith(
-      players: [
-        for (final name in project.players) name == oldName ? value : name,
-      ],
-      candidates: [
-        for (final c in project.candidates)
-          c.player == oldName ? c.copyWith(player: value) : c,
-      ],
-    );
-    unawaited(_queueSave());
-    notifyListeners();
-    return true;
+    if (value.isEmpty) return Future.value(false);
+    return _changePlayer(oldName, value);
   }
 
-  void removePlayer(String player) {
-    reviewHistory.remapPlayer(player, null);
-    project = project.copyWith(
-      players: project.players.where((item) => item != player).toList(),
-      candidates: project.candidates
-          .map(
-            (candidate) => candidate.player == player
-                ? candidate.copyWith(clearPlayer: true)
-                : candidate,
-          )
-          .toList(),
-    );
-    unawaited(_queueSave());
-    notifyListeners();
+  Future<bool> removePlayer(String player) => _changePlayer(player, null);
+
+  Future<bool> _changePlayer(String oldName, String? newName) {
+    final id = project.id, session = _projectSession;
+    return _mutations.run(() async {
+      if (_disposed || project.id != id || _projectSession != session) {
+        return false;
+      }
+      if (!project.players.contains(oldName) ||
+          (newName != null &&
+              newName != oldName &&
+              project.players.contains(newName))) {
+        return false;
+      }
+      if (newName == oldName) return true;
+      final next = project.copyWith(
+        players: [
+          for (final name in project.players)
+            if (name == oldName) ...[?newName] else name,
+        ],
+        candidates: [
+          for (final c in project.candidates)
+            if (c.player == oldName)
+              c.copyWith(player: newName, clearPlayer: newName == null)
+            else
+              c,
+        ],
+      );
+      try {
+        await _writeProject(next);
+        if (_disposed || project.id != id || _projectSession != session) {
+          return false;
+        }
+        project = next;
+        reviewHistory.remapPlayer(oldName, newName);
+        lastPlayerOldName = oldName;
+        lastPlayerNewName = newName;
+        playerMutationRevision++;
+        notifyListeners();
+        return true;
+      } catch (error, stack) {
+        if (!_disposed && project.id == id && _projectSession == session) {
+          recordDiagnosticFailure(error, stack, operation: 'project');
+          notifyListeners();
+        } else {
+          MobileDiagnostics.instance.error(error, stack, operation: 'project');
+        }
+        return false;
+      }
+    });
   }
 
   Future<void> _loadPlayerGroups() async {

@@ -19,6 +19,8 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
   late List<String> _players;
   String? _selected;
   bool _creating = false;
+  bool _saving = false;
+  bool _saveFailed = false;
 
   @override
   void initState() {
@@ -70,7 +72,17 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
         ),
       );
       if (confirmed != true || !mounted) return;
-      widget.state.removePlayer(player);
+      setState(() {
+        _saving = true;
+        _saveFailed = false;
+      });
+      final success = await widget.state.removePlayer(player);
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _saveFailed = !success;
+      });
+      if (!success) return;
       setState(() {
         _players = [...widget.state.project.players];
         if (_selected == player) _selected = null;
@@ -82,7 +94,17 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
       builder: (_) => _RenamePlayerDialog(state: widget.state, player: player),
     );
     if (name == null || !mounted) return;
-    if (!widget.state.renamePlayer(player, name)) return;
+    setState(() {
+      _saving = true;
+      _saveFailed = false;
+    });
+    final success = await widget.state.renamePlayer(player, name);
+    if (!mounted) return;
+    setState(() {
+      _saving = false;
+      _saveFailed = !success;
+    });
+    if (!success) return;
     setState(() {
       _players = [...widget.state.project.players];
       if (_selected == player) _selected = name;
@@ -109,6 +131,19 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (_saving) const LinearProgressIndicator(),
+          if (_saveFailed)
+            _InlineNotice(
+              message: context.bheText('保存失败，请重试'),
+              error: true,
+              action: TextButton(
+                onPressed: () => showMobileDiagnostics(
+                  context,
+                  error: widget.state.diagnosticError,
+                ),
+                child: Text(context.bheText('反馈')),
+              ),
+            ),
           if (_players.isEmpty)
             Text(
               context.bheText('还没有球员标签。'),
@@ -151,6 +186,7 @@ class _PlayerTagSheetState extends State<_PlayerTagSheet> {
                       minHeight: 48,
                     ),
                     icon: const Icon(LucideIcons.ellipsis),
+                    enabled: !_saving,
                     onSelected: (action) => _managePlayer(player, action),
                     itemBuilder: (context) => [
                       PopupMenuItem(

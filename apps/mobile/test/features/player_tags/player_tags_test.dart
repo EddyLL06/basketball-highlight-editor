@@ -29,10 +29,10 @@ void main() {
           ],
         );
         await f.state.savePlayerGroup('team');
-        expect(f.state.renamePlayer('Alice', '  '), isFalse);
-        expect(f.state.renamePlayer('Alice', ' Bob '), isFalse);
+        expect(await f.state.renamePlayer('Alice', '  '), isFalse);
+        expect(await f.state.renamePlayer('Alice', ' Bob '), isFalse);
         await f.state.setCandidatePlayer('goal', 'Bob');
-        expect(f.state.renamePlayer('Alice', ' Carol '), isTrue);
+        expect(await f.state.renamePlayer('Alice', ' Carol '), isTrue);
         expect(f.state.project.players, ['Carol', 'Bob']);
         expect(f.state.project.candidates.last.player, 'Carol');
         expect(f.state.playerGroups.single.players, ['Alice', 'Bob']);
@@ -61,12 +61,12 @@ void main() {
         final source = await f.file('original.mp4', 'original');
         f.state.project = f.project(source.path);
         await f.state.setCandidatePlayer('goal', null);
-        f.state.removePlayer('Alice');
+        await f.state.removePlayer('Alice');
         await f.state.undoReview();
         expect(f.state.project.candidates.single.player, isNull);
         expect(f.state.project.players, isEmpty);
         f.state.addPlayer('unused');
-        f.state.removePlayer('unused');
+        await f.state.removePlayer('unused');
         expect(f.state.project.players, isEmpty);
         await f.state.createNewProject();
       } finally {
@@ -97,7 +97,7 @@ void main() {
         },
       });
       f.state.project = const ProjectPackageCodec().decode(encoded);
-      expect(f.state.renamePlayer('Alice', 'Carol'), isTrue);
+      expect(await f.state.renamePlayer('Alice', 'Carol'), isTrue);
       final restored = const ProjectPackageCodec().decode(
         const ProjectPackageCodec().encode(f.state.project),
       );

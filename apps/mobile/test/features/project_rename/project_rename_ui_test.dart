@@ -3,6 +3,7 @@ import 'package:bhe_mobile/mobile_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../../support/mobile_video_fixture.dart';
+import '../../support/wait_project_writes.dart';
 
 void main() {
   late MobileVideoFixture f;
@@ -71,6 +72,7 @@ void main() {
             await tester.tap(find.text(l10n.text('保存')).last);
             await tester.pump();
             await tester.pump(const Duration(milliseconds: 300));
+            await waitProjectWrites(tester, f.state.pendingProjectWrites);
             expect(f.state.project.name, 'New name');
             expect(f.state.recentProjects.first.name, 'New name');
             await tester.tap(find.byType(PopupMenuButton<String>));

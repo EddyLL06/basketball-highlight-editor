@@ -405,6 +405,7 @@ class _ReviewProgressHeader extends StatelessWidget {
     required this.filtering,
     required this.onBatchRange,
     required this.onAdd,
+    required this.onClearFilters,
   });
   final List<Candidate> candidates;
   final int total;
@@ -412,6 +413,7 @@ class _ReviewProgressHeader extends StatelessWidget {
   final bool filtering;
   final VoidCallback onBatchRange;
   final VoidCallback onAdd;
+  final VoidCallback onClearFilters;
   @override
   Widget build(BuildContext context) {
     final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
@@ -429,6 +431,8 @@ class _ReviewProgressHeader extends StatelessWidget {
                       ? '${context.bheText('显示 ${candidates.length} / $total')} · ${context.bheText('已审核 $reviewed / $total')}'
                       : context.bheText('已审核 $reviewed / $total'),
                   key: const Key('review-progress'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelMedium,
                 ),
               ),
@@ -445,6 +449,7 @@ class _ReviewProgressHeader extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 4),
+              if (filtering) IconButton(key: const Key('review-clear-filters'), onPressed: onClearFilters, tooltip: context.bheText('清除筛选'), icon: const Icon(LucideIcons.filterX, size: 16)),
               if (compact) ...[
                 IconButton(
                   onPressed: onBatchRange,
