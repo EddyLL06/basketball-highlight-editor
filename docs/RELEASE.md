@@ -239,10 +239,10 @@ Windows 发布包采用不含 `libx264` 的 LGPL FFmpeg。导出依次尝试硬�
 
 1. 确认标签所指提交包含本门禁，再推送 `v*` 标签。Actions 构建并创建 GitHub Release；标签触发的 OSS job 会跳过，不修改官网或更新清单。
 2. 检查 GitHub Release 的目标平台安装包、配套 SHA-256 校验文件、版本和内容；完整版本核验全部四个平台，macOS 补丁核验两个架构。标签本身与 GitHub Release 会公开，请按发布授权处理。
-3. 在 **Upload existing release assets to OSS** 手动选择标签、对应平台和 `dry_run=true`。完整版本选 `all`，补丁选 `macos`、`windows` 或 `android`。此工作流下载该 Release 的资产并进行只读演练；核对 `publish-summary.json` 的 `status=dry-run-ok`、验签状态、候选版本和拟上传对象，以及 Actions 产物。
+3. 在 **Upload existing release assets to OSS** 手动选择标签和对应平台，确认 `dry_run=true`（默认演练）。完整版本选 `all`，补丁选 `macos`、`windows` 或 `android`。此工作流下载该 Release 的资产并进行只读演练；核对 `publish-summary.json` 的 `status=dry-run-ok`、验签状态、候选版本和拟上传对象，以及 Actions 产物。
 4. 演练通过并经人工检查和批准后，使用同一手动工作流、相同标签和平台，显式选择 `dry_run=false` 正式发布。检查 job 结果和 `publish-summary.json` 的 `status=success` / `stage=complete`，再核对官网与更新清单。
 
-**这是人工操作门，不是自动审批或演练证明门禁。** 手动工作流的 `dry_run` 默认是 `false`，执行前必须主动检查；正式运行不会自动验证先前演练或锁定演练时的 Release 文件。两次运行分别下载 Release 资产，期间若资产被覆盖、通道变化或有并行发布，先重新核验摘要并重新演练。`BHE release packages` 的手动 `publish_oss` 仍可作为特殊入口，操作人员应避免绕过上述核验流程。
+**这是人工操作门，不是自动审批或演练证明门禁。** 手动工作流的 `dry_run` 默认是 `true`；正式发布必须显式选择 `false`。执行前仍须主动核对；正式运行不会自动验证先前演练或锁定演练时的 Release 文件。两次运行分别下载 Release 资产，期间若资产被覆盖、通道变化或有并行发布，先重新核验摘要并重新演练。`BHE release packages` 的手动 `publish_oss` 仍可作为特殊入口，操作人员应避免绕过上述核验流程。
 
 **首次真实使用仍须 Claude 与老大另行批准。开发验收只使用临时目录和测试密钥，不执行真实上传或读取真实私钥。**
 

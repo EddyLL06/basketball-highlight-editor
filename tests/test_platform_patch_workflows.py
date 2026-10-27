@@ -75,7 +75,8 @@ def test_dry_run_workflow_inputs_and_tag_guards(tmp_path):
     # PyYAML treats the YAML 1.1 key "on" as the boolean True.
     for workflow, job_name in [(primary, 'oss-upload'), (manual, 'upload')]:
         input_def = workflow[True]['workflow_dispatch']['inputs']['dry_run']
-        assert input_def['type'] == 'boolean' and input_def['default'] is False
+        assert input_def['type'] == 'boolean'
+        assert input_def['default'] is (job_name == 'upload')
         job = workflow['jobs'][job_name]
         assert job['concurrency']['cancel-in-progress'] is False
         assert "'bhe-production-update-channel-v1'" in job['concurrency']['group']
@@ -180,7 +181,7 @@ def test_credentials_steps_are_gated_and_no_secrets_leak(tmp_path):
     for filename in ('release-packages.yml', 'upload-release-assets-oss.yml'):
         workflow = yaml.safe_load((ROOT / '.github/workflows' / filename).read_text())
         job = workflow['jobs']['oss-upload' if filename.startswith('release-') else 'upload']
-        guard = "${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}" if filename.startswith('release-') else '${{ !inputs.dry_run }}'
+        guard = "${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}" if filename.startswith('release-') else "${{ toJSON(inputs.dry_run) == 'false' }}"
         for name in ('Configure Alibaba Cloud credentials', 'Install ossutil', 'Configure ossutil credentials'):
             assert next(s for s in job['steps'] if s.get('name') == name)['if'] == guard
         config = next(s['run'] for s in job['steps'] if s.get('name') == 'Configure ossutil credentials')
@@ -253,10 +254,10 @@ def test_tag_push_cannot_enter_oss_job_and_still_uploads_release():
 def test_manual_release_asset_download_patterns_and_lock(tmp_path):
     workflow = yaml.safe_load((ROOT / '.github/workflows/upload-release-assets-oss.yml').read_text())
     inputs = workflow[True]['workflow_dispatch']['inputs']
-    assert inputs['dry_run']['type'] == 'boolean' and inputs['dry_run']['default'] is False
+    assert inputs['dry_run']['type'] == 'boolean' and inputs['dry_run']['default'] is True
     assert inputs['platform']['options'] == ['all', 'macos', 'windows', 'android']
     job = workflow['jobs']['upload']
-    assert job['concurrency']['group'] == "${{ inputs.dry_run && 'bhe-dryrun-update-channel-v1' || 'bhe-production-update-channel-v1' }}"
+    assert job['concurrency']['group'] == "${{ toJSON(inputs.dry_run) == 'false' && 'bhe-production-update-channel-v1' || 'bhe-dryrun-update-channel-v1' }}"
     download = next(step for step in job['steps'] if step.get('name') == 'Download exact release assets')['run']
     fake_gh = tmp_path / 'gh'
     fake_gh.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$ARG_LOG"\n')
@@ -275,3 +276,37 @@ def test_manual_release_asset_download_patterns_and_lock(tmp_path):
         assert args[:3] == ['release', 'download', tag]
         assert args[args.index('--repo') + 1] == 'test/repo'
         assert [args[i+1] for i, arg in enumerate(args) if arg == '--pattern'] == patterns
+
+
+def test_manual_missing_input_defaults_to_dry_run_through_every_gate(tmp_path):
+    import json
+    primary = yaml.safe_load((ROOT / '.github/workflows/release-packages.yml').read_text())
+    workflow = yaml.safe_load((ROOT / '.github/workflows/upload-release-assets-oss.yml').read_text())
+    assert primary[True]['workflow_dispatch']['inputs']['dry_run']['default'] is False
+    input_def = workflow[True]['workflow_dispatch']['inputs']['dry_run']
+    assert input_def['default'] is True and '正式发布请显式选 false' in input_def['description']
+    job = workflow['jobs']['upload']
+    guard = "${{ toJSON(inputs.dry_run) == 'false' }}"
+    assert job['concurrency']['group'] == "${{ toJSON(inputs.dry_run) == 'false' && 'bhe-production-update-channel-v1' || 'bhe-dryrun-update-channel-v1' }}"
+    env_expression = "${{ toJSON(inputs.dry_run) == 'false' && 'false' || 'true' }}"
+    assert job['env']['DRY_RUN'] == env_expression
+    assert workflow['jobs']['publication-status']['steps'][0]['env']['DRY_RUN'] == env_expression
+    for name in ('Configure Alibaba Cloud credentials', 'Install ossutil', 'Configure ossutil credentials'):
+        assert next(s for s in job['steps'] if s.get('name') == name)['if'] == guard
+    script = next(s['run'] for s in job['steps'] if s.get('name') == 'Publish verified update channel')
+    fake_python = tmp_path / 'python3'
+    fake_python.write_text('#!/bin/bash\nif [[ "$1" == -c ]]; then echo status=dry-run-ok; else printf "%s\\n" "$@" > "$ARG_LOG"; fi\n')
+    fake_python.chmod(0o755)
+    for value in (None, True, False, '', 'false', 0):
+        # toJSON returns JSON text; only the boolean false serializes to unquoted false.
+        production = json.dumps(value, separators=(',', ':')) == 'false'
+        dry = 'false' if production else 'true'
+        arglog = tmp_path / ('args-' + str(value))
+        env = dict(os.environ, PATH=str(tmp_path)+':'+os.environ['PATH'], RUNNER_TEMP=str(tmp_path),
+                   UPDATE_SIGNING_KEY='fake', TAG_NAME='v0.1.13', RELEASE_PLATFORM='all', OSS_BUCKET='oss://fake',
+                   OSS_PREFIX='releases', OSS_ANDROID_KEY='android/latest.apk', DRY_RUN=dry, ARG_LOG=str(arglog),
+                   GITHUB_OUTPUT=str(tmp_path / 'output'))
+        subprocess.run(['bash', '-euo', 'pipefail', '-c', script], env=env, check=True)
+        args = arglog.read_text().splitlines()
+        assert ('--dry-run' in args) is not production
+        assert ('--oss-config' in args) is production

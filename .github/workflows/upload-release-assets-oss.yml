@@ -18,10 +18,10 @@ on:
           - windows
           - android
       dry_run:
-        description: "Rehearse update channel without publishing"
+        description: "默认演练；正式发布请显式选 false"
         required: true
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -38,7 +38,7 @@ jobs:
   upload:
     name: Upload release assets to OSS
     concurrency:
-      group: ${{ inputs.dry_run && 'bhe-dryrun-update-channel-v1' || 'bhe-production-update-channel-v1' }}
+      group: ${{ toJSON(inputs.dry_run) == 'false' && 'bhe-production-update-channel-v1' || 'bhe-dryrun-update-channel-v1' }}
       cancel-in-progress: false
     outputs:
       publish_status: ${{ steps.publish.outputs.status }}
@@ -55,7 +55,7 @@ jobs:
       OSSUTIL_VERSION: v1.7.19
       TAG_NAME: ${{ inputs.tag }}
       RELEASE_PLATFORM: ${{ inputs.platform }}
-      DRY_RUN: ${{ inputs.dry_run }}
+      DRY_RUN: ${{ toJSON(inputs.dry_run) == 'false' && 'false' || 'true' }}
     steps:
       - name: Check out publishing tools
         id: checkout_publisher
@@ -71,7 +71,7 @@ jobs:
           path: source
       - name: Configure Alibaba Cloud credentials
         id: credentials
-        if: ${{ !inputs.dry_run }}
+        if: ${{ toJSON(inputs.dry_run) == 'false' }}
         uses: aliyun/configure-aliyun-credentials-action@v1
         with:
           role-to-assume: ${{ vars.ALIYUN_RAM_ROLE_ARN }}
@@ -81,7 +81,7 @@ jobs:
           audience: sts.aliyuncs.com
       - name: Install ossutil
         id: install
-        if: ${{ !inputs.dry_run }}
+        if: ${{ toJSON(inputs.dry_run) == 'false' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -108,7 +108,7 @@ jobs:
           gh release download "${args[@]}"
       - name: Configure ossutil credentials
         id: config
-        if: ${{ !inputs.dry_run }}
+        if: ${{ toJSON(inputs.dry_run) == 'false' }}
         shell: bash
         run: |
           set +x
@@ -201,7 +201,7 @@ jobs:
       - name: Summarize publication and queue cancellation
         env:
           OUTCOME: ${{ needs.upload.result }}
-          DRY_RUN: ${{ inputs.dry_run }}
+          DRY_RUN: ${{ toJSON(inputs.dry_run) == 'false' && 'false' || 'true' }}
           PUBLISH_STATUS: ${{ needs.upload.outputs.publish_status }}
           FAILURE_STAGE: ${{ needs.upload.outputs.failure_stage }}
         run: |
