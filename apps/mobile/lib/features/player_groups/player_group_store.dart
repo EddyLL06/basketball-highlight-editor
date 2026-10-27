@@ -20,6 +20,28 @@ class PlayerGroupStore {
   String? defaultName;
   bool _loadFailed = false;
   bool loaded = false;
+  final Map<String, int> _revisions = {};
+  int revisionFor(String name) => _revisions[name] ?? 0;
+
+  void _advanceRevisions(List<PlayerGroup> before, List<PlayerGroup> after) {
+    final names = <String>{
+      ...before.map((g) => g.name),
+      ...after.map((g) => g.name),
+    };
+    for (final name in names) {
+      final old = before
+          .where((g) => g.name == name)
+          .map((g) => g.players)
+          .toList();
+      final next = after
+          .where((g) => g.name == name)
+          .map((g) => g.players)
+          .toList();
+      if (jsonEncode(old) != jsonEncode(next)) {
+        _revisions[name] = revisionFor(name) + 1;
+      }
+    }
+  }
 
   Future<void> _load() async {
     try {
@@ -44,6 +66,12 @@ class PlayerGroupStore {
             name: item['name'] as String,
             players: (item['players'] as List).cast<String>().toList(),
           ));
+        }
+        final names = <String>{};
+        for (final group in next) {
+          if (group.name.trim().isEmpty || !names.add(group.name)) {
+            _loadFailed = true;
+          }
         }
         groups = next;
         if (_loadFailed) {
@@ -113,17 +141,25 @@ class PlayerGroupStore {
             if (result.defaultName != oldDefault) {
               await write(defaultKey, result.defaultName);
             }
+            _advanceRevisions(groups, result.groups);
             groups = result.groups;
             defaultName = result.defaultName;
             onChanged();
             return true;
           } on Object catch (error, stack) {
-            try {
-              await write(groupsKey, oldGroups);
-              await write(defaultKey, oldDefault);
-            } on Object catch (restoreError, restoreStack) {
-              onFailure(restoreError, restoreStack);
+            var restoreFailed = false;
+            for (final entry in [
+              (groupsKey, oldGroups),
+              (defaultKey, oldDefault),
+            ]) {
+              try {
+                await write(entry.$1, entry.$2);
+              } on Object catch (restoreError, restoreStack) {
+                restoreFailed = true;
+                onFailure(restoreError, restoreStack);
+              }
             }
+            if (restoreFailed) _loadFailed = true;
             onFailure(error, stack);
             return false;
           }

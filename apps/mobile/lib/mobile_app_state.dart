@@ -392,6 +392,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   int _analysisGeneration = 0;
+  int _analysisCancelIntent = 0;
   int _videoPreparationGeneration = 0;
   DateTime? analysisStartedAt;
 
@@ -855,13 +856,17 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     String operation = 'project',
     void Function()? onSuccess,
     bool allowDuringTransition = false,
+    bool Function()? guard,
   }) {
     if (_projectTransitions != 0 && !allowDuringTransition) {
       return Future.value(false);
     }
     final id = project.id, session = _projectSession;
     return _mutations.run(() async {
-      if (_disposed || project.id != id || _projectSession != session) {
+      if (_disposed ||
+          project.id != id ||
+          _projectSession != session ||
+          (guard != null && !guard())) {
         return false;
       }
       final next = change(project);
@@ -1730,19 +1735,32 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   Future<bool> savePlayerGroup(String name, {bool replaceExisting = true}) {
     final value = name.trim();
-    final players = List<String>.of(project.players);
-    if (value.isEmpty) return Future.value(false);
-    return _groupStore.change((groups, currentDefault) {
-      final exists = groups.any((group) => group.name == value);
-      if (exists && !replaceExisting) return null;
-      return (
-        groups: [
-          for (final group in groups)
-            if (group.name == value) (name: value, players: players) else group,
-          if (!exists) (name: value, players: players),
-        ],
-        defaultName: currentDefault,
-      );
+    if (value.isEmpty || projectTransitioning) return Future.value(false);
+    final id = project.id, session = _projectSession;
+    // Project queue first; group operations never wait for the project queue.
+    return _mutations.run(() async {
+      if (_disposed ||
+          project.id != id ||
+          _projectSession != session ||
+          projectTransitioning) {
+        return false;
+      }
+      final players = List<String>.of(project.players);
+      return _groupStore.change((groups, currentDefault) {
+        final exists = groups.any((group) => group.name == value);
+        if (exists && !replaceExisting) return null;
+        return (
+          groups: [
+            for (final group in groups)
+              if (group.name == value)
+                (name: value, players: players)
+              else
+                group,
+            if (!exists) (name: value, players: players),
+          ],
+          defaultName: currentDefault,
+        );
+      });
     });
   }
 
@@ -2107,11 +2125,20 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     int? expectedSession,
     int? expectedVideoGeneration,
   }) async {
+    final intentProjectId = expectedProjectId ?? project.id;
+    final intentSession = expectedSession ?? projectSession;
+    final intentVideoGeneration =
+        expectedVideoGeneration ?? videoPreparationGeneration;
+    final cancelIntent = _analysisCancelIntent;
+    final groupRevision = expectedRosterGroup == null
+        ? null
+        : _groupStore.revisionFor(expectedRosterGroup);
+    final selectedPlayers = List<String>.of(rosterPlayers ?? const []);
     bool rosterCurrent() =>
-        (expectedProjectId == null || project.id == expectedProjectId) &&
-        (expectedSession == null || projectSession == expectedSession) &&
-        (expectedVideoGeneration == null ||
-            videoPreparationGeneration == expectedVideoGeneration) &&
+        !_disposed &&
+        project.id == intentProjectId &&
+        projectSession == intentSession &&
+        videoPreparationGeneration == intentVideoGeneration &&
         !projectTransitioning;
     if (analysing || !rosterCurrent()) return;
     if (!hasVideo || project.hoopRoi == null || project.netRoi == null) {
@@ -2148,42 +2175,53 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         throw const MobileAnalysisException('视频检查未通过或耗时过长，请重新选择可正常播放的原视频。');
       }
       if (!rosterCurrent()) return;
-      if (expectedRosterGroup != null) {
-        final matches = playerGroups.where(
-          (group) => group.name == expectedRosterGroup,
-        );
-        if (matches.isEmpty ||
-            (_rosterSelection != null &&
-                (rosterSelection.groupChanged ||
-                    rosterSelection.groupName != expectedRosterGroup))) {
-          errorMessage = '球员分组已不存在，请重新选择';
-          notifyListeners();
-          return;
+      bool intentCurrent() {
+        if (!rosterCurrent() ||
+            generation != _analysisGeneration ||
+            cancelIntent != _analysisCancelIntent) {
+          return false;
         }
-        final selected = (rosterPlayers ?? const <String>[]).toSet();
-        rosterPlayers = [
-          for (final player in matches.first.players)
-            if (selected.contains(player)) player,
-        ];
+        if (expectedRosterGroup == null) return true;
+        return _groupStore.revisionFor(expectedRosterGroup) == groupRevision &&
+            playerGroups.any((group) => group.name == expectedRosterGroup) &&
+            (_rosterSelection == null ||
+                (!_rosterSelection!.groupChanged &&
+                    _rosterSelection!.groupName == expectedRosterGroup));
       }
-      if (rosterPlayers != null && rosterPlayers.isNotEmpty) {
-        if (!await importPlayers(rosterPlayers)) return;
-        if (generation != _analysisGeneration || !rosterCurrent()) return;
-      }
+
       final initialMessage = progressMessage;
       if (!await _submitProjectChange(
-        (current) => current.copyWith(
-          candidates: const [],
-          lastAnalysisStatus: 'running',
-          lastAnalysisProgressPercent: 0,
-          lastAnalysisMessage: initialMessage,
-        ),
-        inverse: (before) => _restoreOperationFields(before, {
-          'candidates',
-          'status',
-          'progress',
-          'message',
-        }),
+        (current) {
+          final players = List<String>.of(current.players);
+          final selected = selectedPlayers.toSet();
+          final ordered = expectedRosterGroup == null
+              ? selectedPlayers
+              : playerGroups
+                    .firstWhere((group) => group.name == expectedRosterGroup)
+                    .players
+                    .where(selected.contains);
+          for (final name in ordered) {
+            if (!players.contains(name)) players.add(name);
+          }
+          return current.copyWith(
+            players: players,
+            candidates: const [],
+            lastAnalysisStatus: 'running',
+            lastAnalysisProgressPercent: 0,
+            lastAnalysisMessage: initialMessage,
+          );
+        },
+        guard: intentCurrent,
+        inverse: (before) {
+          final restorePlayers = _restorePlayers(before);
+          final restoreAnalysis = _restoreOperationFields(before, {
+            'candidates',
+            'status',
+            'progress',
+            'message',
+          });
+          return (current) => restorePlayers(restoreAnalysis(current));
+        },
         operation: 'analysis',
         onSuccess: () {
           reviewHistory.clear();
@@ -2311,6 +2349,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   Future<void> cancelAnalysis() async {
     if (!analysing) return;
+    _analysisCancelIntent++;
     final generation = _analysisGeneration;
     final projectId = project.id;
     try {

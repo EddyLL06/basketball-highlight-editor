@@ -214,6 +214,7 @@ class _RosterConfirmationState extends State<_RosterConfirmation> {
                                   isScrollControlled: true,
                                   useSafeArea: true,
                                   enableDrag: false,
+                                  isDismissible: false,
                                   builder: (_) => _PlayerGroupsSheet(
                                     state: state,
                                     allowImport: false,

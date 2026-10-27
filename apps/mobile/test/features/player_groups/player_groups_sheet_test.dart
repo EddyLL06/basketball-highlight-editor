@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import 'package:bhe_l10n/bhe_l10n.dart';
 import 'package:bhe_mobile/mobile_ui.dart';
 import 'package:flutter/material.dart';
@@ -5,6 +8,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 import '../../support/fake_video_platform.dart';
 import '../../support/mobile_video_fixture.dart';
+
+class BlockingGroupPreferences extends InMemorySharedPreferencesStore {
+  BlockingGroupPreferences(super.data) : super.withData();
+  final entered = Completer<void>();
+  final release = Completer<void>();
+  @override
+  Future<bool> setValue(String type, String key, Object value) async {
+    if (!entered.isCompleted) {
+      entered.complete();
+      await release.future;
+      throw PlatformException(code: 'group_write_failed');
+    }
+    return super.setValue(type, key, value);
+  }
+}
 
 void main() {
   late MobileVideoFixture f;
@@ -149,4 +167,73 @@ void main() {
       await tester.binding.setSurfaceSize(null);
     }
   });
+  testWidgets(
+    'saving group cannot dismiss by barrier or system back; failure remains visible',
+    (tester) async {
+      final previous = VideoPlayerPlatform.instance;
+      VideoPlayerPlatform.instance = FakeVideoPlatform();
+      tester.binding.platformDispatcher.localeTestValue = const Locale('zh');
+      await tester.binding.setSurfaceSize(const Size(360, 800));
+      BlockingGroupPreferences? backend;
+      try {
+        f.state.project = f.project('${f.root.path}/missing.mp4');
+        expect(
+          await tester.runAsync(() => f.state.savePlayerGroup('Team')),
+          isTrue,
+        );
+        backend = BlockingGroupPreferences({});
+        SharedPreferencesStorePlatform.instance = backend;
+        await tester.pumpWidget(BheMobileApp(appState: f.state));
+        await tester.pump();
+        final l10n = Localizations.of<BheLocalizations>(
+          tester.element(find.byType(Scaffold).first),
+          BheLocalizations,
+        )!;
+        await tester.ensureVisible(find.text(l10n.reviewCount(1)));
+        await tester.pump();
+        await tester.tap(find.text(l10n.reviewCount(1)));
+        await tester.pump();
+        await tester.tap(find.byTooltip(l10n.text('球员：Alice')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.tap(find.text(l10n.text('球员分组')).last);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        final select = tester
+            .widget<PopupMenuButton<String>>(
+              find.byKey(const ValueKey('player-group-menu-Team')),
+            )
+            .onSelected!;
+        await tester.runAsync(() async {
+          select('default');
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          expect(backend!.entered.isCompleted, isTrue);
+        });
+        await tester.pump();
+        await tester.tapAt(const Offset(10, 10));
+        await tester.pump();
+        await tester.binding.handlePopRoute();
+        await tester.pump();
+        expect(find.byKey(const ValueKey('player-group-Team')), findsOneWidget);
+        backend.release.complete();
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)),
+        );
+        await tester.pump();
+        expect(find.text('保存失败，请重试'), findsOneWidget);
+        expect(find.text('反馈'), findsWidgets);
+        expect(f.state.defaultPlayerGroupName, isNull);
+        expect(tester.takeException(), isNull);
+      } finally {
+        if (backend != null && !backend.release.isCompleted) {
+          backend.release.complete();
+        }
+        await tester.pumpWidget(const SizedBox());
+        await tester.runAsync(() => pumpEventQueue());
+        VideoPlayerPlatform.instance = previous;
+        tester.binding.platformDispatcher.clearLocaleTestValue();
+        await tester.binding.setSurfaceSize(null);
+      }
+    },
+  );
 }
