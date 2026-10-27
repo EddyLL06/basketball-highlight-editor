@@ -192,6 +192,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   bool exporting = false;
   bool exportCancelled = false;
   int _exportRun = 0;
+  bool _exportPreflight = false;
   bool _mergeCommitted = false;
   bool exportAudioSkipped = false;
   int? exportMergedOverlapCount;
@@ -1345,8 +1346,20 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   void _resetTransientState() {
+    if (exporting && !_exportPreflight && !_mergeCommitted) {
+      unawaited(
+        exportEngine.cancel().catchError((Object error, StackTrace stack) {
+          MobileDiagnostics.instance.error(
+            error,
+            stack,
+            operation: 'export.cancel',
+          );
+        }),
+      );
+    }
     _analysisLaunchBarrier = null;
     _exportRun++;
+    _exportPreflight = false;
     _mergeCommitted = false;
     _projectSession++;
     _rosterSelection = null;
@@ -1969,48 +1982,65 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     await mergeClipsForPlayer(null);
   }
 
-  Future<void> exportClipsForPlayer(String? player) async {
-    if (exporting) return;
-    exportMergedOverlapCount = null;
-    notifyListeners();
-    final projectId = project.id, session = _projectSession;
-    bool current() =>
-        !_disposed && project.id == projectId && _projectSession == session;
-    if (!await _matchesProjectVideo(applyResult: current)) {
-      if (!current()) return;
-      errorMessage ??= '请先重新选择原视频。';
-      notifyListeners();
-      return;
-    }
-    if (!current()) return;
-    final candidates = project.candidates
-        .where(
-          (candidate) => candidate.selection == CandidateSelection.included,
-        )
-        .where((candidate) => player == null || candidate.player == player)
-        .toList();
-    if (candidates.isEmpty) {
-      errorMessage = '没有符合条件的保留片段。';
-      notifyListeners();
-      return;
-    }
+  int? _beginExport() {
+    if (exporting) return null;
+    final run = ++_exportRun;
     exporting = true;
-    _exportRun++;
+    _exportPreflight = true;
     _mergeCommitted = false;
-    MobileDiagnostics.instance.event('export.start');
     exportCancelled = false;
     exportedPaths = const [];
     exportAudioSkipped = false;
     exportMergedOverlapCount = null;
-    final stopwatch = Stopwatch()..start();
     diagnosticError = null;
     errorMessage = null;
+    MobileDiagnostics.instance.event('export.start');
+    notifyListeners();
+    return run;
+  }
+
+  Future<void> exportClipsForPlayer(String? player) async {
+    final run = _beginExport();
+    if (run == null) return;
+    final stopwatch = Stopwatch()..start();
+    final projectId = project.id, session = _projectSession;
+    bool current() =>
+        !_disposed &&
+        project.id == projectId &&
+        _projectSession == session &&
+        _exportRun == run;
+    bool eligible() => current() && !exportCancelled;
     try {
+      if (!await _matchesProjectVideo(applyResult: eligible)) {
+        if (!eligible()) return;
+        errorMessage ??= '请先重新选择原视频。';
+        notifyListeners();
+        return;
+      }
+      if (!eligible()) return;
+      final candidates = project.candidates
+          .where(
+            (candidate) => candidate.selection == CandidateSelection.included,
+          )
+          .where((candidate) => player == null || candidate.player == player)
+          .toList();
+      if (candidates.isEmpty) {
+        errorMessage = '没有符合条件的保留片段。';
+        notifyListeners();
+        return;
+      }
+      final outputDirectory = await _projectPath(project.id, area: 'exports');
+      if (!eligible()) return;
+      _exportPreflight = false;
+      var firstUpdate = true;
       await for (final update in exportEngine.exportClips(
         video: project.video!,
         candidates: candidates,
-        outputDirectory: await _projectPath(project.id, area: 'exports'),
+        outputDirectory: outputDirectory,
       )) {
+        if (!current()) return;
+        if (firstUpdate && exportCancelled) await exportEngine.cancel();
+        firstUpdate = false;
         if (!current()) return;
         exportAudioSkipped |= update.skippedAudioTracks.isNotEmpty;
         progress = update.progress;
@@ -2020,7 +2050,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         }
         notifyListeners();
       }
-      if (!current()) return;
+      if (!current() || (exportCancelled && !_mergeCommitted)) return;
       final duration = stopwatch.elapsedMilliseconds;
       if (!await _submitProjectChange(
         (current) => current.copyWith(lastExportDurationMs: duration),
@@ -2041,58 +2071,62 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       stopwatch.stop();
       if (current()) {
         exporting = false;
+        _exportPreflight = false;
         notifyListeners();
       }
     }
   }
 
   Future<void> mergeClipsForPlayer(String? player) async {
-    if (exporting) return;
-    exportMergedOverlapCount = null;
-    notifyListeners();
+    final run = _beginExport();
+    if (run == null) return;
+    final stopwatch = Stopwatch()..start();
     final projectId = project.id, session = _projectSession;
     bool current() =>
-        !_disposed && project.id == projectId && _projectSession == session;
-    if (!await _matchesProjectVideo(applyResult: current)) {
-      if (!current()) return;
-      errorMessage ??= '请先重新选择原视频。';
-      notifyListeners();
-      return;
-    }
-    if (!current()) return;
-    final candidates =
-        project.candidates
-            .where(
-              (candidate) => candidate.selection == CandidateSelection.included,
-            )
-            .where((candidate) => player == null || candidate.player == player)
-            .toList()
-          ..sort((a, b) => a.startMs.compareTo(b.startMs));
-    if (candidates.isEmpty) {
-      errorMessage = '没有符合条件的保留片段。';
-      notifyListeners();
-      return;
-    }
-    exporting = true;
-    _exportRun++;
-    _mergeCommitted = false;
-    MobileDiagnostics.instance.event('export.start');
-    exportCancelled = false;
-    exportedPaths = const [];
-    exportAudioSkipped = false;
-    exportMergedOverlapCount = null;
-    final stopwatch = Stopwatch()..start();
-    diagnosticError = null;
-    errorMessage = null;
+        !_disposed &&
+        project.id == projectId &&
+        _projectSession == session &&
+        _exportRun == run;
+    bool eligible() => current() && !exportCancelled;
     try {
+      if (!await _matchesProjectVideo(applyResult: eligible)) {
+        if (!eligible()) return;
+        errorMessage ??= '请先重新选择原视频。';
+        notifyListeners();
+        return;
+      }
+      if (!eligible()) return;
+      final candidates =
+          project.candidates
+              .where(
+                (candidate) =>
+                    candidate.selection == CandidateSelection.included,
+              )
+              .where(
+                (candidate) => player == null || candidate.player == player,
+              )
+              .toList()
+            ..sort((a, b) => a.startMs.compareTo(b.startMs));
+      if (candidates.isEmpty) {
+        errorMessage = '没有符合条件的保留片段。';
+        notifyListeners();
+        return;
+      }
       final outputPath =
           '${await _projectPath(project.id, area: 'exports')}/${project.id}_merged.mp4';
-      if (!current() || exportCancelled) return;
+      if (!eligible()) return;
+      _exportPreflight = false;
+      var firstUpdate = true;
       await for (final update in exportEngine.mergeClips(
         video: project.video!,
         candidates: candidates,
         outputPath: outputPath,
       )) {
+        if (!current()) return;
+        if (firstUpdate && exportCancelled && !update.committed) {
+          await exportEngine.cancel();
+        }
+        firstUpdate = false;
         if (!current()) return;
         if (update.committed) {
           _mergeCommitted = true;
@@ -2107,7 +2141,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         }
         notifyListeners();
       }
-      if (!current()) return;
+      if (!current() || (exportCancelled && !_mergeCommitted)) return;
       final duration = stopwatch.elapsedMilliseconds;
       if (!await _submitProjectChange(
         (current) => current.copyWith(lastExportDurationMs: duration),
@@ -2130,6 +2164,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       stopwatch.stop();
       if (current()) {
         exporting = false;
+        _exportPreflight = false;
         notifyListeners();
       }
     }
@@ -2140,6 +2175,14 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     final run = _exportRun;
     exportCancelled = true;
     exportMergedOverlapCount = null;
+    if (_exportPreflight) {
+      _exportRun++;
+      _exportPreflight = false;
+      exporting = false;
+      progressMessage = '导出已取消';
+      notifyListeners();
+      return;
+    }
     notifyListeners();
     try {
       await exportEngine.cancel();

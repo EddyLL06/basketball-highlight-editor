@@ -19,12 +19,16 @@ String clipFileName(int index, Candidate candidate) {
   return player.isEmpty ? '$name.mp4' : '${name}_$player.mp4';
 }
 
+class _ExportRun {
+  bool cancelled = false;
+  String? mergeId;
+}
+
 class NativeMediaExportEngine implements MobileExportEngine {
   NativeMediaExportEngine();
 
   static const _channel = MethodChannel('com.bhe.bhe/mobile_media');
-  bool _cancelled = false;
-  String? _activeMergeId;
+  _ExportRun? _activeRun;
 
   static Future<bool> isAvailable() async {
     try {
@@ -49,68 +53,72 @@ class NativeMediaExportEngine implements MobileExportEngine {
     required String outputDirectory,
   }) async* {
     if (candidates.isEmpty) return;
-    _cancelled = false;
+    final run = _ExportRun();
+    _activeRun = run;
+    try {
+      // Parallel export: MediaExtractor/MediaMuxer on Android runs on
+      // background threads; exporting 4+ clips concurrently reduces total
+      // wall time from sum(N) to ~max(N) + small overhead.
+      // Keep concurrency bounded to avoid thread/memory pressure on
+      // low-end devices.
+      const maxConcurrent = 3;
+      final outputs = <String>[];
+      final skipped = <String, List<SkippedAudioTrack>>{};
+      var completed = 0;
+      var failed = false;
 
-    // Parallel export: MediaExtractor/MediaMuxer on Android runs on
-    // background threads; exporting 4+ clips concurrently reduces total
-    // wall time from sum(N) to ~max(N) + small overhead.
-    // Keep concurrency bounded to avoid thread/memory pressure on
-    // low-end devices.
-    const maxConcurrent = 3;
-    final outputs = <String>[];
-    final skipped = <String, List<SkippedAudioTrack>>{};
-    var completed = 0;
-    var failed = false;
-
-    Future<void> exportOne(Candidate candidate) async {
-      if (failed || _cancelled) return;
-      final index = candidates.indexOf(candidate) + 1;
-      final outputPath = '$outputDirectory/${clipFileName(index, candidate)}';
-      try {
-        final raw = await _channel.invokeMethod<Object?>('exportClip', {
-          'exportId': candidate.id,
-          'inputPath': video.path,
-          'outputPath': outputPath,
-          'startMs': candidate.startMs,
-          'endMs': candidate.endMs,
-        });
-        if (_cancelled) return;
-        outputs.add(outputPath);
-        skipped[outputPath] = NativeExportResult.decode(
-          raw,
-          outputPath,
-        ).skippedAudioTracks;
-      } on MissingPluginException {
-        failed = true;
-        throw const MobileExportException('当前平台尚未注册视频导出模块。');
-      } on PlatformException catch (error, stack) {
-        MobileDiagnostics.instance.error(error, stack, operation: 'export');
-        failed = true;
-        throw MobileDiagnosticException(error, 'export');
+      Future<void> exportOne(Candidate candidate) async {
+        if (failed || run.cancelled) return;
+        final index = candidates.indexOf(candidate) + 1;
+        final outputPath = '$outputDirectory/${clipFileName(index, candidate)}';
+        try {
+          final raw = await _channel.invokeMethod<Object?>('exportClip', {
+            'exportId': candidate.id,
+            'inputPath': video.path,
+            'outputPath': outputPath,
+            'startMs': candidate.startMs,
+            'endMs': candidate.endMs,
+          });
+          if (run.cancelled) return;
+          outputs.add(outputPath);
+          skipped[outputPath] = NativeExportResult.decode(
+            raw,
+            outputPath,
+          ).skippedAudioTracks;
+        } on MissingPluginException {
+          failed = true;
+          throw const MobileExportException('当前平台尚未注册视频导出模块。');
+        } on PlatformException catch (error, stack) {
+          MobileDiagnostics.instance.error(error, stack, operation: 'export');
+          failed = true;
+          throw MobileDiagnosticException(error, 'export');
+        }
       }
-    }
 
-    // Process in batches of maxConcurrent.
-    for (var i = 0; i < candidates.length; i += maxConcurrent) {
-      final batch = candidates.skip(i).take(maxConcurrent).toList();
-      yield ExportProgress(
-        progress: completed / candidates.length,
-        message:
-            '正在导出 ${completed + 1}-${completed + batch.length}/${candidates.length}',
-      );
-      await Future.wait(batch.map(exportOne));
-      if (_cancelled) {
-        throw const MobileExportException('导出已取消');
-      }
-      completed += batch.length;
-      for (final path in outputs.skip(outputs.length - batch.length)) {
+      // Process in batches of maxConcurrent.
+      for (var i = 0; i < candidates.length; i += maxConcurrent) {
+        final batch = candidates.skip(i).take(maxConcurrent).toList();
         yield ExportProgress(
           progress: completed / candidates.length,
-          message: '已导出 $completed/${candidates.length}',
-          outputPath: path,
-          skippedAudioTracks: skipped[path] ?? const [],
+          message:
+              '正在导出 ${completed + 1}-${completed + batch.length}/${candidates.length}',
         );
+        await Future.wait(batch.map(exportOne));
+        if (run.cancelled) {
+          throw const MobileExportException('导出已取消');
+        }
+        completed += batch.length;
+        for (final path in outputs.skip(outputs.length - batch.length)) {
+          yield ExportProgress(
+            progress: completed / candidates.length,
+            message: '已导出 $completed/${candidates.length}',
+            outputPath: path,
+            skippedAudioTracks: skipped[path] ?? const [],
+          );
+        }
       }
+    } finally {
+      if (identical(_activeRun, run)) _activeRun = null;
     }
   }
 
@@ -121,9 +129,10 @@ class NativeMediaExportEngine implements MobileExportEngine {
     required String outputPath,
   }) async* {
     if (candidates.isEmpty) return;
-    _cancelled = false;
+    final run = _ExportRun();
+    _activeRun = run;
     final exportId = 'merge-${DateTime.now().microsecondsSinceEpoch}';
-    _activeMergeId = exportId;
+    run.mergeId = exportId;
     var reserved = false;
     try {
       try {
@@ -135,9 +144,9 @@ class NativeMediaExportEngine implements MobileExportEngine {
       } on MissingPluginException {
         // Older platforms (including iOS) do not implement reservations.
       }
-      if (_cancelled) throw const MobileExportException('导出已取消');
+      if (run.cancelled) throw const MobileExportException('导出已取消');
       yield const ExportProgress(progress: 0, message: '正在准备合并导出');
-      if (_cancelled) throw const MobileExportException('导出已取消');
+      if (run.cancelled) throw const MobileExportException('导出已取消');
       final raw = await _channel.invokeMethod<Object?>('mergeClips', {
         'exportId': exportId,
         'reservationRequired': reserved,
@@ -149,7 +158,9 @@ class NativeMediaExportEngine implements MobileExportEngine {
         ],
       });
       final committed = raw is Map && raw['committed'] == true;
-      if (_cancelled && !committed) throw const MobileExportException('导出已取消');
+      if (run.cancelled && !committed) {
+        throw const MobileExportException('导出已取消');
+      }
       final result = NativeExportResult.decode(raw, outputPath);
       yield ExportProgress(
         progress: 1,
@@ -178,17 +189,20 @@ class NativeMediaExportEngine implements MobileExportEngine {
           );
         }
       }
-      if (_activeMergeId == exportId) _activeMergeId = null;
+      if (identical(_activeRun, run)) _activeRun = null;
     }
   }
 
   @override
   Future<void> cancel() async {
-    _cancelled = true;
+    final run = _activeRun;
+    if (run == null) return;
+    run.cancelled = true;
+    final exportId = run.mergeId;
     try {
       await _channel.invokeMethod<void>(
         'cancelExport',
-        _activeMergeId == null ? null : {'exportId': _activeMergeId},
+        exportId == null ? null : {'exportId': exportId},
       );
     } on MissingPluginException {
       return;
