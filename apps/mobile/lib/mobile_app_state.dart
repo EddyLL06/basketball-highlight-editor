@@ -499,6 +499,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   Future<void>? _analysisCancelPending;
   PreparedNativeAnalysis? _waitingNativeRun;
   PreparedNativeAnalysis? _uncertainNativeRun;
+  final Expando<bool> _confirmedStoppedAnalysisRuns = Expando<bool>();
   DiagnosticErrorRecord? uncertainAnalysisDiagnostic;
   bool checkingUncertainAnalysis = false;
   String? uncertainAnalysisStatus;
@@ -509,6 +510,11 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     bool cancellationAcknowledged = false,
     DiagnosticErrorRecord? diagnostic,
   }) {
+    if (_confirmedStoppedAnalysisRuns[run] == true) return;
+    if (identical(_uncertainNativeRun, run)) {
+      uncertainAnalysisDiagnostic ??= diagnostic;
+      return;
+    }
     _uncertainNativeRun = run;
     uncertainAnalysisStatus = null;
     uncertainAnalysisDiagnostic =
@@ -550,6 +556,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       final outcome = await engine.nativeAnalysisStatus();
       if (outcome == TaskStopStatus.stopped &&
           identical(_uncertainNativeRun, run)) {
+        _confirmedStoppedAnalysisRuns[run] = true;
         _uncertainNativeRun = null;
         uncertainAnalysisDiagnostic = null;
         uncertainAnalysisStatus = null;
@@ -568,7 +575,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       );
       if (identical(_uncertainNativeRun, run)) {
         uncertainAnalysisStatus = '无法确认上次任务是否停止。';
-        uncertainAnalysisDiagnostic = diagnostic;
+        uncertainAnalysisDiagnostic ??= diagnostic;
       }
       return TaskStopStatus.unknown;
     } finally {
@@ -2902,11 +2909,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         }
         recordDiagnosticFailure(error, stack, operation: 'analysis');
         if (nativeRun != null && nativeRun.dispatched) {
-          if (identical(_uncertainNativeRun, nativeRun)) {
-            uncertainAnalysisDiagnostic = diagnosticError;
-          } else {
-            _markNativeUncertain(nativeRun, diagnostic: diagnosticError);
-          }
+          _markNativeUncertain(nativeRun, diagnostic: diagnosticError);
         }
         final run = _waitingNativeRun;
         if (error is TimeoutException && run != null) {
