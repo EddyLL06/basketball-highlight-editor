@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:bhe_core/bhe_core.dart';
 import 'package:flutter/services.dart';
 
+import 'features/export/native_export_result.dart';
+
 String clipFileName(int index, Candidate candidate) {
   final name =
       'goal_${index.toString().padLeft(3, '0')}_${(candidate.eventMs / 1000).toStringAsFixed(2)}s';
@@ -46,6 +48,7 @@ class NativeMediaExportEngine implements MobileExportEngine {
     // low-end devices.
     const maxConcurrent = 3;
     final outputs = <String>[];
+    final skipped = <String, List<SkippedAudioTrack>>{};
     var completed = 0;
     var failed = false;
 
@@ -54,7 +57,7 @@ class NativeMediaExportEngine implements MobileExportEngine {
       final index = candidates.indexOf(candidate) + 1;
       final outputPath = '$outputDirectory/${clipFileName(index, candidate)}';
       try {
-        await _channel.invokeMethod<String>('exportClip', {
+        final raw = await _channel.invokeMethod<Object?>('exportClip', {
           'exportId': candidate.id,
           'inputPath': video.path,
           'outputPath': outputPath,
@@ -63,6 +66,10 @@ class NativeMediaExportEngine implements MobileExportEngine {
         });
         if (_cancelled) return;
         outputs.add(outputPath);
+        skipped[outputPath] = NativeExportResult.decode(
+          raw,
+          outputPath,
+        ).skippedAudioTracks;
       } on MissingPluginException {
         failed = true;
         throw const MobileExportException('当前平台尚未注册视频导出模块。');
@@ -90,6 +97,7 @@ class NativeMediaExportEngine implements MobileExportEngine {
           progress: completed / candidates.length,
           message: '已导出 $completed/${candidates.length}',
           outputPath: path,
+          skippedAudioTracks: skipped[path] ?? const [],
         );
       }
     }
@@ -105,7 +113,7 @@ class NativeMediaExportEngine implements MobileExportEngine {
     _cancelled = false;
     yield const ExportProgress(progress: 0, message: '正在准备合并导出');
     try {
-      final path = await _channel.invokeMethod<String>('mergeClips', {
+      final raw = await _channel.invokeMethod<Object?>('mergeClips', {
         'exportId': 'merge-${DateTime.now().microsecondsSinceEpoch}',
         'inputPath': video.path,
         'outputPath': outputPath,
@@ -115,10 +123,12 @@ class NativeMediaExportEngine implements MobileExportEngine {
         ],
       });
       if (_cancelled) throw const MobileExportException('导出已取消');
+      final result = NativeExportResult.decode(raw, outputPath);
       yield ExportProgress(
         progress: 1,
         message: '合并导出完成',
-        outputPath: path ?? outputPath,
+        outputPath: result.path,
+        skippedAudioTracks: result.skippedAudioTracks,
       );
     } on MissingPluginException {
       throw const MobileExportException('当前平台尚未注册合并导出模块。');

@@ -25,6 +25,7 @@ part 'features/video_source/video_source_notice.dart';
 part 'features/video_source/review_video_source.dart';
 part 'features/video_source/video_preview.dart';
 part 'features/video_source/review_controls.dart';
+part 'features/export/export_audio_notice.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 
@@ -4327,6 +4328,7 @@ class _ExportViewState extends State<_ExportView> {
                 ),
               ),
             ],
+            _ExportAudioNotice(state: state),
             VideoSourceNotice(state: state),
           ],
         ),

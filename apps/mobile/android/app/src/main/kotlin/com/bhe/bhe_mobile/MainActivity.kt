@@ -622,27 +622,29 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /**
-     * 把原视频里 MP4 容器能接受的音视频轨道加进 muxer，返回 源轨道序号 -> muxer 轨道序号。
-     * iPhone 空间音频等 MP4 不认的音轨加不进去，跳过它只导出画面（和桌面端一致）；
-     * 视频轨加不进去才算失败，否则会导出一个没有画面的文件。
-     */
-    private fun addExportableTracks(extractor: MediaExtractor, muxer: MediaMuxer): Map<Int, Int> {
-        val trackMap = mutableMapOf<Int, Int>()
+    private fun addExportableTracks(extractor: MediaExtractor, muxer: MediaMuxer): ExportTrackSelection =
+        ExportTrackPolicy.select(
+            (0 until extractor.trackCount).mapNotNull { index ->
+                extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.let { ExportSourceTrack(index, it) }
+            },
+            addTrack = { index -> muxer.addTrack(extractor.getTrackFormat(index)) },
+            onSkipped = { track, error -> Log.w("BHE-Export", "skipping audio track ${track.index}: ${track.mime}", error) },
+        )
+
+    private fun applySourceOrientation(extractor: MediaExtractor, muxer: MediaMuxer) {
         for (index in 0 until extractor.trackCount) {
             val format = extractor.getTrackFormat(index)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
-            val isVideo = mime.startsWith("video/")
-            if (!isVideo && !mime.startsWith("audio/")) continue
-            try {
-                trackMap[index] = muxer.addTrack(format)
-            } catch (error: Exception) {
-                if (isVideo) throw IllegalStateException("视频轨道格式（$mime）无法导出", error)
-                Log.w("BHE-Export", "skipping an audio track the MP4 muxer cannot take: $mime", error)
-            }
+            if (format.getString(MediaFormat.KEY_MIME)?.startsWith("video/") != true) continue
+            val rotation = if (format.containsKey(MediaFormat.KEY_ROTATION)) format.getInteger(MediaFormat.KEY_ROTATION) else 0
+            muxer.setOrientationHint(ExportTrackPolicy.orientation(rotation))
+            return
         }
-        return trackMap
     }
+
+    private fun exportResult(path: String, selection: ExportTrackSelection): Map<String, Any> = mapOf(
+        "outputPath" to path,
+        "skippedAudioTracks" to selection.skippedAudio.map { mapOf("index" to it.index, "mime" to it.mime) },
+    )
 
     private fun exportClip(call: MethodCall, result: MethodChannel.Result) {
         val exportId = call.argument<String>("exportId") ?: outputPathId(call)
@@ -668,7 +670,9 @@ class MainActivity : FlutterActivity() {
                 currentExtractor.setDataSource(inputPath)
                 val currentMuxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
                 muxer = currentMuxer
-                val trackMap = addExportableTracks(currentExtractor, currentMuxer)
+                val selection = addExportableTracks(currentExtractor, currentMuxer)
+                val trackMap = selection.trackMap
+                applySourceOrientation(currentExtractor, currentMuxer)
                 trackMap.keys.forEach(currentExtractor::selectTrack)
                 if (trackMap.isEmpty()) throw IllegalStateException("视频没有可导出的音视频轨道")
                 currentMuxer.start()
@@ -703,7 +707,7 @@ class MainActivity : FlutterActivity() {
                     currentMuxer.stop()
                     muxerStarted = false
                 }
-                mainHandler.post { result.success(outputPath) }
+                mainHandler.post { result.success(exportResult(outputPath, selection)) }
             } catch (_: InterruptedException) {
                 File(outputPath).delete()
                 mainHandler.post { result.error("EXPORT_CANCELLED", "导出已取消", null) }
@@ -760,8 +764,14 @@ class MainActivity : FlutterActivity() {
                 firstExtractor.setDataSource(inputPath)
                 val currentMuxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
                 muxer = currentMuxer
-                val trackMap = addExportableTracks(firstExtractor, currentMuxer)
-                firstExtractor.release()
+                val selection: ExportTrackSelection
+                try {
+                    selection = addExportableTracks(firstExtractor, currentMuxer)
+                    applySourceOrientation(firstExtractor, currentMuxer)
+                } finally {
+                    firstExtractor.release()
+                }
+                val trackMap = selection.trackMap
                 if (trackMap.isEmpty()) throw IllegalStateException("视频没有可合并的音视频轨道")
                 currentMuxer.start()
                 muxerStarted = true
@@ -807,7 +817,7 @@ class MainActivity : FlutterActivity() {
                 }
                 currentMuxer.stop()
                 muxerStarted = false
-                mainHandler.post { result.success(outputPath) }
+                mainHandler.post { result.success(exportResult(outputPath, selection)) }
             } catch (_: InterruptedException) {
                 File(outputPath).delete()
                 mainHandler.post { result.error("EXPORT_CANCELLED", "合并导出已取消", null) }

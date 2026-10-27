@@ -115,6 +115,7 @@ class MobileAppState extends ChangeNotifier {
   bool analysing = false;
   bool exporting = false;
   bool exportCancelled = false;
+  bool exportAudioSkipped = false;
   List<String> exportedPaths = const [];
   Future<void> _saveChain = Future<void>.value();
   int _analysisGeneration = 0;
@@ -518,6 +519,7 @@ class MobileAppState extends ChangeNotifier {
     _resetTransientState();
     errorMessage = null;
     exportedPaths = const [];
+    exportAudioSkipped = false;
     await _validateImportedVideoIfPresent();
     recentProjects = [
       project,
@@ -705,6 +707,7 @@ class MobileAppState extends ChangeNotifier {
     analysing = false;
     exporting = false;
     exportedPaths = const [];
+    exportAudioSkipped = false;
     analysisStartedAt = null;
   }
 
@@ -841,6 +844,7 @@ class MobileAppState extends ChangeNotifier {
     } else {
       project = recentProjects.first;
       exportedPaths = const [];
+      exportAudioSkipped = false;
       await _validateImportedVideoIfPresent();
     }
     final directory = await _dataDirectory();
@@ -1040,6 +1044,7 @@ class MobileAppState extends ChangeNotifier {
     exporting = true;
     exportCancelled = false;
     exportedPaths = const [];
+    exportAudioSkipped = false;
     final stopwatch = Stopwatch()..start();
     errorMessage = null;
     try {
@@ -1048,6 +1053,7 @@ class MobileAppState extends ChangeNotifier {
         candidates: candidates,
         outputDirectory: await _projectPath(project.id, area: 'exports'),
       )) {
+        exportAudioSkipped |= update.skippedAudioTracks.isNotEmpty;
         progress = update.progress;
         progressMessage = update.message;
         if (update.outputPath != null) {
@@ -1092,6 +1098,7 @@ class MobileAppState extends ChangeNotifier {
     exporting = true;
     exportCancelled = false;
     exportedPaths = const [];
+    exportAudioSkipped = false;
     final stopwatch = Stopwatch()..start();
     errorMessage = null;
     try {
@@ -1102,6 +1109,7 @@ class MobileAppState extends ChangeNotifier {
         candidates: candidates,
         outputPath: outputPath,
       )) {
+        exportAudioSkipped |= update.skippedAudioTracks.isNotEmpty;
         progress = update.progress;
         progressMessage = update.message;
         if (update.outputPath != null) {

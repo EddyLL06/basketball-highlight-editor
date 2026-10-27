@@ -1,15 +1,23 @@
 import 'models.dart';
 
+class SkippedAudioTrack {
+  const SkippedAudioTrack({required this.index, required this.mime});
+  final int index;
+  final String mime;
+}
+
 class ExportProgress {
   const ExportProgress({
     required this.progress,
     required this.message,
     this.outputPath,
+    this.skippedAudioTracks = const [],
   });
 
   final double progress;
   final String message;
   final String? outputPath;
+  final List<SkippedAudioTrack> skippedAudioTracks;
 }
 
 abstract interface class MobileExportEngine {

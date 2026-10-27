@@ -367,6 +367,7 @@ String _englishDuration(String value) => value
     .trim();
 
 const _englishText = <String, String>{
+  '导出成功，部分音轨无法保留': 'Export complete. Some audio tracks could not be kept.',
   '视频文件找不到了，请重新选择原视频。': 'The video file is missing. Choose the original video again.',
   '这个视频无法播放，请重新选择原视频。': 'This video cannot be played. Choose the original video again.',
   '所选视频与项目记录不一致，请选择原始视频。': 'The selected video does not match this project. Choose the original video.',
