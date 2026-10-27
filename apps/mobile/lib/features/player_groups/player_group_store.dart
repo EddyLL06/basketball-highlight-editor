@@ -19,6 +19,7 @@ class PlayerGroupStore {
   List<PlayerGroup> groups = const [];
   String? defaultName;
   bool _loadFailed = false;
+  bool get hasUnsafeData => _loadFailed;
   bool loaded = false;
   final Map<String, int> _revisions = {};
   int revisionFor(String name) => _revisions[name] ?? 0;

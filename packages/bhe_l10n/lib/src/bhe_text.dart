@@ -1000,6 +1000,7 @@ const _englishText = <String, String>{
   '已有同名分组，是否替换？': 'Replace the existing group?',
   '替换': 'Replace',
   '分组操作未完成': 'Group operation was not completed',
+  '分组数据异常，无法修改': 'Player group data is invalid and cannot be changed.',
   '这个分组还没有球员': 'This group has no players yet',
   '球员名单': 'Player roster',
   '正在读取球员分组…': 'Loading player groups…',

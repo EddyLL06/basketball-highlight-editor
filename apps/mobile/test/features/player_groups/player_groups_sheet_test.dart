@@ -1,3 +1,6 @@
+import 'package:bhe_core/bhe_core.dart';
+import 'package:bhe_mobile/mobile_app_state.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
@@ -233,6 +236,60 @@ void main() {
         VideoPlayerPlatform.instance = previous;
         tester.binding.platformDispatcher.clearLocaleTestValue();
         await tester.binding.setSurfaceSize(null);
+      }
+    },
+  );
+  testWidgets(
+    'invalid legacy groups show diagnostic feedback without overwriting data',
+    (tester) async {
+      final previous = VideoPlayerPlatform.instance;
+      VideoPlayerPlatform.instance = FakeVideoPlatform();
+      tester.binding.platformDispatcher.localeTestValue = const Locale('zh');
+      const raw =
+          '[{"name":"","players":[]},{"name":"Team","players":["Alice"]}]';
+      SharedPreferences.setMockInitialValues({'bhe.player_groups': raw});
+      late MobileAppState state;
+      await tester.runAsync(() async {
+        state = MobileAppState(
+          analysisEngine: const MobileAnalysisEngineUnavailable(),
+        );
+        await state.ready;
+      });
+      try {
+        state.project = f.project('${f.root.path}/missing.mp4');
+        await tester.pumpWidget(BheMobileApp(appState: state));
+        await tester.pump();
+        final l10n = Localizations.of<BheLocalizations>(
+          tester.element(find.byType(Scaffold).first),
+          BheLocalizations,
+        )!;
+        await tester.ensureVisible(find.text(l10n.reviewCount(1)));
+        await tester.pump();
+        await tester.tap(find.text(l10n.reviewCount(1)));
+        await tester.pump();
+        await tester.tap(find.byTooltip(l10n.text('球员：Alice')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.tap(find.text(l10n.text('球员分组')).last);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(find.text('分组数据异常，无法修改'), findsOneWidget);
+        expect(find.text('反馈'), findsWidgets);
+        expect(
+          await tester.runAsync(
+            () async => (await SharedPreferences.getInstance()).getString(
+              'bhe.player_groups',
+            ),
+          ),
+          raw,
+        );
+        expect(tester.takeException(), isNull);
+      } finally {
+        await tester.pumpWidget(const SizedBox());
+        state.dispose();
+        await tester.runAsync(() => pumpEventQueue());
+        VideoPlayerPlatform.instance = previous;
+        tester.binding.platformDispatcher.clearLocaleTestValue();
       }
     },
   );

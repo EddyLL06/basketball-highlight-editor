@@ -113,6 +113,18 @@ class _PlayerGroupsSheetState extends State<_PlayerGroupsSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_busy) const LinearProgressIndicator(),
+            if (widget.state.playerGroupDataInvalid)
+              _InlineNotice(
+                error: true,
+                message: context.bheText('分组数据异常，无法修改'),
+                action: TextButton(
+                  onPressed: () => showMobileDiagnostics(
+                    context,
+                    error: widget.state.playerGroupError,
+                  ),
+                  child: Text(context.bheText('反馈')),
+                ),
+              ),
             if (_failed)
               _InlineNotice(
                 error: true,

@@ -92,6 +92,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   set defaultPlayerGroupName(String? value) => _groupStore.defaultName = value;
   Future<void> get groupsReady => _groupStore.ready;
   bool get groupsLoaded => _groupStore.loaded;
+  bool get playerGroupDataInvalid => _groupStore.hasUnsafeData;
   DiagnosticErrorRecord? playerGroupError;
   RosterSelection? _rosterSelection;
   int get videoPreparationGeneration => _videoPreparationGeneration;
@@ -393,6 +394,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   int _analysisGeneration = 0;
   int _analysisCancelIntent = 0;
+  Future<void>? _analysisLaunchBarrier;
   int _videoPreparationGeneration = 0;
   DateTime? analysisStartedAt;
 
@@ -830,7 +832,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     }
   }
 
-  Future<void> _writeProject(ProjectSnapshot snapshot) async {
+  Future<void> _writeProject(
+    ProjectSnapshot snapshot, {
+    bool Function()? commitGuard,
+  }) async {
     final file = await _projectFile(snapshot.id);
     final next = [
       snapshot,
@@ -842,10 +847,14 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     // those redundant index writes while still committing each undo step.
     final indexUnchanged =
         await index.exists() && await index.readAsString() == indexContent;
-    await commitProjectFiles({
-      file: const ProjectPackageCodec().encode(snapshot),
-      if (!indexUnchanged) index: indexContent,
-    });
+    await commitProjectFiles(
+      {
+        file: const ProjectPackageCodec().encode(snapshot),
+        if (!indexUnchanged) index: indexContent,
+      },
+      beforeInstall: commitGuard,
+      afterInstall: commitGuard,
+    );
     recentProjects = next;
   }
 
@@ -857,6 +866,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     void Function()? onSuccess,
     bool allowDuringTransition = false,
     bool Function()? guard,
+    bool recheckAfterWrite = false,
   }) {
     if (_projectTransitions != 0 && !allowDuringTransition) {
       return Future.value(false);
@@ -874,9 +884,20 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       final rollback = inverse(project);
       project = next;
       notifyListeners();
+      var written = false;
       try {
-        await _writeProject(project);
+        await _writeProject(
+          project,
+          commitGuard: recheckAfterWrite ? guard : null,
+        );
+        written = true;
         if (_disposed || project.id != id || _projectSession != session) {
+          return false;
+        }
+        if (recheckAfterWrite && guard != null && !guard()) {
+          project = rollback(project);
+          await _writeProject(project);
+          notifyListeners();
           return false;
         }
         onSuccess?.call();
@@ -885,6 +906,21 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       } on Object catch (error, stack) {
         if (!_disposed && project.id == id && _projectSession == session) {
           project = rollback(project);
+          if (error is ProjectCommitSuperseded) {
+            notifyListeners();
+            return false;
+          }
+          if (written) {
+            try {
+              await _writeProject(project);
+            } on Object catch (restoreError, restoreStack) {
+              MobileDiagnostics.instance.error(
+                restoreError,
+                restoreStack,
+                operation: '$operation.rollback',
+              );
+            }
+          }
           recordDiagnosticFailure(error, stack, operation: operation);
           notifyListeners();
         } else {
@@ -1305,6 +1341,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   void _resetTransientState() {
+    _analysisLaunchBarrier = null;
     _projectSession++;
     _rosterSelection = null;
     _analysisGeneration++;
@@ -2175,13 +2212,14 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         throw const MobileAnalysisException('视频检查未通过或耗时过长，请重新选择可正常播放的原视频。');
       }
       if (!rosterCurrent()) return;
+      var rosterCommitted = false;
       bool intentCurrent() {
         if (!rosterCurrent() ||
             generation != _analysisGeneration ||
             cancelIntent != _analysisCancelIntent) {
           return false;
         }
-        if (expectedRosterGroup == null) return true;
+        if (rosterCommitted || expectedRosterGroup == null) return true;
         return _groupStore.revisionFor(expectedRosterGroup) == groupRevision &&
             playerGroups.any((group) => group.name == expectedRosterGroup) &&
             (_rosterSelection == null ||
@@ -2189,60 +2227,103 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
                     _rosterSelection!.groupName == expectedRosterGroup));
       }
 
+      if (selectedPlayers.isNotEmpty) {
+        if (!await _submitProjectChange(
+          (current) {
+            final players = List<String>.of(current.players);
+            final selected = selectedPlayers.toSet();
+            final ordered = expectedRosterGroup == null
+                ? selectedPlayers
+                : playerGroups
+                      .firstWhere((group) => group.name == expectedRosterGroup)
+                      .players
+                      .where(selected.contains);
+            for (final name in ordered) {
+              if (!players.contains(name)) players.add(name);
+            }
+            return current.copyWith(players: players);
+          },
+          guard: intentCurrent,
+          inverse: _restorePlayers,
+          operation: 'analysis',
+        )) {
+          return;
+        }
+      }
+      if (selectedPlayers.isEmpty && !intentCurrent()) return;
+      rosterCommitted = true;
+      if (!intentCurrent()) return;
       final initialMessage = progressMessage;
+      StreamController<AnalysisProgress>? controller;
+      StreamSubscription<AnalysisProgress>? sourceSubscription;
       if (!await _submitProjectChange(
-        (current) {
-          final players = List<String>.of(current.players);
-          final selected = selectedPlayers.toSet();
-          final ordered = expectedRosterGroup == null
-              ? selectedPlayers
-              : playerGroups
-                    .firstWhere((group) => group.name == expectedRosterGroup)
-                    .players
-                    .where(selected.contains);
-          for (final name in ordered) {
-            if (!players.contains(name)) players.add(name);
-          }
-          return current.copyWith(
-            players: players,
-            candidates: const [],
-            lastAnalysisStatus: 'running',
-            lastAnalysisProgressPercent: 0,
-            lastAnalysisMessage: initialMessage,
-          );
-        },
+        (current) => current.copyWith(
+          candidates: const [],
+          lastAnalysisStatus: 'running',
+          lastAnalysisProgressPercent: 0,
+          lastAnalysisMessage: initialMessage,
+        ),
         guard: intentCurrent,
-        inverse: (before) {
-          final restorePlayers = _restorePlayers(before);
-          final restoreAnalysis = _restoreOperationFields(before, {
-            'candidates',
-            'status',
-            'progress',
-            'message',
-          });
-          return (current) => restorePlayers(restoreAnalysis(current));
-        },
+        recheckAfterWrite: true,
+        inverse: (before) => _restoreOperationFields(before, {
+          'candidates',
+          'status',
+          'progress',
+          'message',
+        }),
         operation: 'analysis',
         onSuccess: () {
+          final output = StreamController<AnalysisProgress>(
+            onCancel: () => sourceSubscription?.cancel(),
+          );
+          controller = output;
+          final launched = Completer<void>();
+          _analysisLaunchBarrier = launched.future;
+          void markLaunched() {
+            if (!launched.isCompleted) launched.complete();
+          }
+
+          sourceSubscription = analysisEngine
+              .analyze(
+                video: project.video!,
+                hoopRoi: project.hoopRoi!,
+                rimRoi: project.rimRoi,
+                netRoi: project.netRoi!,
+                settings: project.settings,
+              )
+              .listen(
+                (update) {
+                  markLaunched();
+                  output.add(update);
+                },
+                onError: (Object error, StackTrace stack) {
+                  markLaunched();
+                  output.addError(error, stack);
+                },
+                onDone: () {
+                  markLaunched();
+                  output.close();
+                },
+              );
+          // Stream.listen starts synchronous engines immediately and schedules
+          // async generators before this microtask, without waiting for data.
+          scheduleMicrotask(markLaunched);
           reviewHistory.clear();
           _setReviewNotice(null);
         },
       )) {
         return;
       }
-      if (generation != _analysisGeneration) return;
+      if (generation != _analysisGeneration) {
+        await sourceSubscription?.cancel();
+        return;
+      }
       progress = 0.02;
       progressMessage = '正在准备本地分析';
       notifyListeners();
       var lastCheckpoint = -1;
       List<Candidate>? latestCandidates;
-      await for (final update in analysisEngine.analyze(
-        video: project.video!,
-        hoopRoi: project.hoopRoi!,
-        rimRoi: project.rimRoi,
-        netRoi: project.netRoi!,
-        settings: project.settings,
-      )) {
+      await for (final update in controller!.stream) {
         if (generation != _analysisGeneration) break;
         if (stage != update.stage) {
           MobileDiagnostics.instance.event('analysis.${update.stage.name}');
@@ -2311,7 +2392,15 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       )) {
         return;
       }
-      unawaited(_updateCover(project));
+      unawaited(
+        _updateCover(project).catchError((Object error, StackTrace stack) {
+          MobileDiagnostics.instance.error(
+            error,
+            stack,
+            operation: 'analysis.cover',
+          );
+        }),
+      );
     } on Object catch (error, stack) {
       MobileDiagnostics.instance.error(error, stack, operation: 'project');
       if (generation != _analysisGeneration) return;
@@ -2340,6 +2429,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     } finally {
       stopwatch.stop();
       if (generation == _analysisGeneration) {
+        _analysisLaunchBarrier = null;
         analysing = false;
         analysisStartedAt = null;
         notifyListeners();
@@ -2353,6 +2443,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     final generation = _analysisGeneration;
     final projectId = project.id;
     try {
+      final launch = _analysisLaunchBarrier;
+      if (launch != null) await launch;
       await analysisEngine.cancel();
     } on Object catch (error, stack) {
       if (generation == _analysisGeneration &&
@@ -2369,6 +2461,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       return;
     }
     _analysisGeneration++;
+    _analysisLaunchBarrier = null;
     analysing = false;
     analysisStartedAt = null;
     stage = AnalysisStage.cancelled;
