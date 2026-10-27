@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:video_player/video_player.dart';
 
+import 'features/diagnostics/mobile_diagnostics.dart';
 import 'mobile_theme.dart';
 import 'features/video_source/video_unavailable.dart';
 
@@ -28,6 +29,7 @@ Future<({int start, int end})?> showClipRangeEditor(
   int? eventMs,
   int? defaultStartMs,
   int? defaultEndMs,
+  ValueChanged<DiagnosticErrorRecord>? onFeedback,
 }) => showModalBottomSheet<({int start, int end})>(
   context: context,
   isScrollControlled: true,
@@ -45,6 +47,7 @@ Future<({int start, int end})?> showClipRangeEditor(
     eventMs: eventMs,
     defaultStartMs: defaultStartMs,
     defaultEndMs: defaultEndMs,
+    onFeedback: onFeedback,
   ),
 );
 
@@ -66,6 +69,7 @@ class ClipRangeEditor extends StatefulWidget {
     this.eventMs,
     this.defaultStartMs,
     this.defaultEndMs,
+    this.onFeedback,
   });
 
   final String videoPath;
@@ -80,6 +84,7 @@ class ClipRangeEditor extends StatefulWidget {
   final int? eventMs;
   final int? defaultStartMs;
   final int? defaultEndMs;
+  final ValueChanged<DiagnosticErrorRecord>? onFeedback;
 
   @override
   State<ClipRangeEditor> createState() => _ClipRangeEditorState();
@@ -98,6 +103,7 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
   int _positionMs = 0;
   bool _ready = false;
   bool _failed = false;
+  DiagnosticErrorRecord? _diagnosticFailure;
   // Playback started inside the range stays inside it: it loops, or stops
   // at the end for an ending preview. Playback started outside the range
   // browses freely so an earlier or later moment can be found.
@@ -130,12 +136,18 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
       await player.initialize();
       await player.seekTo(Duration(milliseconds: _startMs));
       if (mounted && identical(player, _player)) setState(() => _ready = true);
-    } catch (_) {
+    } catch (error, stack) {
+      _diagnosticFailure = MobileDiagnostics.instance.error(
+        error,
+        stack,
+        operation: 'playback',
+      );
       player.removeListener(_onPlayerChanged);
       if (identical(player, _player)) _player = null;
       try {
         await player.dispose();
-      } catch (_) {
+      } catch (error, stack) {
+        MobileDiagnostics.instance.error(error, stack, operation: 'playback');
         /* Keep the failure UI available. */
       }
       if (mounted) setState(() => _failed = true);
@@ -148,20 +160,49 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
     final player = _player;
     _player = null;
     player?.removeListener(_onPlayerChanged);
-    unawaited(player?.dispose());
+    unawaited(_guard(player?.dispose()));
     super.dispose();
+  }
+
+  void _playbackFailed(Object error, StackTrace? stack) {
+    _diagnosticFailure = MobileDiagnostics.instance.error(
+      error,
+      stack,
+      operation: 'playback',
+    );
+    if (mounted) {
+      setState(() {
+        _ready = false;
+        _failed = true;
+      });
+    }
+  }
+
+  Future<void> _guard(Future<void>? action) async {
+    try {
+      await action;
+    } catch (error, stack) {
+      _playbackFailed(error, stack);
+    }
   }
 
   void _onPlayerChanged() {
     final player = _player;
     if (player == null || !mounted) return;
     final value = player.value;
+    if (value.hasError && !_failed) {
+      _playbackFailed(
+        StateError(value.errorDescription ?? 'playback_failed'),
+        null,
+      );
+      return;
+    }
     final next = value.position.inMilliseconds;
     if (_pendingScrubMs == null && (next - _positionMs).abs() >= 40) {
       setState(() => _positionMs = next);
     }
     if (_boundedPlayback && !_wrapping && value.isPlaying && next >= _endMs) {
-      unawaited(_handleRangeEnd(player));
+      unawaited(_guard(_handleRangeEnd(player)));
     }
   }
 
@@ -195,7 +236,7 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
     setState(() => _positionMs = target);
     _pendingScrubMs = target;
     if (_scrubTimer != null) return;
-    unawaited(_seek(target));
+    unawaited(_guard(_seek(target)));
     _scrubTimer = Timer(const Duration(milliseconds: 120), () {
       _scrubTimer = null;
       final pending = _pendingScrubMs;
@@ -207,7 +248,7 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
     _scrubTimer?.cancel();
     _scrubTimer = null;
     _pendingScrubMs = null;
-    unawaited(_seek(position));
+    unawaited(_guard(_seek(position)));
   }
 
   Future<void> _pauseForEditing() async {
@@ -272,7 +313,7 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
   }
 
   void _onTimelineRangeChanged(ClipRangeHandle handle, int startMs, int endMs) {
-    if (_player?.value.isPlaying == true) unawaited(_pauseForEditing());
+    if (_player?.value.isPlaying == true) unawaited(_guard(_pauseForEditing()));
     _setRange(startMs, endMs, expandWindow: false);
     _scrubTo(handle == ClipRangeHandle.start ? startMs : endMs);
   }
@@ -346,7 +387,7 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
       widget.defaultStartMs ?? widget.startMs,
       widget.defaultEndMs ?? widget.endMs,
     );
-    unawaited(_seek(_startMs));
+    unawaited(_guard(_seek(_startMs)));
   }
 
   @override
@@ -397,7 +438,7 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
                 Text(context.bheText(widget.description!), style: labelStyle),
               const SizedBox(height: 8),
               GestureDetector(
-                onTap: () => unawaited(_togglePlayback()),
+                onTap: () => unawaited(_guard(_togglePlayback())),
                 child: AspectRatio(
                   aspectRatio: widget.aspectRatio,
                   child: ClipRRect(
@@ -429,20 +470,28 @@ class _ClipRangeEditorState extends State<ClipRangeEditor> {
                 ),
               ),
               const SizedBox(height: 6),
+              if (_failed &&
+                  widget.onFeedback != null &&
+                  _diagnosticFailure != null)
+                TextButton(
+                  onPressed: () => widget.onFeedback!(_diagnosticFailure!),
+                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                  child: Text(context.bheText('反馈')),
+                ),
               Row(
                 children: [
                   IconButton(
                     key: const Key('clip-range-play'),
                     tooltip: context.bheText(playing ? '暂停' : '播放片段'),
                     onPressed: _ready
-                        ? () => unawaited(_togglePlayback())
+                        ? () => unawaited(_guard(_togglePlayback()))
                         : null,
                     icon: Icon(playing ? LucideIcons.pause : LucideIcons.play),
                   ),
                   TextButton.icon(
                     key: const Key('clip-range-preview-ending'),
                     onPressed: _ready
-                        ? () => unawaited(_previewEnding())
+                        ? () => unawaited(_guard(_previewEnding()))
                         : null,
                     icon: const Icon(LucideIcons.skipForward, size: 16),
                     label: Text(context.bheText('预览结尾')),

@@ -59,7 +59,7 @@ void main() {
               await tester.pump();
               expect(tester.takeException(), isNull);
               final buttons = find.byType(TextButton);
-              expect(buttons, findsNWidgets(failure.canRelink ? 2 : 1));
+              expect(buttons, findsNWidgets(failure.canRelink ? 3 : 2));
               for (final button in buttons.evaluate()) {
                 expect(
                   tester.getSize(find.byWidget(button.widget)).height,
@@ -74,8 +74,14 @@ void main() {
                   );
                 }
               }
-              if (failure.canRelink) await tester.tap(buttons.first);
-              await tester.tap(buttons.last);
+              expect(
+                find.byKey(const ValueKey('roi-feedback')),
+                findsOneWidget,
+              );
+              if (failure.canRelink) {
+                await tester.tap(find.byKey(const ValueKey('roi-relink')));
+              }
+              await tester.tap(find.byKey(const ValueKey('roi-back')));
             }
             expect(recovered, isTrue);
             expect(returned, isTrue);

@@ -1,5 +1,7 @@
 package com.bhe.bhe_mobile
 
+import com.bhe.bhe_mobile.diagnostics.AppDiagnostics
+import com.bhe.bhe_mobile.diagnostics.NativeFailureDetails
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.media.MediaExtractor
@@ -120,25 +122,31 @@ class MainActivity : FlutterActivity() {
 
     /// 交给系统安装器；没有「安装未知应用」权限时先打开设置页让用户允许。
     private fun installApk(call: MethodCall, result: MethodChannel.Result) {
-        val path = call.argument<String>("path")
-        if (path.isNullOrEmpty() || !File(path).isFile) {
-            result.error("UPDATE_FILE_MISSING", "安装包不存在", null)
-            return
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+        try {
+            AppDiagnostics.event("update.install")
+            val path = call.argument<String>("path")
+            if (path.isNullOrEmpty() || !File(path).isFile) {
+                result.error("UPDATE_FILE_MISSING", "安装包不存在", null)
+                return
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+                )
+                result.success("permission_required")
+                return
+            }
+            val uri = FileProvider.getUriForFile(this, "$packageName.update_provider", File(path))
             startActivity(
-                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+                Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             )
-            result.success("permission_required")
-            return
+            result.success("started")
+        } catch (error: Exception) {
+            AppDiagnostics.event("update.install.failed", error = error)
+            result.error("UPDATE_INSTALL_FAILED", error.message, NativeFailureDetails.from(error))
         }
-        val uri = FileProvider.getUriForFile(this, "$packageName.update_provider", File(path))
-        startActivity(
-            Intent(Intent.ACTION_VIEW)
-                .setDataAndType(uri, "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-        result.success("started")
     }
 
     private fun getAnalysisState(result: MethodChannel.Result) {
@@ -313,6 +321,7 @@ class MainActivity : FlutterActivity() {
                     )
                 }
             } catch (error: Exception) {
+                AppDiagnostics.event("roi.failed", error = error)
                 Log.w(tag, "automatic ROI suggestion failed", error)
                 mainHandler.post { result.error("AUTO_ROI_FAILED", error.message ?: "自动识别篮筐失败", null) }
             } finally {
@@ -487,6 +496,7 @@ class MainActivity : FlutterActivity() {
                     partial.renameTo(File(outputPath))
                 }
             } catch (error: Exception) {
+                AppDiagnostics.event("cover.failed", error = error)
                 Log.w("BHE-Cover", "cover extraction failed", error)
                 false
             } finally {
@@ -629,7 +639,10 @@ class MainActivity : FlutterActivity() {
                 extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.let { ExportSourceTrack(index, it) }
             },
             addTrack = { index -> muxer.addTrack(extractor.getTrackFormat(index)) },
-            onSkipped = { track, error -> Log.w("BHE-Export", "skipping audio track ${track.index}: ${track.mime}", error) },
+            onSkipped = { track, error ->
+                Log.w("BHE-Export", "skipping audio track ${track.index}: ${track.mime}", error)
+                AppDiagnostics.event("export.audio.skipped", mapOf("track" to track.index, "mime" to track.mime), error)
+            },
         )
 
     private fun applySourceOrientation(extractor: MediaExtractor, muxer: MediaMuxer) {
@@ -648,6 +661,7 @@ class MainActivity : FlutterActivity() {
     )
 
     private fun exportClip(call: MethodCall, result: MethodChannel.Result) {
+        AppDiagnostics.event("export.start", mapOf("operation" to "exportClip"))
         val exportId = call.argument<String>("exportId") ?: outputPathId(call)
         val inputPath = call.argument<String>("inputPath")
         val outputPath = call.argument<String>("outputPath")
@@ -708,13 +722,16 @@ class MainActivity : FlutterActivity() {
                     currentMuxer.stop()
                     muxerStarted = false
                 }
+                AppDiagnostics.event("export.completed")
                 mainHandler.post { result.success(exportResult(outputPath, selection)) }
             } catch (_: InterruptedException) {
                 File(outputPath).delete()
+                AppDiagnostics.event("export.cancelled")
                 mainHandler.post { result.error("EXPORT_CANCELLED", "导出已取消", null) }
             } catch (error: Exception) {
                 File(outputPath).delete()
-                mainHandler.post { result.error("EXPORT_FAILED", error.message, null) }
+                AppDiagnostics.event("export.failed", error = error)
+                mainHandler.post { result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error)) }
             } finally {
                 if (muxerStarted) {
                     try {
@@ -730,6 +747,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun mergeClips(call: MethodCall, result: MethodChannel.Result) {
+        AppDiagnostics.event("export.start", mapOf("operation" to "mergeClips"))
         val exportId = call.argument<String>("exportId") ?: "merge-${System.nanoTime()}"
         val inputPath = call.argument<String>("inputPath")
         val outputPath = call.argument<String>("outputPath")
@@ -818,13 +836,16 @@ class MainActivity : FlutterActivity() {
                 }
                 currentMuxer.stop()
                 muxerStarted = false
+                AppDiagnostics.event("export.completed")
                 mainHandler.post { result.success(exportResult(outputPath, selection)) }
             } catch (_: InterruptedException) {
                 File(outputPath).delete()
+                AppDiagnostics.event("export.cancelled")
                 mainHandler.post { result.error("EXPORT_CANCELLED", "合并导出已取消", null) }
             } catch (error: Exception) {
                 File(outputPath).delete()
-                mainHandler.post { result.error("EXPORT_FAILED", error.message, null) }
+                AppDiagnostics.event("export.failed", error = error)
+                mainHandler.post { result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error)) }
             } finally {
                 if (muxerStarted) {
                     try {
@@ -885,7 +906,8 @@ class MainActivity : FlutterActivity() {
                 }
                 mainHandler.post { result.success(null) }
             } catch (error: Exception) {
-                mainHandler.post { result.error("PHOTO_SAVE_FAILED", error.message, null) }
+                AppDiagnostics.event("export.save.failed", error = error)
+                mainHandler.post { result.error("PHOTO_SAVE_FAILED", error.message, NativeFailureDetails.from(error)) }
             }
         }.start()
     }

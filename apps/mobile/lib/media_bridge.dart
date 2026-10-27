@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:bhe_core/bhe_core.dart';
 import 'package:flutter/services.dart';
 
+import 'features/diagnostics/friendly_error.dart';
+import 'features/diagnostics/mobile_diagnostics.dart';
 import 'features/export/native_export_result.dart';
 
 String clipFileName(int index, Candidate candidate) {
@@ -28,6 +30,13 @@ class NativeMediaExportEngine implements MobileExportEngine {
       final result = await _channel.invokeMethod<bool>('isAvailable');
       return result ?? false;
     } on MissingPluginException {
+      return false;
+    } on PlatformException catch (error, stack) {
+      MobileDiagnostics.instance.error(
+        error,
+        stack,
+        operation: 'export.availability',
+      );
       return false;
     }
   }
@@ -73,9 +82,10 @@ class NativeMediaExportEngine implements MobileExportEngine {
       } on MissingPluginException {
         failed = true;
         throw const MobileExportException('当前平台尚未注册视频导出模块。');
-      } on PlatformException catch (error) {
+      } on PlatformException catch (error, stack) {
+        MobileDiagnostics.instance.error(error, stack, operation: 'export');
         failed = true;
-        throw MobileExportException(error.message ?? error.code);
+        throw MobileDiagnosticException(error, 'export');
       }
     }
 
@@ -132,8 +142,9 @@ class NativeMediaExportEngine implements MobileExportEngine {
       );
     } on MissingPluginException {
       throw const MobileExportException('当前平台尚未注册合并导出模块。');
-    } on PlatformException catch (error) {
-      throw MobileExportException(error.message ?? error.code);
+    } on PlatformException catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'export');
+      throw MobileDiagnosticException(error, 'export');
     }
   }
 
@@ -144,8 +155,9 @@ class NativeMediaExportEngine implements MobileExportEngine {
       await _channel.invokeMethod<void>('cancelExport');
     } on MissingPluginException {
       return;
-    } on PlatformException catch (error) {
-      throw MobileExportException(error.message ?? error.code);
+    } on PlatformException catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'export');
+      throw MobileDiagnosticException(error, 'export');
     }
   }
 
@@ -155,8 +167,9 @@ class NativeMediaExportEngine implements MobileExportEngine {
       await _channel.invokeMethod<void>('saveToLibrary', {'path': path});
     } on MissingPluginException {
       throw const MobileExportException('当前平台尚未注册相册保存模块。');
-    } on PlatformException catch (error) {
-      throw MobileExportException(error.message ?? error.code);
+    } on PlatformException catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'export');
+      throw MobileDiagnosticException(error, 'export');
     }
   }
 }

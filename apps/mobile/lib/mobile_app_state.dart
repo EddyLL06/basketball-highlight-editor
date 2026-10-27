@@ -18,9 +18,11 @@ import 'features/video_source/project_file_commit.dart';
 import 'features/video_source/video_source_store.dart';
 import 'features/video_source/video_source_failure.dart';
 import 'media_bridge.dart';
+import 'features/diagnostics/diagnostic_state.dart';
+import 'features/diagnostics/mobile_diagnostics.dart';
 import 'native_analysis_engine.dart';
 
-class MobileAppState extends ChangeNotifier {
+class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   MobileAppState({
     MobileAnalysisEngine? analysisEngine,
     VideoSourceStore? videoSourceStore,
@@ -62,6 +64,7 @@ class MobileAppState extends ChangeNotifier {
   int? processedFrames;
   int? totalFrames;
   Duration? eta;
+  @override
   String? errorMessage;
   VideoSourceFailure? videoSourceFailure;
   int videoSourceRevision = 0;
@@ -72,20 +75,35 @@ class MobileAppState extends ChangeNotifier {
   int _relinkSerial = 0;
   bool _disposed = false;
 
-  void markVideoFailure(VideoSourceFailure failure) {
+  void markVideoFailure(
+    VideoSourceFailure failure, {
+    DiagnosticErrorRecord? diagnostic,
+  }) {
     if (_disposed) return;
     videoSourceFailure = failure;
     errorMessage = failure.message;
+    diagnosticError =
+        diagnostic ??
+        MobileDiagnostics.instance.error(
+          StateError(failure.message),
+          null,
+          operation: 'video.source',
+        );
     notifyListeners();
   }
 
-  void _recordVideoFailure(Object error, String? path) {
+  void _recordVideoFailure(Object error, String? path, [StackTrace? stack]) {
     markVideoFailure(
       error is VideoSourceMismatch
           ? VideoSourceFailure.mismatch
           : path != null && !File(path).existsSync()
           ? VideoSourceFailure.missing
           : VideoSourceFailure.unplayable,
+      diagnostic: MobileDiagnostics.instance.error(
+        error,
+        stack,
+        operation: 'video.source',
+      ),
     );
   }
 
@@ -331,12 +349,14 @@ class MobileAppState extends ChangeNotifier {
       await _inspectVideo(File(expected.path), expected: expected);
       if (project.video == expected && (applyResult?.call() ?? true)) {
         videoSourceFailure = null;
+        diagnosticError = null;
         errorMessage = null;
       }
       return true;
-    } on Object catch (error) {
+    } on Object catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'project');
       if (project.video == expected && (applyResult?.call() ?? true)) {
-        _recordVideoFailure(error, expected.path);
+        _recordVideoFailure(error, expected.path, stack);
       }
       return false;
     }
@@ -362,13 +382,15 @@ class MobileAppState extends ChangeNotifier {
       await _storeVideo(source, snapshot, generation);
       if (_isCurrentVideoPreparation(generation, snapshot.id)) {
         videoSourceFailure = null;
+        diagnosticError = null;
         errorMessage = null;
       }
     } on VideoSourceCancelled {
       return;
-    } on Object catch (error) {
+    } on Object catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'project');
       if (_isCurrentVideoPreparation(generation, snapshot.id)) {
-        _recordVideoFailure(error, video.path);
+        _recordVideoFailure(error, video.path, stack);
       }
     }
   }
@@ -395,6 +417,11 @@ class MobileAppState extends ChangeNotifier {
               const ProjectPackageCodec().decode(await file.readAsString()),
             );
           } on Object catch (error, stack) {
+            MobileDiagnostics.instance.error(
+              error,
+              stack,
+              operation: 'project',
+            );
             developer.log(
               'skipping invalid project $id: $error',
               name: 'BHE-Project',
@@ -418,8 +445,8 @@ class MobileAppState extends ChangeNotifier {
       if (project.lastAnalysisStatus == 'running') {
         unawaited(_recoverRunningAnalysis());
       }
-    } on Object catch (error) {
-      errorMessage = '读取本地项目失败：$error';
+    } on Object catch (error, stack) {
+      recordDiagnosticFailure(error, stack, operation: 'project.load');
     } finally {
       loading = false;
       notifyListeners();
@@ -431,6 +458,9 @@ class MobileAppState extends ChangeNotifier {
     try {
       await for (final update in analysisEngine.recoverAnalysis()) {
         receivedState = true;
+        if (stage != update.stage) {
+          MobileDiagnostics.instance.event('analysis.${update.stage.name}');
+        }
         stage = update.stage;
         progress = update.progress.clamp(0, 1);
         progressMessage = update.message;
@@ -455,11 +485,19 @@ class MobileAppState extends ChangeNotifier {
           unawaited(_updateCover(project));
         } else if (update.stage == AnalysisStage.cancelled ||
             update.stage == AnalysisStage.failed) {
+          if (update.stage == AnalysisStage.failed) {
+            recordDiagnosticFailure(
+              MobileAnalysisException(update.message),
+              null,
+              operation: 'analysis.recover',
+            );
+            progressMessage = errorMessage ?? '';
+          }
           project = project.copyWith(
             lastAnalysisStatus: update.stage == AnalysisStage.cancelled
                 ? 'cancelled'
                 : 'failed',
-            lastAnalysisMessage: update.message,
+            lastAnalysisMessage: errorMessage ?? update.message,
           );
           analysing = false;
           analysisStartedAt = null;
@@ -482,10 +520,11 @@ class MobileAppState extends ChangeNotifier {
         await _queueSave();
         notifyListeners();
       }
-    } on Object catch (error) {
+    } on Object catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'project');
       project = project.copyWith(
         lastAnalysisStatus: 'interrupted',
-        lastAnalysisMessage: '无法恢复原生分析任务：$error',
+        lastAnalysisMessage: '出错了：视频分析未完成，请重试。',
       );
       analysing = false;
       analysisStartedAt = null;
@@ -524,10 +563,15 @@ class MobileAppState extends ChangeNotifier {
     if (!await file.exists()) return;
     project = const ProjectPackageCodec().decode(await file.readAsString());
     _resetTransientState();
+    diagnosticError = null;
     errorMessage = null;
     exportedPaths = const [];
     exportAudioSkipped = false;
     await _validateImportedVideoIfPresent();
+    MobileDiagnostics.instance.event(
+      'project.open',
+      available: sourceVideoExists,
+    );
     recentProjects = [
       project,
       ...recentProjects.where((item) => item.id != project.id),
@@ -602,6 +646,7 @@ class MobileAppState extends ChangeNotifier {
     videoSourceFailure = null;
     preparingVideo = true;
     preparingVideoMessage = '正在读取视频信息';
+    diagnosticError = null;
     errorMessage = null;
     notifyListeners();
     try {
@@ -616,6 +661,7 @@ class MobileAppState extends ChangeNotifier {
         name: name,
       );
       if (!_isCurrentVideoPreparation(preparationGeneration, projectId)) return;
+      diagnosticError = null;
       errorMessage = null;
       preparingVideoMessage = '正在识别篮筐区域';
       notifyListeners();
@@ -660,6 +706,7 @@ class MobileAppState extends ChangeNotifier {
           await _queueSave();
         }
       } on Object catch (error, stack) {
+        MobileDiagnostics.instance.error(error, stack, operation: 'project');
         developer.log(
           'automatic ROI suggestion failed: $error',
           name: 'BHE-Project',
@@ -670,6 +717,7 @@ class MobileAppState extends ChangeNotifier {
     } on VideoSourceCancelled {
       return;
     } on Object catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'project');
       developer.log(
         'video preparation failed: $error',
         name: 'BHE-Project',
@@ -704,6 +752,7 @@ class MobileAppState extends ChangeNotifier {
 
   void _resetTransientState() {
     videoSourceFailure = null;
+    diagnosticError = null;
     errorMessage = null;
     stage = AnalysisStage.idle;
     progress = 0;
@@ -744,12 +793,13 @@ class MobileAppState extends ChangeNotifier {
       );
       project = imported;
       _resetTransientState();
+      diagnosticError = null;
       errorMessage = null;
       await _validateImportedVideoIfPresent();
       await _queueSave();
       notifyListeners();
-    } on Object catch (error) {
-      errorMessage = '项目包无法打开：$error';
+    } on Object catch (error, stack) {
+      recordDiagnosticFailure(error, stack, operation: 'project.import');
       notifyListeners();
     }
   }
@@ -786,10 +836,12 @@ class MobileAppState extends ChangeNotifier {
       );
       if (!current()) return;
       videoSourceFailure = null;
+      diagnosticError = null;
       errorMessage = null;
     } on VideoSourceCancelled {
       // Switching project, cancelling, or closing never changes the new page.
-    } on Object catch (error) {
+    } on Object catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'project');
       if (current()) _recordVideoFailure(error, path);
     } finally {
       if (!_disposed && operation == _relinkSerial) {
@@ -835,6 +887,7 @@ class MobileAppState extends ChangeNotifier {
     await _saveChain;
     final deletedId = project.id;
     stage = AnalysisStage.idle;
+    diagnosticError = null;
     errorMessage = null;
     _resetTransientState();
     final file = await _projectFile(deletedId);
@@ -961,7 +1014,8 @@ class MobileAppState extends ChangeNotifier {
           ),
       ];
       notifyListeners();
-    } on Object catch (error) {
+    } on Object catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'project');
       developer.log('player groups unreadable: $error', name: 'BHE-Project');
     }
   }
@@ -1004,22 +1058,27 @@ class MobileAppState extends ChangeNotifier {
   }
 
   Future<void> exportProjectPackage() async {
-    final staging = Directory(
-      await _projectPath(project.id, area: 'package_staging'),
-    );
-    if (await staging.exists()) await staging.delete(recursive: true);
-    await staging.create(recursive: true);
-    final projectJson = File('${staging.path}/project.json');
-    await projectJson.writeAsString(
-      const ProjectPackageCodec().encode(project),
-    );
-    final file = File(await _projectPath(project.id, suffix: '.bhe'));
-    final encoder = ZipFileEncoder()
-      ..create(file.path, level: ZipFileEncoder.store);
-    encoder.addFileSync(projectJson, 'project.json');
-    encoder.closeSync();
-    await staging.delete(recursive: true);
-    await SharePlus.instance.share(ShareParams(files: [XFile(file.path)]));
+    try {
+      final staging = Directory(
+        await _projectPath(project.id, area: 'package_staging'),
+      );
+      if (await staging.exists()) await staging.delete(recursive: true);
+      await staging.create(recursive: true);
+      final projectJson = File('${staging.path}/project.json');
+      await projectJson.writeAsString(
+        const ProjectPackageCodec().encode(project),
+      );
+      final file = File(await _projectPath(project.id, suffix: '.bhe'));
+      final encoder = ZipFileEncoder()
+        ..create(file.path, level: ZipFileEncoder.store);
+      encoder.addFileSync(projectJson, 'project.json');
+      encoder.closeSync();
+      await staging.delete(recursive: true);
+      await SharePlus.instance.share(ShareParams(files: [XFile(file.path)]));
+    } on Object catch (error, stack) {
+      recordDiagnosticFailure(error, stack, operation: 'export');
+      notifyListeners();
+    }
   }
 
   Future<void> exportClips() async {
@@ -1049,10 +1108,12 @@ class MobileAppState extends ChangeNotifier {
       return;
     }
     exporting = true;
+    MobileDiagnostics.instance.event('export.start');
     exportCancelled = false;
     exportedPaths = const [];
     exportAudioSkipped = false;
     final stopwatch = Stopwatch()..start();
+    diagnosticError = null;
     errorMessage = null;
     try {
       await for (final update in exportEngine.exportClips(
@@ -1072,8 +1133,9 @@ class MobileAppState extends ChangeNotifier {
         lastExportDurationMs: stopwatch.elapsedMilliseconds,
       );
       await _queueSave();
-    } on Object catch (error) {
-      errorMessage = error.toString();
+      MobileDiagnostics.instance.event('operation.completed');
+    } on Object catch (error, stack) {
+      recordDiagnosticFailure(error, stack, operation: 'export');
       notifyListeners();
     } finally {
       stopwatch.stop();
@@ -1103,10 +1165,12 @@ class MobileAppState extends ChangeNotifier {
       return;
     }
     exporting = true;
+    MobileDiagnostics.instance.event('export.start');
     exportCancelled = false;
     exportedPaths = const [];
     exportAudioSkipped = false;
     final stopwatch = Stopwatch()..start();
+    diagnosticError = null;
     errorMessage = null;
     try {
       final outputPath =
@@ -1128,8 +1192,9 @@ class MobileAppState extends ChangeNotifier {
         lastExportDurationMs: stopwatch.elapsedMilliseconds,
       );
       await _queueSave();
-    } on Object catch (error) {
-      errorMessage = error.toString();
+      MobileDiagnostics.instance.event('operation.completed');
+    } on Object catch (error, stack) {
+      recordDiagnosticFailure(error, stack, operation: 'export');
       notifyListeners();
     } finally {
       stopwatch.stop();
@@ -1144,22 +1209,28 @@ class MobileAppState extends ChangeNotifier {
     try {
       await exportEngine.cancel();
       progressMessage = '导出已取消';
-    } on Object catch (error) {
-      errorMessage = error.toString();
+    } on Object catch (error, stack) {
+      recordDiagnosticFailure(error, stack, operation: 'export');
     }
     notifyListeners();
   }
 
   Future<void> shareExportedFiles() async {
     if (exportedPaths.isEmpty) return;
-    await SharePlus.instance.share(
-      ShareParams(files: exportedPaths.map(XFile.new).toList()),
-    );
+    try {
+      await SharePlus.instance.share(
+        ShareParams(files: exportedPaths.map(XFile.new).toList()),
+      );
+    } on Object catch (error, stack) {
+      recordDiagnosticFailure(error, stack, operation: 'export');
+      notifyListeners();
+    }
   }
 
   Future<void> saveExportedFiles() async {
     if (exportedPaths.isEmpty) return;
     exporting = true;
+    diagnosticError = null;
     errorMessage = null;
     try {
       for (var index = 0; index < exportedPaths.length; index++) {
@@ -1170,8 +1241,8 @@ class MobileAppState extends ChangeNotifier {
       }
       progress = 1;
       progressMessage = '已保存 ${exportedPaths.length} 个片段到相册';
-    } on Object catch (error) {
-      errorMessage = error.toString();
+    } on Object catch (error, stack) {
+      recordDiagnosticFailure(error, stack, operation: 'export');
     } finally {
       exporting = false;
       notifyListeners();
@@ -1189,6 +1260,7 @@ class MobileAppState extends ChangeNotifier {
     progress = 0.01;
     progressMessage = '正在检查视频';
     analysing = true;
+    diagnosticError = null;
     errorMessage = null;
     final stopwatch = Stopwatch()..start();
     final generation = ++_analysisGeneration;
@@ -1231,6 +1303,9 @@ class MobileAppState extends ChangeNotifier {
         settings: project.settings,
       )) {
         if (generation != _analysisGeneration) break;
+        if (stage != update.stage) {
+          MobileDiagnostics.instance.event('analysis.${update.stage.name}');
+        }
         stage = update.stage;
         progress = update.progress.clamp(0, 1);
         progressMessage = update.message;
@@ -1258,10 +1333,20 @@ class MobileAppState extends ChangeNotifier {
       );
       await _queueSave();
       unawaited(_updateCover(project));
-    } on Object catch (error) {
+    } on Object catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'project');
       if (generation != _analysisGeneration) return;
       stage = AnalysisStage.failed;
-      errorMessage = videoSourceFailure?.message ?? error.toString();
+      if (videoSourceFailure == null) {
+        recordDiagnosticFailure(error, stack, operation: 'analysis');
+      } else {
+        diagnosticError = MobileDiagnostics.instance.error(
+          error,
+          stack,
+          operation: 'analysis',
+        );
+        errorMessage = videoSourceFailure!.message;
+      }
       project = project.copyWith(
         lastAnalysisStatus: 'failed',
         lastAnalysisMessage: errorMessage,
@@ -1280,14 +1365,25 @@ class MobileAppState extends ChangeNotifier {
 
   Future<void> cancelAnalysis() async {
     if (!analysing) return;
-    final generation = ++_analysisGeneration;
+    final generation = _analysisGeneration;
     final projectId = project.id;
-    await analysisEngine.cancel();
+    try {
+      await analysisEngine.cancel();
+    } on Object catch (error, stack) {
+      if (generation == _analysisGeneration &&
+          project.id == projectId &&
+          !_disposed) {
+        recordDiagnosticFailure(error, stack, operation: 'analysis');
+        notifyListeners();
+      }
+      return;
+    }
     if (generation != _analysisGeneration ||
         project.id != projectId ||
         _disposed) {
       return;
     }
+    _analysisGeneration++;
     analysing = false;
     analysisStartedAt = null;
     stage = AnalysisStage.cancelled;

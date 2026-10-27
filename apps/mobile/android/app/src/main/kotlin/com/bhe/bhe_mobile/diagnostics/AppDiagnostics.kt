@@ -49,7 +49,7 @@ object AppDiagnostics {
     fun event(event: String, fields: Map<String, Any?> = emptyMap(), error: Throwable? = null) {
         try {
             val safe = NativeDiagnosticEvent.format(event, fields, error)
-            append(safe, if (error == null) null else "native:${safe.hashCode()}")
+            append(if (event == "app.error.native") "app error: $safe" else safe, if (error == null) null else "native:${safe.hashCode()}")
         } catch (_: Exception) { }
     }
 

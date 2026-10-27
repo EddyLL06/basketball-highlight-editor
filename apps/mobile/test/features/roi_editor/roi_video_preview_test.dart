@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:bhe_mobile/features/roi_editor/roi_video_preview.dart';
 import 'package:bhe_mobile/features/video_source/video_source_failure.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 
@@ -44,6 +45,7 @@ void main() {
       platform.failInitialize = true;
       await preview.open(await source(), 0);
       expect(preview.failure, VideoSourceFailure.unplayable);
+      expect(preview.diagnosticError?.error, isA<PlatformException>());
       expect(preview.controller, isNull);
       expect(platform.disposed, [0]);
     },

@@ -79,6 +79,9 @@ extension BheBuildContextText on BuildContext {
 }
 
 String? _translateDynamic(String source) {
+  final mobileFormat = RegExp(r'^这个视频的格式（(.+)）手机无法处理。$').firstMatch(source);
+  if (mobileFormat != null) return 'This phone cannot process this video format (${mobileFormat.group(1)}).';
+
   final mergedOverlap = RegExp(r'^有 (\d+) 个重叠片段已合并为一段$').firstMatch(source);
   if (mergedOverlap != null) {
     return '${mergedOverlap.group(1)} overlapping clips merged into continuous segments';
@@ -381,6 +384,42 @@ String _englishDuration(String value) => value
 const _englishText = <String, String>{
   '已调整': 'Edited',
   '重叠': 'Overlap',
+  '诊断信息暂时不可用。': 'Diagnostics are temporarily unavailable.',
+  '反馈与诊断': 'Feedback and diagnostics',
+  '遇到问题时，把下面的信息发给我们。已隐藏你的用户名和文件路径。': 'If you encounter a problem, send us the information below. Your username and file paths have been hidden.',
+  '已复制': 'Copied',
+  '在 GitHub 反馈': 'Report on GitHub',
+  '反馈': 'Feedback',
+  'BHE 诊断信息': 'BHE diagnostics',
+  'App 版本': 'App version',
+  '安卓版本': 'Android version',
+  'SDK': 'SDK',
+  '厂商': 'Manufacturer',
+  '手机型号': 'Device model',
+  'CPU 架构': 'CPU architecture',
+  '总内存': 'Total memory',
+  '可用内存': 'Available memory',
+  '可用存储': 'Available storage',
+  '屏幕尺寸': 'Screen size',
+  '语言': 'Language',
+  '未知': 'Unknown',
+  '当前错误': 'Current error',
+  '最近的运行日志': 'Recent logs',
+  '没有找到运行日志': 'No logs found',
+  '运行日志暂不可用': 'Logs are temporarily unavailable',
+  '复制失败，请重试。': 'Could not copy. Please try again.',
+  '无法打开反馈入口，请先复制诊断信息。': 'Could not open the feedback destination. Please copy the diagnostics first.',
+  '手机存储空间不足，请清理后重试。': 'Your phone is running out of storage. Free up space and try again.',
+  '没有读取这个文件的权限，请重新选择。': 'There is no permission to read this file. Please choose it again.',
+  '更新安装包找不到了，请重新下载。': 'The update package is missing. Please download it again.',
+  '文件找不到了，请重新选择。': 'The file is missing. Please choose it again.',
+  '设置无效，请检查视频范围后重试。': 'The settings are invalid. Check the video range and try again.',
+  '这个视频的格式手机无法处理。': 'This phone cannot process this video format.',
+  '出错了：视频分析未完成，请重试。': 'Something went wrong: video analysis did not finish. Please try again.',
+  '出错了：视频导出未完成，请重试。': 'Something went wrong: video export did not finish. Please try again.',
+  '出错了：更新操作未完成，请重试。': 'Something went wrong: the update did not finish. Please try again.',
+  '出错了：操作未完成，请重试。': 'Something went wrong: the operation did not finish. Please try again.',
+
   '检查分析引擎': 'Checking analysis engine',
   '引擎自检': 'Engine check',
   '分析引擎在这台电脑上无法启动（运行库初始化失败）。请先安装最新的 VC++ 运行库后重启电脑，仍然不行请把 CPU 型号和诊断信息发给我们。':

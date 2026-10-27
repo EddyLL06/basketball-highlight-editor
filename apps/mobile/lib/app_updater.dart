@@ -6,6 +6,9 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'features/diagnostics/friendly_error.dart';
+import 'features/diagnostics/mobile_diagnostics.dart';
+
 /// 打包时由 `--dart-define=BHE_VERSION=<版本>` 注入，本地开发是 dev，不自动检查。
 const mobileAppVersion = String.fromEnvironment(
   'BHE_VERSION',
@@ -46,6 +49,7 @@ class AppUpdater extends ChangeNotifier {
   int received = 0;
   File? file;
   String? error;
+  DiagnosticErrorRecord? diagnosticError;
   HttpClient? _downloadClient;
   bool _cancelled = false;
 
@@ -63,6 +67,8 @@ class AppUpdater extends ChangeNotifier {
       return;
     }
     manifest = null;
+    diagnosticError = null;
+    MobileDiagnostics.instance.event('update.check');
     _set(UpdateStatus.checking);
     try {
       final latest = await _fetch();
@@ -79,8 +85,16 @@ class AppUpdater extends ChangeNotifier {
             ? UpdateStatus.available
             : UpdateStatus.upToDate,
       );
-    } catch (e) {
-      _set(UpdateStatus.failed, error: e.toString());
+    } catch (e, stack) {
+      diagnosticError = MobileDiagnostics.instance.error(
+        e,
+        stack,
+        operation: 'update.check',
+      );
+      _set(
+        UpdateStatus.failed,
+        error: friendlyMobileError(e, operation: 'update.check').message,
+      );
     }
   }
 
@@ -128,10 +142,23 @@ class AppUpdater extends ChangeNotifier {
       );
       received = target.size;
       _set(UpdateStatus.ready);
-    } catch (e) {
+    } catch (e, stack) {
+      if (!_cancelled) {
+        diagnosticError = MobileDiagnostics.instance.error(
+          e,
+          stack,
+          operation: 'update.download',
+        );
+      }
       _cancelled
           ? _set(UpdateStatus.available)
-          : _set(UpdateStatus.failed, error: e.toString());
+          : _set(
+              UpdateStatus.failed,
+              error: friendlyMobileError(
+                e,
+                operation: 'update.download',
+              ).message,
+            );
     } finally {
       _downloadClient = null;
     }
@@ -146,9 +173,23 @@ class AppUpdater extends ChangeNotifier {
   Future<bool> install() async {
     final path = file?.path;
     if (path == null) return false;
-    final result = await _channel.invokeMethod<String>('installApk', {
-      'path': path,
-    });
-    return result == 'started';
+    try {
+      MobileDiagnostics.instance.event('update.install');
+      final result = await _channel.invokeMethod<String>('installApk', {
+        'path': path,
+      });
+      return result == 'started';
+    } catch (error, stack) {
+      diagnosticError = MobileDiagnostics.instance.error(
+        error,
+        stack,
+        operation: 'update.install',
+      );
+      _set(
+        UpdateStatus.failed,
+        error: friendlyMobileError(error, operation: 'update.install').message,
+      );
+      return false;
+    }
   }
 }

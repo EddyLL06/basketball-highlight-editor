@@ -80,54 +80,69 @@ class VideoSourceNotice extends StatelessWidget {
           key: const ValueKey('video-source-notice'),
           message: context.bheText(state.errorMessage ?? '正在重新选择视频'),
           error: true,
-          action: !state.canRelinkVideo && !busy
-              ? null
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextButton(
-                      key: const ValueKey('video-relink'),
-                      onPressed: busy || state.preparingVideo || state.exporting
-                          ? null
-                          : () => unawaited(state.relinkVideo()),
-                      style: actionStyle,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (busy) ...[
-                            const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-                          Flexible(
-                            child: Text(
-                              context.bheText(
-                                state.relinkCancelling
-                                    ? '正在取消'
-                                    : busy
-                                    ? '正在重新选择视频'
-                                    : '重新选择视频',
-                              ),
-                            ),
+          action: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (state.canRelinkVideo || busy)
+                TextButton(
+                  key: const ValueKey('video-relink'),
+                  onPressed: busy || state.preparingVideo || state.exporting
+                      ? null
+                      : () => unawaited(state.relinkVideo()),
+                  style: actionStyle,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (busy) ...[
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Flexible(
+                        child: Text(
+                          context.bheText(
+                            state.relinkCancelling
+                                ? '正在取消'
+                                : busy
+                                ? '正在重新选择视频'
+                                : '重新选择视频',
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                    if (busy)
-                      TextButton(
-                        key: const ValueKey('video-relink-cancel'),
-                        onPressed: state.relinkCancelling
-                            ? null
-                            : state.cancelVideoRelink,
-                        style: actionStyle,
-                        child: Text(context.bheText('取消')),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
+              if (busy)
+                TextButton(
+                  key: const ValueKey('video-relink-cancel'),
+                  onPressed: state.relinkCancelling
+                      ? null
+                      : state.cancelVideoRelink,
+                  style: actionStyle,
+                  child: Text(context.bheText('取消')),
+                ),
+              if (state.errorMessage != null)
+                TextButton(
+                  key: const ValueKey('video-feedback'),
+                  onPressed: () => showMobileDiagnostics(
+                    context,
+                    error:
+                        state.diagnosticError ??
+                        DiagnosticErrorRecord(
+                          StateError(state.errorMessage!),
+                          null,
+                          'video',
+                        ),
+                  ),
+                  style: actionStyle,
+                  child: Text(context.bheText('反馈')),
+                ),
+            ],
+          ),
         ),
       );
     },

@@ -1,5 +1,6 @@
 package com.bhe.bhe_mobile
 
+import com.bhe.bhe_mobile.diagnostics.AppDiagnostics
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -20,6 +21,8 @@ class AnalysisForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        AppDiagnostics.configure(applicationContext)
+        AppDiagnostics.event("service.created")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(CHANNEL_ID, "视频分析", NotificationManager.IMPORTANCE_LOW),
@@ -28,6 +31,7 @@ class AnalysisForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        AppDiagnostics.event("service.command", mapOf("status" to if (intent?.action == ACTION_STOP) "stop" else "start"))
         when (intent?.action) {
             ACTION_STOP -> {
                 releaseScreenWakeLock()
@@ -63,6 +67,7 @@ class AnalysisForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        AppDiagnostics.event("service.destroyed")
         releaseScreenWakeLock()
         super.onDestroy()
     }

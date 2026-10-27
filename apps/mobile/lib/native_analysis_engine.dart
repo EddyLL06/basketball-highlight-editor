@@ -6,6 +6,9 @@ import 'package:bhe_core/bhe_core.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'features/diagnostics/friendly_error.dart';
+import 'features/diagnostics/mobile_diagnostics.dart';
+
 class NativeAnalysisEngine implements MobileAnalysisEngine {
   NativeAnalysisEngine();
 
@@ -51,7 +54,8 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       return value?.map((key, value) => MapEntry(key.toString(), value));
     } on MissingPluginException {
       return null;
-    } on PlatformException catch (error) {
+    } on PlatformException catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'analysis');
       developer.log(
         'automatic ROI suggestion failed: ${error.message}',
         name: 'BHE-Analysis',
@@ -111,7 +115,8 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       }
     } on MissingPluginException {
       return;
-    } on PlatformException catch (error) {
+    } on PlatformException catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'analysis');
       developer.log(
         'analysis recovery failed: ${error.message}',
         name: 'BHE-Analysis',
@@ -136,10 +141,7 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       progress: 0.02,
       message: '正在检查视频',
     );
-    developer.log(
-      'analysis stream started: ${video.path}',
-      name: 'BHE-Analysis',
-    );
+    developer.log('analysis stream started', name: 'BHE-Analysis');
     yield const AnalysisProgress(
       stage: AnalysisStage.prepareProxy,
       progress: 0.03,
@@ -150,7 +152,7 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       onTimeout: () =>
           throw const MobileAnalysisException('本地模型准备超过 60 秒，请检查存储空间后重试。'),
     );
-    developer.log('model ready: $modelPath', name: 'BHE-Analysis');
+    MobileDiagnostics.instance.event('analysis.model.ready');
     final progressController = StreamController<AnalysisProgress>();
     final progressSubscription = _progressChannel
         .receiveBroadcastStream()
@@ -218,8 +220,9 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       );
     } on MissingPluginException {
       throw const MobileAnalysisException('当前设备未注册移动端分析模块。');
-    } on PlatformException catch (error) {
-      throw MobileAnalysisException(error.message ?? error.code);
+    } on PlatformException catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'analysis');
+      throw MobileDiagnosticException(error, 'analysis');
     } finally {
       await progressSubscription.cancel();
       await iterator.cancel();
@@ -307,6 +310,13 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       await _channel.invokeMethod<void>('cancelAnalysis');
     } on MissingPluginException {
       return;
+    } on PlatformException catch (error, stack) {
+      MobileDiagnostics.instance.error(
+        error,
+        stack,
+        operation: 'analysis.cancel',
+      );
+      throw MobileDiagnosticException(error, 'analysis');
     }
   }
 
@@ -323,7 +333,8 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
             'outputPath': outputPath,
           }) ==
           true;
-    } on Object {
+    } on Object catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'video.cover');
       return false;
     }
   }

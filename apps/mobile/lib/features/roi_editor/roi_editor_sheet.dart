@@ -116,6 +116,7 @@ class _RoiEditorSheetState extends State<_RoiEditorSheet> {
         title: context.bheText('设置检测区域'),
         child: RoiPreviewFailure(
           failure: failure,
+          diagnostic: _preview.diagnosticError,
           onRelink: widget.onRelink,
           onBack: () => Navigator.pop(context),
         ),
@@ -718,7 +719,9 @@ class RoiPreviewFailure extends StatelessWidget {
     required this.failure,
     required this.onRelink,
     required this.onBack,
+    this.diagnostic,
   });
+  final DiagnosticErrorRecord? diagnostic;
   final VideoSourceFailure failure;
   final VoidCallback onRelink;
   final VoidCallback onBack;
@@ -731,14 +734,29 @@ class RoiPreviewFailure extends StatelessWidget {
       children: [
         if (failure.canRelink)
           TextButton(
+            key: const ValueKey('roi-relink'),
             onPressed: onRelink,
             style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
             child: Text(context.bheText('重新选择视频')),
           ),
         TextButton(
+          key: const ValueKey('roi-back'),
           onPressed: onBack,
           style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
           child: Text(context.bheText('返回')),
+        ),
+        TextButton(
+          key: const ValueKey('roi-feedback'),
+          onPressed: () => showMobileDiagnostics(
+            context,
+            error: diagnostic ?? DiagnosticErrorRecord(
+              StateError(failure.message),
+              null,
+              'video',
+            ),
+          ),
+          style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+          child: Text(context.bheText('反馈')),
         ),
       ],
     ),

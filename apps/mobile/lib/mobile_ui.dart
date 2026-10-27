@@ -19,11 +19,14 @@ import 'features/video_source/video_source_failure.dart';
 import 'features/video_source/video_unavailable.dart';
 import 'features/roi_editor/roi_video_preview.dart';
 import 'mobile_app_state.dart';
+import 'features/diagnostics/mobile_diagnostics.dart';
+import 'features/diagnostics/diagnostic_report.dart';
 import 'mobile_theme.dart';
 
 export 'mobile_theme.dart' show BhePalette, bheTheme;
 
 part 'features/video_source/video_source_notice.dart';
+part 'features/diagnostics/diagnostic_sheet.dart';
 part 'features/video_source/review_video_source.dart';
 part 'features/video_source/video_preview.dart';
 part 'features/video_source/review_controls.dart';
@@ -99,6 +102,10 @@ class _BheMobileAppState extends State<BheMobileApp> {
       if (saved != null && mounted) {
         setState(() => _locale = BheLocale.fromName(saved));
       }
+      unawaited(MobileDiagnostics.instance.initialize(
+        version: mobileAppVersion,
+        language: _locale.toLanguageTag(),
+      ));
     } catch (_) {
       // 读取失败时保留系统语言，不影响应用启动。
     }
@@ -107,6 +114,10 @@ class _BheMobileAppState extends State<BheMobileApp> {
   Future<void> _setLocale(Locale locale) async {
     final normalized = BheLocale.fromName(locale.toLanguageTag());
     setState(() => _locale = normalized);
+    unawaited(MobileDiagnostics.instance.initialize(
+      version: mobileAppVersion,
+      language: normalized.toLanguageTag(),
+    ));
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('bhe.locale', normalized.toLanguageTag());
@@ -487,6 +498,11 @@ class _TopBar extends StatelessWidget {
                 case 'update':
                   onCheckUpdate();
                   break;
+                case 'diagnostics':
+                  await showMobileDiagnostics(
+                    context, error: state.diagnosticError,
+                  );
+                  break;
               }
             },
             itemBuilder: (context) => [
@@ -509,6 +525,10 @@ class _TopBar extends StatelessWidget {
               PopupMenuItem(
                 value: 'update',
                 child: Text(context.bheText('检查更新')),
+              ),
+              PopupMenuItem(
+                value: 'diagnostics',
+                child: Text(context.bheText('反馈与诊断')),
               ),
             ],
           ),
@@ -1517,7 +1537,19 @@ class _ReviewViewState extends State<_ReviewView> {
       if (_disposed) return;
       final player = controller;
       if (player == null || !player.value.isInitialized) return;
-      await action(player);
+      final projectId = state.project.id;
+      try {
+        await action(player);
+      } catch (error, stack) {
+        final record = MobileDiagnostics.instance.error(
+          error, stack, operation: 'playback',
+        );
+        if (mounted && !_disposed && controller == player && state.project.id == projectId) {
+          state.markVideoFailure(
+            VideoSourceFailure.unplayable, diagnostic: record,
+          );
+        }
+      }
     });
     _playerQueue = task.then<void>((_) {}, onError: (_, _) {});
     return task;
@@ -1776,6 +1808,11 @@ class _ReviewViewState extends State<_ReviewView> {
     final range = await showClipRangeEditor(
       context,
       videoPath: video.path,
+      onFeedback: (error) {
+        if (context.mounted) {
+          unawaited(showMobileDiagnostics(context, error: error));
+        }
+      },
       aspectRatio: video.width / video.height,
       durationMs: video.durationMs,
       startMs: start.round(),
@@ -1873,6 +1910,11 @@ class _ReviewViewState extends State<_ReviewView> {
     final result = await showClipRangeEditor(
       context,
       videoPath: video.path,
+      onFeedback: (error) {
+        if (context.mounted) {
+          unawaited(showMobileDiagnostics(context, error: error));
+        }
+      },
       aspectRatio: video.width / video.height,
       durationMs: video.durationMs,
       startMs: candidate.startMs,
@@ -4365,14 +4407,21 @@ class _Metric extends StatelessWidget {
 }
 
 class _SheetFrame extends StatelessWidget {
-  const _SheetFrame({required this.title, required this.child});
+  const _SheetFrame({
+    required this.title,
+    required this.child,
+    this.padding = const EdgeInsets.fromLTRB(20, 10, 20, 20),
+    this.titleStyle,
+  });
   final String title;
   final Widget child;
+  final EdgeInsets padding;
+  final TextStyle? titleStyle;
 
   @override
   Widget build(BuildContext context) => SafeArea(
     child: Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+      padding: padding,
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -4393,7 +4442,7 @@ class _SheetFrame extends StatelessWidget {
                 Expanded(
                   child: Text(
                     title,
-                    style: Theme.of(context).textTheme.titleLarge,
+                    style: titleStyle ?? Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
                 IconButton(
@@ -4815,6 +4864,13 @@ class _UpdateSheet extends StatelessWidget {
       }
     }
 
+    if (status == UpdateStatus.failed) {
+      children.add(TextButton(
+        onPressed: () => showMobileDiagnostics(context, error: updater.diagnosticError),
+        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+        child: Text(context.bheText('反馈')),
+      ));
+    }
     return _SheetFrame(
       title: context.bheText('检查更新'),
       child: Column(
