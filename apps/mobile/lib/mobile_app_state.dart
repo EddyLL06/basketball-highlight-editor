@@ -14,15 +14,31 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 
 import 'features/video_source/project_paths.dart';
+import 'features/video_source/project_file_commit.dart';
+import 'features/video_source/video_source_store.dart';
 import 'media_bridge.dart';
 import 'native_analysis_engine.dart';
 
 class MobileAppState extends ChangeNotifier {
-  MobileAppState({MobileAnalysisEngine? analysisEngine})
-    : analysisEngine = analysisEngine ?? NativeAnalysisEngine() {
-    unawaited(loadSavedProject());
-    unawaited(_loadPlayerGroups());
+  MobileAppState({
+    MobileAnalysisEngine? analysisEngine,
+    VideoSourceStore? videoSourceStore,
+    this.videoProbe,
+  }) : analysisEngine = analysisEngine ?? NativeAnalysisEngine(),
+       _providedVideoStore = videoSourceStore {
+    ready = Future.wait([loadSavedProject(), _loadPlayerGroups()]).then((_) {});
   }
+
+  late final Future<void> ready;
+  final VideoSourceStore? _providedVideoStore;
+  final Future<VideoInfo> Function(File)? videoProbe;
+  late final VideoSourceStore _videoStore =
+      _providedVideoStore ??
+      VideoSourceStore(
+        dataDirectory: _dataDirectory,
+        temporaryDirectory: () async =>
+            Directory((await getTemporaryDirectory()).path),
+      );
 
   static const playerGroupsPrefsKey = 'bhe.player_groups';
 
@@ -83,43 +99,96 @@ class MobileAppState extends ChangeNotifier {
     suffix: suffix,
   );
 
-  Future<String> _materializeVideoPath(String path, String projectId) async {
-    if (!Platform.isIOS) return path;
-    final source = File(path);
-    final directory = Directory(await _projectPath(projectId, area: 'videos'));
-    await directory.create(recursive: true);
-    final extension = path.contains('.')
-        ? path.substring(path.lastIndexOf('.')).toLowerCase()
-        : '.mp4';
-    final target = File('${directory.path}/source$extension');
-    // A project can outlive its iOS container path after a reinstall. In
-    // that case keep the already materialized copy instead of trying to copy
-    // from the stale temporary path.
-    if (!await source.exists()) {
-      final existing = await _existingMaterializedVideo(directory);
-      if (existing != null) return existing.path;
-      return target.path;
+  Future<VideoInfo> _inspectVideo(File file, {VideoInfo? expected}) async {
+    if (!await file.exists()) {
+      throw FileSystemException('Missing source video', file.path);
     }
-    if (source.path != target.path) {
-      if (await target.exists()) await target.delete();
-      await source.copy(target.path);
-    }
-    await for (final entry in directory.list()) {
-      if (entry.path == target.path) continue;
-      await entry.delete(recursive: true);
-    }
-    return target.path;
-  }
-
-  Future<File?> _existingMaterializedVideo(Directory directory) async {
-    if (!await directory.exists()) return null;
-    await for (final entry in directory.list()) {
-      if (entry is File &&
-          entry.path.split(Platform.pathSeparator).last.startsWith('source.')) {
-        return entry;
+    final VideoInfo actual;
+    final probe = videoProbe;
+    if (probe != null) {
+      actual = await probe(file);
+    } else {
+      final controller = VideoPlayerController.file(file);
+      try {
+        await controller.initialize();
+        final value = controller.value;
+        actual = VideoInfo(
+          path: file.path,
+          name: file.uri.pathSegments.last,
+          sizeBytes: await file.length(),
+          durationMs: value.duration.inMilliseconds,
+          width: value.size.width.round(),
+          height: value.size.height.round(),
+          sha256: await _sha256(file),
+        );
+      } finally {
+        await controller.dispose();
       }
     }
-    return null;
+    if (expected != null &&
+        (expected.width != actual.width ||
+            expected.height != actual.height ||
+            (expected.durationMs - actual.durationMs).abs() > 1500 ||
+            (expected.sha256 != null && expected.sha256 != actual.sha256))) {
+      throw const VideoSourceMismatch();
+    }
+    return actual;
+  }
+
+  Future<VideoInfo> _storeVideo(
+    String path,
+    ProjectSnapshot snapshot,
+    int generation, {
+    bool fromPicker = false,
+    bool replace = false,
+    String? name,
+  }) async {
+    bool current() => _isCurrentVideoPreparation(generation, snapshot.id);
+    return _videoStore.save(
+      sourcePath: path,
+      projectId: snapshot.id,
+      previousPath: snapshot.video?.path,
+      fromPicker: fromPicker,
+      isCurrent: current,
+      validate: (file) =>
+          _inspectVideo(file, expected: replace ? null : snapshot.video),
+      persist: (localPath, info) async {
+        final video = VideoInfo(
+          path: localPath,
+          name: name ?? snapshot.video?.name ?? info.name,
+          sizeBytes: info.sizeBytes,
+          durationMs: info.durationMs,
+          width: info.width,
+          height: info.height,
+          sha256: info.sha256,
+        );
+        final next = snapshot.copyWith(
+          video: video,
+          name: replace
+              ? video.name.replaceFirst(RegExp(r'\.[^.]+$'), '')
+              : snapshot.name,
+          clearHoopRoi: replace,
+          clearRimRoi: replace,
+          clearNetRoi: replace,
+          candidates: replace ? const [] : snapshot.candidates,
+          clearLastAnalysis: replace,
+        );
+        final task = _saveChain.then((_) async {
+          if (!current()) throw const VideoSourceCancelled();
+          await _writeProject(next);
+          if (!current()) {
+            await _writeProject(snapshot);
+            throw const VideoSourceCancelled();
+          }
+          project = next;
+        });
+        _saveChain = task.then<void>(
+          (_) {},
+          onError: (Object _, StackTrace _) {},
+        );
+        await task;
+      },
+    );
   }
 
   Future<File> _projectFile(String id) async {
@@ -202,65 +271,38 @@ class MobileAppState extends ChangeNotifier {
   Future<bool> _matchesProjectVideo() async {
     final expected = project.video;
     if (expected == null) return false;
-    developer.log(
-      'video validation started: ${expected.path}',
-      name: 'BHE-Analysis',
-    );
-    final file = File(expected.path);
-    if (!await file.exists()) return false;
-    final controller = VideoPlayerController.file(file);
     try {
-      await controller.initialize();
-      developer.log('video initialized', name: 'BHE-Analysis');
-      final actual = controller.value;
-      if (actual.size.width.round() != expected.width ||
-          actual.size.height.round() != expected.height ||
-          (actual.duration.inMilliseconds - expected.durationMs).abs() > 1500) {
-        return false;
-      }
-      if (expected.sha256 != null) {
-        developer.log('video hash validation started', name: 'BHE-Analysis');
-        if (await _sha256(file) != expected.sha256) return false;
-      }
-      developer.log('video validation succeeded', name: 'BHE-Analysis');
+      await _inspectVideo(File(expected.path), expected: expected);
       return true;
     } on Object {
       return false;
-    } finally {
-      await controller.dispose();
     }
   }
 
   Future<void> _validateImportedVideoIfPresent() async {
-    if (project.video == null) {
+    final snapshot = project;
+    final video = snapshot.video;
+    if (video == null) {
       errorMessage = '项目已打开，请重新选择原视频后继续。';
       return;
     }
-    final video = project.video!;
-    final directory = Directory(await _projectPath(project.id, area: 'videos'));
-    final existing = await _existingMaterializedVideo(directory);
-    final persistentPath =
-        existing?.path ?? await _materializeVideoPath(video.path, project.id);
-    if (!await File(persistentPath).exists()) {
-      errorMessage = '项目已打开，请重新选择原视频后继续。';
+    final generation = _videoPreparationGeneration;
+    try {
+      final source = await File(video.path).exists()
+          ? video.path
+          : await _videoStore.existingVideo(snapshot.id);
+      if (source == null) {
+        throw FileSystemException('Missing source video', video.path);
+      }
+      // Existing records may share a legacy cache path. Migration is a copy;
+      // only a fresh picker selection grants permission to move its cache.
+      await _storeVideo(source, snapshot, generation);
+    } on VideoSourceCancelled {
       return;
-    }
-    if (persistentPath != video.path) {
-      project = project.copyWith(
-        video: VideoInfo(
-          path: persistentPath,
-          name: video.name,
-          sizeBytes: video.sizeBytes,
-          durationMs: video.durationMs,
-          width: video.width,
-          height: video.height,
-          sha256: video.sha256,
-        ),
-      );
-      await _queueSave();
-    }
-    if (!await _matchesProjectVideo()) {
-      errorMessage = '项目已打开，但当前原视频与项目记录不一致，请重新选择原视频。';
+    } on Object {
+      if (_isCurrentVideoPreparation(generation, snapshot.id)) {
+        errorMessage = '项目已打开，请重新选择原视频后继续。';
+      }
     }
   }
 
@@ -387,12 +429,16 @@ class MobileAppState extends ChangeNotifier {
 
   Future<void> _writeProject(ProjectSnapshot snapshot) async {
     final file = await _projectFile(snapshot.id);
-    await file.writeAsString(const ProjectPackageCodec().encode(snapshot));
-    recentProjects = [
+    final next = [
       snapshot,
       ...recentProjects.where((item) => item.id != snapshot.id),
     ].take(12).toList();
-    await _persistProjects();
+    final index = File('${(await _dataDirectory()).path}/project_index.json');
+    await commitProjectFiles({
+      file: const ProjectPackageCodec().encode(snapshot),
+      index: jsonEncode(next.map((item) => item.id).toList()),
+    });
+    recentProjects = next;
   }
 
   Future<void> _persistProjects() async {
@@ -489,47 +535,19 @@ class MobileAppState extends ChangeNotifier {
     preparingVideoMessage = '正在读取视频信息';
     errorMessage = null;
     notifyListeners();
-    VideoPlayerController? controller;
     try {
       preparingVideoMessage = '正在保存视频到本机';
       notifyListeners();
-      final localPath = await _materializeVideoPath(path, projectId);
-      if (!_isCurrentVideoPreparation(preparationGeneration, projectId)) return;
-      final file = File(localPath);
-      final player = VideoPlayerController.file(file);
-      controller = player;
-      await player.initialize();
-      final value = player.value;
-      final sourceName = name?.trim().isNotEmpty == true
-          ? name!.trim()
-          : path.split(Platform.pathSeparator).last;
-      preparingVideoMessage = '正在读取文件大小';
-      notifyListeners();
-      final sizeBytes = await file.length();
-      if (!_isCurrentVideoPreparation(preparationGeneration, projectId)) return;
-      project = project.copyWith(
-        name: sourceName.replaceFirst(RegExp(r'\.[^.]+$'), ''),
-        video: VideoInfo(
-          path: localPath,
-          name: sourceName,
-          sizeBytes: sizeBytes,
-          durationMs: value.duration.inMilliseconds,
-          width: value.size.width.round(),
-          height: value.size.height.round(),
-        ),
-        clearHoopRoi: true,
-        clearRimRoi: true,
-        clearNetRoi: true,
-        candidates: const [],
-        clearLastAnalysis: true,
+      await _storeVideo(
+        path,
+        project,
+        preparationGeneration,
+        fromPicker: true,
+        replace: true,
+        name: name,
       );
+      if (!_isCurrentVideoPreparation(preparationGeneration, projectId)) return;
       errorMessage = null;
-      preparingVideoMessage = '正在保存项目';
-      notifyListeners();
-      await _queueSave();
-      if (!_isCurrentVideoPreparation(preparationGeneration, projectId)) {
-        return;
-      }
       preparingVideoMessage = '正在识别篮筐区域';
       notifyListeners();
       try {
@@ -580,15 +598,8 @@ class MobileAppState extends ChangeNotifier {
           stackTrace: stack,
         );
       }
-      unawaited(
-        _finishVideoHash(
-          projectId,
-          preparationGeneration,
-          localPath,
-          sizeBytes,
-          value,
-        ),
-      );
+    } on VideoSourceCancelled {
+      return;
     } on Object catch (error, stack) {
       developer.log(
         'video preparation failed: $error',
@@ -603,7 +614,6 @@ class MobileAppState extends ChangeNotifier {
         preparingVideoMessage = '';
         notifyListeners();
       }
-      await controller?.dispose();
     }
   }
 
@@ -627,33 +637,6 @@ class MobileAppState extends ChangeNotifier {
     exporting = false;
     exportedPaths = const [];
     analysisStartedAt = null;
-  }
-
-  Future<void> _finishVideoHash(
-    String projectId,
-    int preparationGeneration,
-    String path,
-    int sizeBytes,
-    VideoPlayerValue metadata,
-  ) async {
-    final hash = await _sha256(File(path));
-    if (!_isCurrentVideoPreparation(preparationGeneration, projectId) ||
-        project.video?.path != path) {
-      return;
-    }
-    project = project.copyWith(
-      video: VideoInfo(
-        path: path,
-        name: project.video!.name,
-        sizeBytes: sizeBytes,
-        durationMs: metadata.duration.inMilliseconds,
-        width: metadata.size.width.round(),
-        height: metadata.size.height.round(),
-        sha256: hash,
-      ),
-    );
-    await _queueSave();
-    notifyListeners();
   }
 
   Future<void> importProject() async {
@@ -698,50 +681,15 @@ class MobileAppState extends ChangeNotifier {
     final file = result?.files.single;
     final path = file?.path;
     if (path == null) return;
-    final sourceFile = File(path);
-    final controller = VideoPlayerController.file(sourceFile);
-    try {
-      await controller.initialize();
-      final value = controller.value;
-      final previous = project.video;
-      if (previous != null &&
-          (previous.width != value.size.width.round() ||
-              previous.height != value.size.height.round() ||
-              (previous.durationMs - value.duration.inMilliseconds).abs() >
-                  1500)) {
-        errorMessage = '所选视频的分辨率或时长与项目记录不一致，请选择同一段原视频。';
-        notifyListeners();
-        return;
-      }
-      final fileHash = await _sha256(sourceFile);
-      if (previous?.sha256 != null && previous!.sha256 != fileHash) {
-        errorMessage = '所选视频文件与项目记录不一致，请选择原始视频。';
-        notifyListeners();
-        return;
-      }
-      final localPath = await _materializeVideoPath(path, project.id);
-      final localFile = File(localPath);
-      final fallbackName = path.split(Platform.pathSeparator).last;
-      final name = file?.name.trim().isNotEmpty == true
-          ? file!.name
-          : fallbackName;
-      project = project.copyWith(
-        video: VideoInfo(
-          path: localPath,
-          name: name,
-          sizeBytes: await localFile.length(),
-          durationMs: value.duration.inMilliseconds,
-          width: value.size.width.round(),
-          height: value.size.height.round(),
-          sha256: fileHash,
-        ),
-      );
-      errorMessage = null;
-      await _queueSave();
-      notifyListeners();
-    } finally {
-      await controller.dispose();
-    }
+    await _storeVideo(
+      path,
+      project,
+      ++_videoPreparationGeneration,
+      fromPicker: true,
+      name: file?.name,
+    );
+    errorMessage = null;
+    notifyListeners();
   }
 
   void updateSettings(AnalysisSettings settings) {

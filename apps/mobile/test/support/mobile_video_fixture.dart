@@ -1,0 +1,121 @@
+import 'dart:io';
+
+import 'package:bhe_core/bhe_core.dart';
+import 'package:bhe_mobile/mobile_app_state.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class TestFilePicker extends FilePicker {
+  Future<FilePickerResult?> Function()? pick;
+  @override
+  Future<FilePickerResult?> pickFiles({
+    String? dialogTitle,
+    String? initialDirectory,
+    FileType type = FileType.any,
+    List<String>? allowedExtensions,
+    Function(FilePickerStatus)? onFileLoading,
+    bool allowCompression = false,
+    int compressionQuality = 0,
+    bool allowMultiple = false,
+    bool withData = false,
+    bool withReadStream = false,
+    bool lockParentWindow = false,
+    bool readSequential = false,
+  }) async => pick?.call();
+}
+
+class MobileVideoFixture {
+  late Directory root;
+  late MobileAppState state;
+  final picker = TestFilePicker();
+  Directory get data => Directory('${root.path}/BHE Mobile');
+
+  Future<void> init({
+    Future<VideoInfo> Function(File)? probe,
+    MobileAnalysisEngine? engine,
+  }) async {
+    root = await Directory.systemTemp.createTemp('bhe_state_');
+    SharedPreferences.setMockInitialValues({});
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          (_) async => root.path,
+        );
+    FilePicker.platform = picker;
+    state = MobileAppState(
+      analysisEngine: engine ?? const MobileAnalysisEngineUnavailable(),
+      videoProbe: probe ?? inspect,
+    );
+    await state.ready;
+  }
+
+  static Future<VideoInfo> inspect(File file) async => VideoInfo(
+    path: file.path,
+    name: 'original.mp4',
+    sizeBytes: await file.length(),
+    durationMs: 10000,
+    width: 1920,
+    height: 1080,
+    sha256: await file.readAsString(),
+  );
+
+  Future<File> file(String relative, String contents) async {
+    final file = File('${root.path}/$relative');
+    await file.parent.create(recursive: true);
+    return file.writeAsString(contents);
+  }
+
+  ProjectSnapshot project(String path, {String id = 'A'}) => ProjectSnapshot(
+    id: id,
+    name: id,
+    video: VideoInfo(
+      path: path,
+      name: 'original.mp4',
+      sizeBytes: 8,
+      durationMs: 10000,
+      width: 1920,
+      height: 1080,
+      sha256: 'original',
+    ),
+    hoopRoi: const Roi(left: .2, top: .2, right: .6, bottom: .6),
+    netRoi: const Roi(left: .3, top: .3, right: .5, bottom: .5),
+    players: const ['Alice'],
+    candidates: const [
+      Candidate(
+        id: 'goal',
+        startMs: 1000,
+        endMs: 3000,
+        eventMs: 2000,
+        player: 'Alice',
+        reviewed: true,
+        rangeEdited: true,
+      ),
+    ],
+  );
+
+  void choose(File? file) {
+    picker.pick = () async => file == null
+        ? null
+        : FilePickerResult([
+            PlatformFile(
+              name: file.uri.pathSegments.last,
+              path: file.path,
+              size: await file.length(),
+            ),
+          ]);
+  }
+
+  Future<void> close() async {
+    await pumpEventQueue();
+    state.dispose();
+    FilePicker.platform = TestFilePicker();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          null,
+        );
+    await root.delete(recursive: true);
+  }
+}
