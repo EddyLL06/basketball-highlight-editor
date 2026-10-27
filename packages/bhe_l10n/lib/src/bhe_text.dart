@@ -419,6 +419,8 @@ const _englishText = <String, String>{
   '出错了：视频导出未完成，请重试。': 'Something went wrong: video export did not finish. Please try again.',
   '出错了：更新操作未完成，请重试。': 'Something went wrong: the update did not finish. Please try again.',
   '出错了：操作未完成，请重试。': 'Something went wrong: the operation did not finish. Please try again.',
+  '重命名项目': 'Rename project',
+
   '重命名球员': 'Rename player',
   '名称不能为空': 'Name cannot be empty',
   '已有同名球员': 'A player with this name already exists',

@@ -623,7 +623,43 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       file: const ProjectPackageCodec().encode(snapshot),
       index: jsonEncode(next.map((item) => item.id).toList()),
     });
-    recentProjects = next;
+    recentProjects = [
+      for (final item in next)
+        item.id == project.id ? item.copyWith(name: project.name) : item,
+    ];
+  }
+
+  Future<bool> renameProject(String name) async {
+    final value = name.trim();
+    if (value.isEmpty || value.characters.length > 40) return false;
+    if (value == project.name) return true;
+    final id = project.id;
+    final oldName = project.name;
+    project = project.copyWith(name: value);
+    if (recentProjects.any((item) => item.id == id)) {
+      recentProjects = [
+        for (final item in recentProjects)
+          item.id == id ? item.copyWith(name: value) : item,
+      ];
+    } else if (project.video != null) {
+      recentProjects = [project, ...recentProjects].take(12).toList();
+    }
+    final pending = _queueSave();
+    notifyListeners();
+    try {
+      await pending;
+      return true;
+    } catch (_) {
+      if (!_disposed && project.id == id && project.name == value) {
+        project = project.copyWith(name: oldName);
+        recentProjects = [
+          for (final item in recentProjects)
+            item.id == id ? item.copyWith(name: oldName) : item,
+        ];
+        notifyListeners();
+      }
+      return false;
+    }
   }
 
   Future<void> _persistProjects() async {

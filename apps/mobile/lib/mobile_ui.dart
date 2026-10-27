@@ -34,6 +34,7 @@ part 'features/export/export_audio_notice.dart';
 part 'features/roi_editor/roi_editor_sheet.dart';
 part 'features/review_undo/review_notice.dart';
 part 'features/player_tags/player_tag_sheet.dart';
+part 'features/project_rename/project_rename_dialog.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 
@@ -442,15 +443,22 @@ class _TopBar extends StatelessWidget {
               ),
             ),
           ),
-          if (state.project.video != null)
+          if (state.project.video != null || state.recentProjects.any((p) => p.id == state.project.id))
             Flexible(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: Text(
-                  state.project.name,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: Theme.of(context).textTheme.bodySmall,
+                child: InkWell(
+                  key: const ValueKey('project-name-rename'),
+                  onTap: section == _WorkspaceSection.project ? () => _showProjectRename(context, state) : null,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                    child: Align(alignment: Alignment.centerRight, child: Text(
+                      state.project.name,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    )),
+                  ),
                 ),
               ),
             ),
@@ -497,6 +505,9 @@ class _TopBar extends StatelessWidget {
                 case 'delete':
                   await _confirmDelete(context, state);
                   break;
+                case 'renameProject':
+                  await _showProjectRename(context, state);
+                  break;
                 case 'undo':
                   await state.undoReview();
                   break;
@@ -537,6 +548,7 @@ class _TopBar extends StatelessWidget {
               ),
               if (section == _WorkspaceSection.review)
                 PopupMenuItem(value: 'undo', enabled: state.canUndoReview, child: Text(context.bheText('撤销上一步'))),
+              PopupMenuItem(value: 'renameProject', enabled: state.project.video != null || state.recentProjects.any((p) => p.id == state.project.id), child: Text(context.bheText('重命名项目'))),
             ],
           ),
         ],
