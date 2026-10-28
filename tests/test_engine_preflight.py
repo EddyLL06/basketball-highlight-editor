@@ -36,10 +36,18 @@ def load_detector(model):
     with (model.parent / 'loads.txt').open('a') as output:
         output.write(_device + '\\n')
     mode = model.read_text()
+    if mode == 'autoinstall':
+        assert os.environ.get('YOLO_AUTOINSTALL') == 'false'
     if mode == 'ImportError':
         raise ImportError('DLL load failed while importing onnxruntime_pybind11_state')
     if mode == 'OSError':
         raise OSError('[WinError 1114] DLL initialization failed')
+    if mode == 'dill':
+        from basketball_highlight.runtime_errors import DetectorRuntimeUnavailable
+        try:
+            raise ModuleNotFoundError("No module named 'dill'", name='dill')
+        except ImportError as exc:
+            raise DetectorRuntimeUnavailable(str(exc)) from exc
     if mode == 'unknown':
         raise ValueError('unrecognized model')
     if mode == 'crash':
@@ -71,6 +79,12 @@ def test_real_child_loads_the_requested_backend(detector_repo, model, device):
     assert result['status'] == 'ready'
     assert result['elapsed_ms'] >= result['load_ms']
     assert loads(model) == [result['device']]
+
+
+def test_preflight_disables_online_dependency_install(detector_repo, model, monkeypatch):
+    monkeypatch.setenv('YOLO_AUTOINSTALL', 'true')
+    model.write_text('autoinstall')
+    assert preflight.check_detector(detector_repo, model, 'cpu')['status'] == 'ready'
 
 
 @pytest.mark.parametrize('error', ['ImportError', 'OSError'])
@@ -184,10 +198,14 @@ def run_analysis(project):
     return store.get_job(job['id'])
 
 
-@pytest.mark.parametrize('error', ['ImportError', 'OSError'])
-def test_failed_preflight_never_prepares_proxy_or_roi(project, detector_repo, model, error, monkeypatch):
+@pytest.mark.parametrize('system', ['Darwin', 'Windows', 'Linux'])
+@pytest.mark.parametrize('mode', ['fast', 'standard'])
+@pytest.mark.parametrize('error', ['ImportError', 'OSError', 'dill'])
+def test_failed_preflight_never_prepares_proxy_or_roi(project, detector_repo, model, error, system, mode, monkeypatch):
+    monkeypatch.setattr(preflight.platform, 'system', lambda: system)
     model.write_text(error)
     service, store, payload = project
+    payload['mode'] = mode
     original_roi = store.active_roi(payload['video_id'])
 
     def no_pipeline(**kwargs):
@@ -197,11 +215,16 @@ def test_failed_preflight_never_prepares_proxy_or_roi(project, detector_repo, mo
     job = run_analysis(project)
     assert job['state'] == 'failed'
     assert job['error_code'] == 'ENGINE_RUNTIME_UNAVAILABLE'
-    assert preflight.GENERIC_MESSAGE in job['error_message']
-    assert 'VC++' not in job['error_message'].splitlines()[0]
+    expected = preflight.DEPENDENCY_MESSAGE if error == 'dill' else (
+        preflight.WINDOWS_MESSAGE if system == 'Windows' else preflight.GENERIC_MESSAGE
+    )
+    assert job['error_message'].startswith(expected + '\n')
+    if error == 'dill':
+        assert "No module named 'dill'" in job['error_message']
     with pytest.raises(ProtocolError) as failure:
         service.suggest_roi(payload)
     assert failure.value.code == 'ENGINE_RUNTIME_UNAVAILABLE'
+    assert str(failure.value).startswith(expected + '\n')
     assert loads(model) == ['cpu', 'cpu']
     assert not list((store.root / 'artifacts').rglob('*.*'))
     assert store.active_roi(payload['video_id']) == original_roi

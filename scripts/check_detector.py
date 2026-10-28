@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -17,6 +18,9 @@ RESULT_PREFIX = "BHE_PREFLIGHT_RESULT="
 
 
 def main():
+    # A packaged runtime cannot repair itself; report missing dependencies
+    # immediately instead of waiting for Ultralytics to run an online install.
+    os.environ["YOLO_AUTOINSTALL"] = "false"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True)
     parser.add_argument("--device", default="auto", choices=SUPPORTED_DEVICES)
@@ -36,6 +40,12 @@ def main():
             "error_code": "ENGINE_RUNTIME_UNAVAILABLE" if unavailable else None,
             "details": details,
         }
+        cause = exc
+        while cause is not None:
+            if isinstance(cause, ModuleNotFoundError):
+                result["missing_module"] = cause.name
+                break
+            cause = cause.__cause__ or cause.__context__
         print(details, file=sys.stderr, flush=True)
     else:
         result = {"status": "ready", "device": current_device()}

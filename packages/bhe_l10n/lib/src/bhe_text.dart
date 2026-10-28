@@ -446,6 +446,8 @@ const _englishText = <String, String>{
 
   '检查分析引擎': 'Checking analysis engine',
   '引擎自检': 'Engine check',
+  '分析引擎缺少模型加载依赖，请安装最新版本的应用，仍然不行请发送诊断信息。':
+      'The analysis engine is missing a dependency required to load the model. Install the latest version of the app. If the problem persists, send us diagnostic information.',
   '分析引擎在这台电脑上无法启动（运行库初始化失败）。请先安装最新的 VC++ 运行库后重启电脑，仍然不行请把 CPU 型号和诊断信息发给我们。':
       'The analysis engine could not start on this computer (runtime initialization failed). Install the latest Visual C++ Redistributable and restart your computer. If the problem persists, send us your CPU model and diagnostic information.',
   '分析引擎在这台电脑上无法启动（运行库初始化失败）。请检查或重新安装应用，仍然不行请把系统版本、CPU 型号和诊断信息发给我们。':

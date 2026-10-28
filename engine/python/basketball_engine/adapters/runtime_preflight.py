@@ -16,10 +16,13 @@ from ..protocol import ProtocolError
 RESULT_PREFIX = "BHE_PREFLIGHT_RESULT="
 WINDOWS_MESSAGE = "分析引擎在这台电脑上无法启动（运行库初始化失败）。请先安装最新的 VC++ 运行库后重启电脑，仍然不行请把 CPU 型号和诊断信息发给我们。"
 GENERIC_MESSAGE = "分析引擎在这台电脑上无法启动（运行库初始化失败）。请检查或重新安装应用，仍然不行请把系统版本、CPU 型号和诊断信息发给我们。"
+DEPENDENCY_MESSAGE = "分析引擎缺少模型加载依赖，请安装最新版本的应用，仍然不行请发送诊断信息。"
 
 
-def runtime_error(details):
-    message = WINDOWS_MESSAGE if platform.system() == "Windows" else GENERIC_MESSAGE
+def runtime_error(details, missing_module=None):
+    message = DEPENDENCY_MESSAGE if missing_module else (
+        WINDOWS_MESSAGE if platform.system() == "Windows" else GENERIC_MESSAGE
+    )
     return ProtocolError("ENGINE_RUNTIME_UNAVAILABLE", f"{message}\n{details}")
 
 
@@ -90,7 +93,8 @@ def check_detector(repo_root, model_path, device, cancel_check=None, process_cal
         if (process.returncode != 0 and result.get("status") == "unavailable"
                 and result.get("error_code") == "ENGINE_RUNTIME_UNAVAILABLE"
                 and isinstance(result.get("details"), str)):
-            raise runtime_error(f"exit={process.returncode}\n{stderr.strip() or result['details']}")
+            raise runtime_error(f"exit={process.returncode}\n{stderr.strip() or result['details']}",
+                                missing_module=result.get("missing_module"))
         break
     details = f"exit={process.returncode}\n{stderr}\n{stdout}".strip()
     log_diagnostic(f"detector preflight warning: inconclusive check; continuing analysis\n{details}")

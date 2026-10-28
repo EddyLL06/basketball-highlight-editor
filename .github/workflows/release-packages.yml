@@ -461,7 +461,8 @@ jobs:
       - name: Export mobile ONNX model
         run: |
           set -euo pipefail
-          python -m pip install --disable-pip-version-check --no-cache-dir ultralytics onnx
+          # Exporting also loads the .pt checkpoint and its declared dependencies (dill).
+          python -m pip install --disable-pip-version-check --no-cache-dir -r requirements.txt onnx
           python scripts/export_mobile_model.py \
             --model models/bball_model.pt \
             --output apps/mobile/assets/models/bball_model.onnx
