@@ -43,6 +43,13 @@ class _ExportTicket {
   }
 }
 
+class _MergeBatchLease {
+  _MergeBatchLease(this.ticket, this.run);
+  final _ExportTicket ticket;
+  final _ExportRun run;
+  bool uncertain = false;
+}
+
 class _ExportOwner {
   _ExportOwner(this.ticket, this.run);
   final _ExportTicket ticket;
@@ -76,6 +83,7 @@ class NativeMediaExportEngine implements MobileExportEngine {
 
   static const _channel = MethodChannel('com.bhe.bhe/mobile_media');
   _ExportRun? _activeRun;
+  _MergeBatchLease? _mergeBatch;
 
   static Future<bool> isAvailable() async {
     try {
@@ -173,25 +181,70 @@ class NativeMediaExportEngine implements MobileExportEngine {
     }
   }
 
+  /// Holds the same global export ticket across every merge in this batch.
+  Future<void> withMergeBatch(
+    Future<void> Function() body, {
+    void Function()? onWaiting,
+  }) async {
+    final run = _ExportRun();
+    final ticket = _ExportGate.enter();
+    final lease = _MergeBatchLease(ticket, run);
+    _activeRun = run;
+    try {
+      if (ticket.waiting) onWaiting?.call();
+      await _waitForTurn(ticket, run);
+      _mergeBatch = lease;
+      await body();
+    } finally {
+      if (identical(_mergeBatch, lease)) _mergeBatch = null;
+      if (!lease.uncertain) ticket.finish();
+      if (identical(_activeRun, run)) _activeRun = null;
+    }
+  }
+
   @override
   Stream<ExportProgress> mergeClips({
     required VideoInfo video,
     required List<Candidate> candidates,
     required String outputPath,
+  }) =>
+      _mergeClips(video: video, candidates: candidates, outputPath: outputPath);
+
+  Stream<ExportProgress> mergeClipsInBatch({
+    required VideoInfo video,
+    required List<Candidate> candidates,
+    required String outputPath,
+  }) {
+    final lease = _mergeBatch;
+    if (lease == null) throw StateError('No active merge batch');
+    return _mergeClips(
+      video: video,
+      candidates: candidates,
+      outputPath: outputPath,
+      lease: lease,
+    );
+  }
+
+  Stream<ExportProgress> _mergeClips({
+    required VideoInfo video,
+    required List<Candidate> candidates,
+    required String outputPath,
+    _MergeBatchLease? lease,
   }) async* {
     if (candidates.isEmpty) return;
-    final run = _ExportRun();
+    final run = lease?.run ?? _ExportRun();
     _activeRun = run;
     final exportId = 'merge-${DateTime.now().microsecondsSinceEpoch}';
     run.mergeId = exportId;
     var reserved = false;
     var releaseUncertain = false;
-    final ticket = _ExportGate.enter();
+    final ticket = lease?.ticket ?? _ExportGate.enter();
     try {
-      if (ticket.waiting) {
+      if (lease == null && ticket.waiting) {
         yield const ExportProgress(progress: 0, message: '正在结束上一次导出');
       }
-      await _waitForTurn(ticket, run);
+      if (lease == null) await _waitForTurn(ticket, run);
+      if (run.cancelled) throw const MobileExportException('导出已取消');
       run.nativeId = exportId;
       run.nativeGeneration++;
       try {
@@ -243,6 +296,7 @@ class NativeMediaExportEngine implements MobileExportEngine {
               .timeout(drainTimeout);
         } on TimeoutException {
           releaseUncertain = true;
+          if (lease != null) lease.uncertain = true;
           throw const ExportDrainTimeout();
         } on Object catch (error, stack) {
           MobileDiagnostics.instance.error(
@@ -251,11 +305,12 @@ class NativeMediaExportEngine implements MobileExportEngine {
             operation: 'export.release',
           );
           releaseUncertain = true;
+          if (lease != null) lease.uncertain = true;
           throw const ExportDrainTimeout();
         }
       }
-      if (!releaseUncertain) ticket.finish();
-      if (identical(_activeRun, run)) _activeRun = null;
+      if (lease == null && !releaseUncertain) ticket.finish();
+      if (lease == null && identical(_activeRun, run)) _activeRun = null;
     }
   }
 

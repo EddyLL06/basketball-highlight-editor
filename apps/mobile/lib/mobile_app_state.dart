@@ -17,6 +17,7 @@ import 'features/review_undo/review_action_result.dart';
 import 'features/player_roster/roster_selection.dart';
 import 'features/player_groups/player_group_store.dart';
 import 'features/project_list/project_catalog.dart';
+import 'features/export/export_modes.dart';
 
 export 'features/review_undo/review_action_result.dart';
 import 'features/project_mutation/project_mutation_queue.dart';
@@ -34,6 +35,7 @@ export 'features/operation_status/task_stop_status.dart';
 import 'native_analysis_engine.dart';
 
 part 'features/project_list/project_management.dart';
+part 'features/export/label_export_batch.dart';
 
 class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   MobileAppState({
@@ -208,6 +210,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   String preparingVideoMessage = '';
   bool analysing = false;
   bool exporting = false;
+  int exportBatchTotal = 0;
+  List<LabelExportFile> exportBatchFiles = const [];
+  bool _batchExport = false;
+  bool _batchStopRequested = false;
   bool exportCancelled = false;
   int _exportRun = 0;
   bool _exportPreflight = false;
@@ -1603,6 +1609,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     analysing = false;
     exporting = false;
     exportedPaths = const [];
+    exportBatchTotal = 0;
+    exportBatchFiles = const [];
+    _batchExport = false;
+    _batchStopRequested = false;
     exportAudioSkipped = false;
     exportMergedOverlapCount = null;
     analysisStartedAt = null;
@@ -2208,6 +2218,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     await mergeClipsForPlayer(null);
   }
 
+  void _notifyLabelExport() => notifyListeners();
+
   int? _beginExport() {
     if (projectTransitioning || exportStartBlockReason != null) {
       notifyListeners();
@@ -2222,6 +2234,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     _mergeCommitted = false;
     exportCancelled = false;
     exportedPaths = const [];
+    exportBatchTotal = 0;
+    exportBatchFiles = const [];
+    _batchExport = false;
+    _batchStopRequested = false;
     exportAudioSkipped = false;
     exportMergedOverlapCount = null;
     diagnosticError = null;
@@ -2418,10 +2434,18 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   Future<void> cancelExport() async {
-    if (!exporting || _mergeCommitted || exportCancelled) return;
+    if (!exporting) return;
+    if (_batchExport) {
+      _batchStopRequested = true;
+      if (_mergeCommitted) {
+        notifyListeners();
+        return;
+      }
+    }
+    if (_mergeCommitted || exportCancelled) return;
     final run = _exportRun;
     exportCancelled = true;
-    exportMergedOverlapCount = null;
+    if (!_batchExport) exportMergedOverlapCount = null;
     if (_exportPreflight) {
       _exportRun++;
       _exportPreflight = false;
@@ -2461,11 +2485,12 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     if (!_disposed && run == _exportRun) notifyListeners();
   }
 
-  Future<void> shareExportedFiles() async {
-    if (exportedPaths.isEmpty) return;
+  Future<void> shareExportedFiles({List<String>? paths}) async {
+    final selectedPaths = paths ?? exportedPaths;
+    if (selectedPaths.isEmpty) return;
     try {
       await SharePlus.instance.share(
-        ShareParams(files: exportedPaths.map(XFile.new).toList()),
+        ShareParams(files: selectedPaths.map(XFile.new).toList()),
       );
     } on Object catch (error, stack) {
       recordDiagnosticFailure(error, stack, operation: 'export');
@@ -2473,8 +2498,9 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     }
   }
 
-  Future<void> saveExportedFiles() async {
-    if (exportedPaths.isEmpty) return;
+  Future<void> saveExportedFiles({List<String>? paths}) async {
+    final selectedPaths = paths ?? exportedPaths;
+    if (selectedPaths.isEmpty) return;
     if (exportStartBlockReason != null) {
       notifyListeners();
       return;
@@ -2485,14 +2511,14 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     diagnosticError = null;
     errorMessage = null;
     try {
-      for (var index = 0; index < exportedPaths.length; index++) {
-        progress = index / exportedPaths.length;
-        progressMessage = '正在保存到相册 ${index + 1}/${exportedPaths.length}';
+      for (var index = 0; index < selectedPaths.length; index++) {
+        progress = index / selectedPaths.length;
+        progressMessage = '正在保存到相册 ${index + 1}/${selectedPaths.length}';
         notifyListeners();
-        await exportEngine.saveToLibrary(exportedPaths[index]);
+        await exportEngine.saveToLibrary(selectedPaths[index]);
       }
       progress = 1;
-      progressMessage = '已保存 ${exportedPaths.length} 个片段到相册';
+      progressMessage = '已保存 ${selectedPaths.length} 个片段到相册';
     } on Object catch (error, stack) {
       recordDiagnosticFailure(error, stack, operation: 'export');
     } finally {

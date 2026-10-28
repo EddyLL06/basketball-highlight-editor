@@ -145,7 +145,13 @@ void main() {
       await f.state.createNewProject();
       f.state.project = f.project(file.path, id: 'B');
       final next = f.state.mergeClips();
-      await pumpEventQueue();
+      for (
+        var attempt = 0;
+        attempt < 100 && f.state.progressMessage != '正在结束上一次导出';
+        attempt++
+      ) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
       expect(f.state.progressMessage, '正在结束上一次导出');
       await f.state.cancelExport();
       await next;

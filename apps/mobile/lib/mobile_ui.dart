@@ -20,6 +20,7 @@ import 'features/video_source/video_unavailable.dart';
 import 'features/roi_editor/roi_video_preview.dart';
 import 'mobile_app_state.dart';
 import 'features/project_list/project_catalog.dart';
+import 'features/export/export_modes.dart';
 import 'features/diagnostics/mobile_diagnostics.dart';
 import 'features/diagnostics/diagnostic_report.dart';
 import 'mobile_theme.dart';
@@ -44,6 +45,7 @@ part 'features/player_groups/player_group_editor.dart';
 part 'features/operation_status/uncertain_task_notice.dart';
 part 'features/export/export_overlap_notice.dart';
 part 'features/project_list/project_list_page.dart';
+part 'features/export/export_modes_ui.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 
@@ -4119,8 +4121,20 @@ class _ExportView extends StatefulWidget {
 
 class _ExportViewState extends State<_ExportView> {
   String? selectedPlayer;
+  MobileOutputMode outputMode = MobileOutputMode.clips;
 
   MobileAppState get state => widget.state;
+
+  void _startExport(BuildContext context) {
+    switch (outputMode) {
+      case MobileOutputMode.clips:
+        unawaited(state.exportClipsForPlayer(selectedPlayer));
+      case MobileOutputMode.merged:
+        unawaited(state.mergeClipsForPlayer(selectedPlayer));
+      case MobileOutputMode.labels:
+        unawaited(state.exportByLabels(player: selectedPlayer));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4200,74 +4214,14 @@ class _ExportViewState extends State<_ExportView> {
                     ),
                 ],
               ),
-              if (selectedPlayer != null) ...[
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: (state.exportStartBlockReason != null)
-                        ? null
-                        : () => unawaited(
-                            state.exportClipsForPlayer(selectedPlayer),
-                          ),
-                    icon: Icon(
-                      LucideIcons.download,
-                      size: 18,
-                      color: Colors.white,
-                    ),
-                    label: Text(context.bheText('导出 $selectedPlayer 的片段')),
-                  ),
-                ),
-              ],
               const SizedBox(height: 16),
             ],
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      l10n?.outputMode ?? '输出方式',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      l10n?.mobileExportDescription ?? '当前移动端使用原视频分别导出，保留原始音频。',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: (state.exportStartBlockReason != null)
-                            ? null
-                            : () => unawaited(state.exportClips()),
-                        icon: const Icon(LucideIcons.files, size: 18),
-                        label: Text(l10n?.exportAllSeparately ?? '分别导出全部'),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: (state.exportStartBlockReason != null)
-                            ? null
-                            : () => unawaited(
-                                state.mergeClipsForPlayer(selectedPlayer),
-                              ),
-                        icon: const Icon(LucideIcons.merge, size: 18),
-                        label: Text(
-                          selectedPlayer == null
-                              ? (l10n?.mergeAllIncluded ?? '合并导出全部保留片段')
-                              : (l10n?.mergePlayerClips(selectedPlayer!) ??
-                                    '合并导出 $selectedPlayer 的片段'),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            _ExportModeSelector(
+              state: state,
+              mode: outputMode,
+              player: selectedPlayer,
+              onChanged: (mode) => setState(() => outputMode = mode),
+              onStart: () => _startExport(context),
             ),
             if (state.exporting) ...[
               const SizedBox(height: 12),
@@ -4314,26 +4268,32 @@ class _ExportViewState extends State<_ExportView> {
                             '已导出 ${state.exportedPaths.length} 个片段',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
+                      if (state.exportBatchTotal > 0) ...[
+                        const SizedBox(height: 8),
+                        Text(context.bheText(state.exportBatchFiles.length < state.exportBatchTotal ? '部分完成' : '全部完成')),
+                        Text(context.bheText('已完成 ${state.exportBatchFiles.length}/${state.exportBatchTotal} 个标签')),
+                        for (final item in state.exportBatchFiles)
+                          _LabelExportResultRow(state: state, item: item),
+                      ] else ...[
+                        for (final path in state.exportedPaths)
+                          _LabelExportResultRow(state: state, item: LabelExportFile(File(path).uri.pathSegments.last, path)),
+                      ],
                       const SizedBox(height: 12),
-                      Row(
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
                         children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () =>
-                                  unawaited(state.shareExportedFiles()),
-                              icon: const Icon(LucideIcons.share2, size: 17),
-                              label: Text(context.bheText('分享')),
-                            ),
+                          OutlinedButton.icon(
+                            onPressed: () => unawaited(state.shareExportedFiles()),
+                            icon: const Icon(LucideIcons.share2, size: 17),
+                            label: Text(context.bheText(state.exportedPaths.length > 1 ? '分享全部' : '分享')),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: state.exportStartBlockReason == null
-                                  ? () => unawaited(state.saveExportedFiles())
-                                  : null,
-                              icon: const Icon(LucideIcons.save, size: 17),
-                              label: Text(context.bheText('保存到相册')),
-                            ),
+                          FilledButton.icon(
+                            onPressed: state.exportStartBlockReason == null
+                                ? () => unawaited(state.saveExportedFiles())
+                                : null,
+                            icon: const Icon(LucideIcons.save, size: 17),
+                            label: Text(context.bheText(state.exportedPaths.length > 1 ? '保存全部到相册' : '保存到相册')),
                           ),
                         ],
                       ),

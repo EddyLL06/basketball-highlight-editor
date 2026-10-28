@@ -79,6 +79,10 @@ extension BheBuildContextText on BuildContext {
 }
 
 String? _translateDynamic(String source) {
+  final labelBatch = RegExp(r'^已完成 (\d+)/(\d+) 个标签$').firstMatch(source);
+  if (labelBatch != null) return '${labelBatch.group(1)}/${labelBatch.group(2)} labels completed';
+  final labelProgress = RegExp(r'^正在合成标签 (\d+)/(\d+)：(.+)$').firstMatch(source);
+  if (labelProgress != null) return 'Merging label ${labelProgress.group(1)}/${labelProgress.group(2)}: ${labelProgress.group(3) == '未标记' ? 'Unlabelled' : labelProgress.group(3)}';
   final mobileFormat = RegExp(r'^这个视频的格式（(.+)）手机无法处理。$').firstMatch(source);
   if (mobileFormat != null) return 'This phone cannot process this video format (${mobileFormat.group(1)}).';
 
@@ -449,6 +453,20 @@ const _englishText = <String, String>{
   '部分项目读取失败，查看反馈': 'Some projects could not be read; view diagnostics',
   '新建项目，或从最近项目中打开一个': 'Create a project or open one from recent projects.',
   '将删除项目及应用内视频副本、封面和导出文件；不会删除原视频或相册中的文件。': 'This removes the project and its app-owned video copy, cover, and exports. The original video and files in your gallery are not deleted.',
+  '输出方式': 'Output mode',
+  '标签': 'Label',
+  '开始导出': 'Start export',
+  '每个片段原样导出': 'Export each clip separately',
+  '分别保存每个保留片段': 'Save each included clip separately',
+  '合并成一个视频': 'Merge into one video',
+  '按时间拼成一条集锦': 'Join clips in time order',
+  '按标签合成，含未标记': 'Merge by label, including unlabelled clips',
+  '分享全部': 'Share all',
+  '保存全部到相册': 'Save all to gallery',
+  '按标签合成完成': 'Merged by label',
+  '部分导出已完成': 'Some exports are complete',
+  '部分完成': 'Partially complete',
+  '全部完成': 'All complete',
 
   '重命名球员': 'Rename player',
   '名称不能为空': 'Name cannot be empty',
