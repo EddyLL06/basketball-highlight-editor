@@ -95,6 +95,11 @@ String? _translateDynamic(String source) {
         ? '${gameStatsSummary.group(1)} kept'
         : '${gameStatsSummary.group(1)} kept · est. hit rate $rate%';
   }
+  final untaggedReminder = RegExp(r'^还有 (\d+) 个片段未标标签$').firstMatch(source);
+  if (untaggedReminder != null) {
+    final n = untaggedReminder.group(1);
+    return n == '1' ? '1 clip is still untagged' : '$n clips are still untagged';
+  }
   final historyPartial = RegExp(r'^部分完成 (\d+)/(\d+)$').firstMatch(source);
   if (historyPartial != null) {
     return 'Partial ${historyPartial.group(1)}/${historyPartial.group(2)}';
@@ -505,6 +510,8 @@ const _englishText = <String, String>{
 
   '检查分析引擎': 'Checking analysis engine',
   '收起': 'Collapse',
+  '本次导出会包含这些片段。': 'This export will include them.',
+  '仍然导出': 'Export anyway',
   '展开': 'Expand',
   '从视频开头算起': 'From the start of the video',
   '保留 ÷ 候选，粗略估算，非真实命中率': 'Kept ÷ candidates. Rough estimate, not a real rate.',

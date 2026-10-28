@@ -35,6 +35,7 @@ part 'features/video_source/video_preview.dart';
 part 'features/video_source/review_controls.dart';
 part 'features/export/export_audio_notice.dart';
 part 'features/game_stats/game_stats_section.dart';
+part 'features/export/untagged_reminder.dart';
 part 'features/roi_editor/roi_editor_sheet.dart';
 part 'features/review_undo/review_notice.dart';
 part 'features/player_tags/player_tag_sheet.dart';
@@ -396,7 +397,10 @@ class _AppShell extends StatelessWidget {
           onOpenExport: () => onSectionChanged(_WorkspaceSection.export),
         ),
       ),
-      _WorkspaceSection.export => _ExportView(state: state),
+      _WorkspaceSection.export => _ExportView(
+        state: state,
+        onBackToReview: () => onSectionChanged(_WorkspaceSection.review),
+      ),
     };
     return Scaffold(
       body: SafeArea(
@@ -4131,8 +4135,9 @@ class _LegendDot extends StatelessWidget {
 }
 
 class _ExportView extends StatefulWidget {
-  const _ExportView({required this.state});
+  const _ExportView({required this.state, required this.onBackToReview});
   final MobileAppState state;
+  final VoidCallback onBackToReview;
 
   @override
   State<_ExportView> createState() => _ExportViewState();
@@ -4144,7 +4149,22 @@ class _ExportViewState extends State<_ExportView> {
 
   MobileAppState get state => widget.state;
 
-  void _startExport(BuildContext context) {
+  bool _reminding = false;
+
+  Future<void> _startExport(BuildContext context) async {
+    if (_reminding) return;
+    final untagged = _untaggedReminderCount(state, selectedPlayer, outputMode);
+    if (untagged > 0) {
+      _reminding = true;
+      final choice = await _showUntaggedReminder(context, untagged);
+      _reminding = false;
+      if (!mounted) return;
+      if (choice == _UntaggedChoice.backToReview) {
+        widget.onBackToReview();
+        return;
+      }
+      if (choice != _UntaggedChoice.exportAnyway) return;
+    }
     switch (outputMode) {
       case MobileOutputMode.clips:
         unawaited(state.exportClipsForPlayer(selectedPlayer));
@@ -4240,7 +4260,7 @@ class _ExportViewState extends State<_ExportView> {
               mode: outputMode,
               player: selectedPlayer,
               onChanged: (mode) => setState(() => outputMode = mode),
-              onStart: () => _startExport(context),
+              onStart: () => unawaited(_startExport(context)),
             ),
             if (state.exporting) ...[
               const SizedBox(height: 12),
