@@ -16,6 +16,7 @@ import 'features/review_undo/review_history.dart';
 import 'features/review_undo/review_action_result.dart';
 import 'features/player_roster/roster_selection.dart';
 import 'features/player_groups/player_group_store.dart';
+import 'features/project_list/project_catalog.dart';
 
 export 'features/review_undo/review_action_result.dart';
 import 'features/project_mutation/project_mutation_queue.dart';
@@ -29,7 +30,10 @@ import 'features/diagnostics/diagnostic_state.dart';
 import 'features/diagnostics/mobile_diagnostics.dart';
 import 'features/operation_status/task_stop_status.dart';
 export 'features/operation_status/task_stop_status.dart';
+
 import 'native_analysis_engine.dart';
+
+part 'features/project_list/project_management.dart';
 
 class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   MobileAppState({
@@ -862,6 +866,17 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     }
   }
 
+  void _notifyProjectManagement() => notifyListeners();
+
+  Future<ProjectCatalog> listSavedProjects() => _mutations.run(() async {
+    try {
+      return await readProjectCatalog(await _dataDirectory());
+    } on Object catch (error, stack) {
+      recordDiagnosticFailure(error, stack, operation: 'project.catalog');
+      Error.throwWithStackTrace(error, stack);
+    }
+  });
+
   Future<void> loadSavedProject() async {
     try {
       await _mutations.run(() async {
@@ -1268,20 +1283,21 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     );
   }
 
-  Future<void> openProject(String id) {
+  Future<void> openProject(String id, {bool requireIdle = false}) {
+    if (requireIdle && projectManagementBlockReason != null) return Future.value();
     final intent = _newProjectIntent();
     return _withProjectTransition(intent, () async {
       if (analysing) await cancelAnalysis();
       if (!_isProjectIntent(intent)) return;
       _invalidateVideoPreparation();
       final opened = await _mutations.run(() async {
-        if (!_isProjectIntent(intent)) return false;
+        if (!_isProjectIntent(intent) || (requireIdle && projectManagementBlockReason != null)) return false;
         final file = await _projectFile(id);
         if (!await file.exists() || !_isProjectIntent(intent)) return false;
         final loaded = const ProjectPackageCodec().decode(
           await file.readAsString(),
         );
-        if (!_isProjectIntent(intent)) return false;
+        if (!_isProjectIntent(intent) || (requireIdle && projectManagementBlockReason != null)) return false;
         project = loaded;
         _resetTransientState();
         diagnosticError = null;
@@ -1292,7 +1308,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         recentProjects = [
           project,
           ...recentProjects.where((item) => item.id != project.id),
-        ];
+        ].take(12).toList();
         await _persistProjects();
         notifyListeners();
         return true;
@@ -1321,13 +1337,14 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
 
   Future<void> createNewProject() => _createNewProject(_newProjectIntent());
 
-  Future<void> _createNewProject(int intent) =>
+  Future<void> _createNewProject(int intent, {bool requireIdle = false}) =>
       _withProjectTransition(intent, () async {
+        if (requireIdle && projectManagementBlockReason != null) return;
         if (analysing) await cancelAnalysis();
         if (!_isProjectIntent(intent)) return;
         _invalidateVideoPreparation();
         await _mutations.run(() async {
-          if (!_isProjectIntent(intent)) return;
+          if (!_isProjectIntent(intent) || (requireIdle && projectManagementBlockReason != null)) return;
           project = _newProject();
           _resetTransientState();
           notifyListeners();
@@ -1347,7 +1364,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     return id;
   }
 
-  Future<void> createNewProjectAndPickVideo() async {
+  Future<void> createNewProjectAndPickVideo({bool requireIdle = false}) async {
+    if (requireIdle && projectManagementBlockReason != null) return;
     final intent = _newProjectIntent();
     final id = project.id, session = _projectSession;
     try {
@@ -1358,8 +1376,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           _projectSession != session) {
         return;
       }
-      await _createNewProject(intent);
-      if (!_isProjectIntent(intent)) return;
+      await _createNewProject(intent, requireIdle: requireIdle);
+      if (!_isProjectIntent(intent) || (requireIdle && project.id == id)) return;
       await _prepareVideo(
         picked.path,
         name: picked.name,
@@ -1590,7 +1608,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     analysisStartedAt = null;
   }
 
-  Future<void> importProject() async {
+  Future<void> importProject({bool requireIdle = false}) async {
+    if (requireIdle && projectManagementBlockReason != null) return;
     final intent = _newProjectIntent();
     final id = project.id, session = _projectSession;
     try {
@@ -1615,15 +1634,16 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         return;
       }
       await _withProjectTransition(intent, () async {
+        if (requireIdle && projectManagementBlockReason != null) return;
         if (analysing) await cancelAnalysis();
         if (!_isProjectIntent(intent)) return;
         _invalidateVideoPreparation();
         final imported = await _mutations.run(() async {
-          if (!_isProjectIntent(intent)) return false;
+          if (!_isProjectIntent(intent) || (requireIdle && projectManagementBlockReason != null)) return false;
           final existing = await existingProjectStorageIds(
             await _dataDirectory(),
           );
-          if (!_isProjectIntent(intent)) return false;
+          if (!_isProjectIntent(intent) || (requireIdle && projectManagementBlockReason != null)) return false;
           final value = const ProjectPackageCodec().decode(
             content,
             existingIds: [
@@ -2189,7 +2209,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   int? _beginExport() {
-    if (exportStartBlockReason != null) {
+    if (projectTransitioning || exportStartBlockReason != null) {
       notifyListeners();
       return null;
     }

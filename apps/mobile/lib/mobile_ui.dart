@@ -19,6 +19,7 @@ import 'features/video_source/video_source_failure.dart';
 import 'features/video_source/video_unavailable.dart';
 import 'features/roi_editor/roi_video_preview.dart';
 import 'mobile_app_state.dart';
+import 'features/project_list/project_catalog.dart';
 import 'features/diagnostics/mobile_diagnostics.dart';
 import 'features/diagnostics/diagnostic_report.dart';
 import 'mobile_theme.dart';
@@ -42,6 +43,7 @@ part 'features/player_groups/player_groups_sheet.dart';
 part 'features/player_groups/player_group_editor.dart';
 part 'features/operation_status/uncertain_task_notice.dart';
 part 'features/export/export_overlap_notice.dart';
+part 'features/project_list/project_list_page.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 
@@ -317,8 +319,9 @@ class _BheMobileAppState extends State<BheMobileApp> {
             onLocaleChanged: _setLocale,
             section: state.analysing ? _WorkspaceSection.project : section,
             onSectionChanged: (value) => setState(() => section = value),
-            onCreateProject: () =>
-                unawaited(state.createNewProjectAndPickVideo()),
+            onCreateProject: () {
+              unawaited(_createManagedProject(context, state));
+            },
             onCheckUpdate: () =>
                 unawaited(_showUpdateSheet(context, updater, state)),
           ),
@@ -530,11 +533,20 @@ class _TopBar extends StatelessWidget {
                 case 'new':
                   onCreateProject();
                   break;
+                case 'projects':
+                  await _showProjectList(context, state);
+                  break;
+                case 'closeProject':
+                  if (_canManageProjects(context, state) && !await state.closeManagedProject() && context.mounted) _projectActionFailed(context, state);
+                  break;
                 case 'import':
-                  await state.importProject();
+                  if (_canManageProjects(context, state)) {
+                    await state.importProject(requireIdle: true);
+                    if (context.mounted && state.projectManagementBlockReason != null) _canManageProjects(context, state);
+                  }
                   break;
                 case 'delete':
-                  await _confirmDelete(context, state);
+                  if (_canManageProjects(context, state)) await _confirmManagedDelete(context, state, state.project);
                   break;
                 case 'renameProject':
                   await _showProjectRename(context, state);
@@ -562,6 +574,10 @@ class _TopBar extends StatelessWidget {
                 const PopupMenuDivider(),
               ],
               PopupMenuItem(
+                value: 'projects',
+                child: Text(context.bheText('项目列表')),
+              ),
+              PopupMenuItem(
                 value: 'new',
                 child: Text(l10n?.newProject ?? '新建项目'),
               ),
@@ -573,6 +589,11 @@ class _TopBar extends StatelessWidget {
                 value: 'renameProject',
                 enabled: state.project.video != null || state.recentProjects.any((p) => p.id == state.project.id),
                 child: Text(context.bheText('重命名项目')),
+              ),
+              PopupMenuItem(
+                value: 'closeProject',
+                enabled: state.project.video != null || state.recentProjects.any((p) => p.id == state.project.id),
+                child: Text(context.bheText('关闭项目')),
               ),
               PopupMenuItem(
                 value: 'delete',
@@ -602,28 +623,6 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-Future<void> _confirmDelete(BuildContext context, MobileAppState state) async {
-  if (state.project.video == null && state.recentProjects.isEmpty) return;
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(context.bheText('删除当前项目？')),
-      content: Text(context.bheText('“${state.project.name}”及其审核记录会从本机移除。')),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: Text(context.bheText('取消')),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: Text(context.bheText('删除')),
-        ),
-      ],
-    ),
-  );
-  if (confirmed == true) await state.clearProject();
-}
-
 class _ProjectView extends StatelessWidget {
   const _ProjectView({
     super.key,
@@ -650,7 +649,7 @@ class _ProjectView extends StatelessWidget {
                   ? (l10n?.startVideoProject ?? '开始一个视频项目')
                   : state.project.name,
               subtitle: state.project.video == null
-                  ? (l10n?.localCompleteDescription ?? '本地完成分析、审核和导出。')
+                  ? context.bheText('新建项目，或从最近项目中打开一个')
                   : (l10n?.configureAnalysisDescription ?? '配置好分析区域后即可开始识别。'),
             ),
             VideoSourceNotice(state: state),
@@ -661,7 +660,7 @@ class _ProjectView extends StatelessWidget {
               _VideoPreparationCard(message: state.preparingVideoMessage, onCancel: state.cancelVideoPreparation)
             else if (state.project.video == null)
               _EmptyProject(
-                onPick: () => unawaited(state.createNewProjectAndPickVideo()),
+                onPick: () { unawaited(_createManagedProject(context, state)); },
               )
             else
               _ProjectSetup(state: state, onOpenReview: onOpenReview),
@@ -680,7 +679,7 @@ class _ProjectView extends StatelessWidget {
                 _RecentProjectRow(
                   project: project,
                   coverPath: state.coverPaths[project.id],
-                  onTap: () => state.openProject(project.id),
+                  onTap: () { if (_canManageProjects(context, state)) state.openProject(project.id, requireIdle: true); },
                 ),
             ],
           ],
