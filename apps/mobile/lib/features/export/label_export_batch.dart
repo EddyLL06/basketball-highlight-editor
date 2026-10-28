@@ -41,6 +41,8 @@ extension MobileLabelExport on MobileAppState {
         return;
       }
       exportBatchTotal = groups.length;
+      _historyActiveMode = 'labels';
+      _historyPlannedCount = groups.length;
       final parent = Directory(await _projectPath(id, area: 'exports'));
       await parent.create(recursive: true);
       final batch = await parent.createTemp('labels_');
@@ -154,6 +156,22 @@ extension MobileLabelExport on MobileAppState {
       }
     } finally {
       watch.stop();
+      if (current() && exportedPaths.isNotEmpty) {
+        await _recordExportHistory(
+          mode: 'labels',
+          plannedCount: exportBatchTotal,
+          durationMs: watch.elapsedMilliseconds,
+          paths: List.of(exportedPaths),
+          expectedRun: run,
+          names: {
+            for (final file in exportBatchFiles) file.path: file.label ?? '未标记',
+          },
+          untaggedPaths: {
+            for (final file in exportBatchFiles)
+              if (file.label == null) file.path,
+          },
+        );
+      }
       if (batchDirectory != null && !cleanupUncertain) {
         try {
           if (await batchDirectory.exists() &&

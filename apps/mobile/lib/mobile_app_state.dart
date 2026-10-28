@@ -9,6 +9,7 @@ import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
@@ -36,6 +37,7 @@ import 'native_analysis_engine.dart';
 
 part 'features/project_list/project_management.dart';
 part 'features/export/label_export_batch.dart';
+part 'features/export_history/export_history_state.dart';
 
 class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   MobileAppState({
@@ -209,6 +211,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   bool preparingVideo = false;
   String preparingVideoMessage = '';
   bool analysing = false;
+  String? exportHistoryWarning;
+  String? _historyActiveMode;
+  int _historyPlannedCount = 0;
+  DateTime? _historyExportStartedAt;
   bool exporting = false;
   int exportBatchTotal = 0;
   List<LabelExportFile> exportBatchFiles = const [];
@@ -903,7 +909,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
             if (!await file.exists()) continue;
             try {
               loadedProjects.add(
-                const ProjectPackageCodec().decode(await file.readAsString()),
+                const ProjectPackageCodec().decode(await file.readAsString(), includeLocalHistory: true),
               );
             } on Object catch (error, stack) {
               MobileDiagnostics.instance.error(
@@ -1075,7 +1081,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         await index.exists() && await index.readAsString() == indexContent;
     await commitProjectFiles(
       {
-        file: const ProjectPackageCodec().encode(snapshot),
+        file: const ProjectPackageCodec().encode(snapshot, includeLocalHistory: true),
         if (!indexUnchanged) index: indexContent,
       },
       beforeInstall: commitGuard,
@@ -1184,6 +1190,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           ? old['candidates'] as List<Candidate>
           : current.candidates,
       players: current.players,
+      exportHistory: current.exportHistory,
       lastAnalysisDurationMs: old.containsKey('duration')
           ? old['duration'] as int?
           : current.lastAnalysisDurationMs,
@@ -1302,6 +1309,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         if (!await file.exists() || !_isProjectIntent(intent)) return false;
         final loaded = const ProjectPackageCodec().decode(
           await file.readAsString(),
+          includeLocalHistory: true,
         );
         if (!_isProjectIntent(intent) || (requireIdle && projectManagementBlockReason != null)) return false;
         project = loaded;
@@ -1600,6 +1608,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     videoSourceFailure = null;
     diagnosticError = null;
     errorMessage = null;
+    exportHistoryWarning = null;
+    _historyActiveMode = null;
+    _historyPlannedCount = 0;
+    _historyExportStartedAt = null;
     stage = AnalysisStage.idle;
     progress = 0;
     progressMessage = '';
@@ -2219,6 +2231,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   void _notifyLabelExport() => notifyListeners();
+  void _notifyHistory() => notifyListeners();
 
   int? _beginExport() {
     if (projectTransitioning || exportStartBlockReason != null) {
@@ -2242,6 +2255,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     exportMergedOverlapCount = null;
     diagnosticError = null;
     errorMessage = null;
+    exportHistoryWarning = null;
+    _historyActiveMode = null;
+    _historyPlannedCount = 0;
+    _historyExportStartedAt = DateTime.now();
     MobileDiagnostics.instance.event('export.start');
     notifyListeners();
     return run;
@@ -2258,6 +2275,8 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         _projectSession == session &&
         _exportRun == run;
     bool eligible() => current() && !exportCancelled;
+    var plannedCount = 0;
+    Directory? batchDirectory;
     try {
       if (!await _matchesProjectVideo(applyResult: eligible)) {
         if (!eligible()) return;
@@ -2277,7 +2296,11 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         notifyListeners();
         return;
       }
-      final outputDirectory = await _projectPath(project.id, area: 'exports');
+      plannedCount = candidates.length;
+      _historyActiveMode = 'clips';
+      _historyPlannedCount = plannedCount;
+      batchDirectory = await _newExportDirectory(projectId, 'clips_');
+      final outputDirectory = batchDirectory.path;
       if (!eligible()) return;
       _exportPreflight = false;
       var firstUpdate = true;
@@ -2318,6 +2341,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       }
     } finally {
       stopwatch.stop();
+      if (current() && exportedPaths.isNotEmpty) {
+        await _recordExportHistory(mode: 'clips', plannedCount: plannedCount, durationMs: stopwatch.elapsedMilliseconds, paths: List.of(exportedPaths), expectedRun: run);
+      }
+      await _removeEmptyExportDirectory(batchDirectory);
       if (current()) {
         _exportDrainTimer?.cancel();
         exporting = false;
@@ -2338,6 +2365,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         _projectSession == session &&
         _exportRun == run;
     bool eligible() => current() && !exportCancelled;
+    Directory? batchDirectory;
     try {
       if (!await _matchesProjectVideo(applyResult: eligible)) {
         if (!eligible()) return;
@@ -2362,8 +2390,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
         notifyListeners();
         return;
       }
-      final outputPath =
-          '${await _projectPath(project.id, area: 'exports')}/${project.id}_merged.mp4';
+      _historyActiveMode = 'merged';
+      _historyPlannedCount = 1;
+      batchDirectory = await _newExportDirectory(projectId, 'merge_');
+      final outputPath = '${batchDirectory.path}/${projectId}_merged.mp4';
       if (!eligible()) return;
       _exportPreflight = false;
       var firstUpdate = true;
@@ -2424,6 +2454,10 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       }
     } finally {
       stopwatch.stop();
+      if (current() && exportedPaths.isNotEmpty) {
+        await _recordExportHistory(mode: 'merged', plannedCount: 1, durationMs: stopwatch.elapsedMilliseconds, paths: List.of(exportedPaths), expectedRun: run);
+      }
+      await _removeEmptyExportDirectory(batchDirectory);
       if (current()) {
         _exportDrainTimer?.cancel();
         exporting = false;
@@ -2468,6 +2502,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       recordDiagnosticFailure(error, StackTrace.current, operation: 'export');
       errorMessage = '上一次导出尚未结束，请稍后重试。';
       progressMessage = errorMessage!;
+      _recordTimedOutPartialHistory(run);
       notifyListeners();
     });
     try {
@@ -2505,25 +2540,40 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
       notifyListeners();
       return;
     }
-    _exportRun++;
+    final run = ++_exportRun;
+    final id = project.id, session = _projectSession;
+    bool current() => !_disposed && project.id == id && _projectSession == session && _exportRun == run;
     _mergeCommitted = false;
     exporting = true;
     diagnosticError = null;
     errorMessage = null;
+    exportHistoryWarning = null;
+    _historyActiveMode = null;
+    _historyPlannedCount = 0;
+    _historyExportStartedAt = null;
     try {
       for (var index = 0; index < selectedPaths.length; index++) {
         progress = index / selectedPaths.length;
         progressMessage = '正在保存到相册 ${index + 1}/${selectedPaths.length}';
         notifyListeners();
         await exportEngine.saveToLibrary(selectedPaths[index]);
+        if (!current()) return;
+        await _markHistoryGallerySaved(selectedPaths[index], id: id, session: session);
+        if (!current()) return;
       }
       progress = 1;
       progressMessage = '已保存 ${selectedPaths.length} 个片段到相册';
     } on Object catch (error, stack) {
-      recordDiagnosticFailure(error, stack, operation: 'export');
+      if (current()) {
+        recordDiagnosticFailure(error, stack, operation: 'export');
+      } else {
+        MobileDiagnostics.instance.error(error, stack, operation: 'export');
+      }
     } finally {
-      exporting = false;
-      notifyListeners();
+      if (current()) {
+        exporting = false;
+        notifyListeners();
+      }
     }
   }
 

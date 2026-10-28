@@ -1,4 +1,5 @@
 export 'src/models.dart';
+export 'src/export_history.dart';
 export 'src/project_package.dart';
 export 'src/project_identity.dart';
 export 'src/analysis_engine.dart';

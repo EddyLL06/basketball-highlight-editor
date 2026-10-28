@@ -79,6 +79,8 @@ extension BheBuildContextText on BuildContext {
 }
 
 String? _translateDynamic(String source) {
+  final historyMore = RegExp(r'^查看全部 (\d+) 条$').firstMatch(source);
+  if (historyMore != null) return 'View all ${historyMore.group(1)} entries';
   final labelBatch = RegExp(r'^已完成 (\d+)/(\d+) 个标签$').firstMatch(source);
   if (labelBatch != null) return '${labelBatch.group(1)}/${labelBatch.group(2)} labels completed';
   final labelProgress = RegExp(r'^正在合成标签 (\d+)/(\d+)：(.+)$').firstMatch(source);
@@ -454,6 +456,14 @@ const _englishText = <String, String>{
   '新建项目，或从最近项目中打开一个': 'Create a project or open one from recent projects.',
   '将删除项目及应用内视频副本、封面和导出文件；不会删除原视频或相册中的文件。': 'This removes the project and its app-owned video copy, cover, and exports. The original video and files in your gallery are not deleted.',
   '输出方式': 'Output mode',
+  '导出历史': 'Export history',
+  '暂无导出记录': 'No export history',
+  '查看最近 3 条': 'Show latest 3',
+  '本机文件不可用': 'Local file unavailable',
+  '已保存到相册，请在相册查看': 'Saved to gallery. View it in your gallery.',
+  '已保存到相册': 'Saved to gallery',
+  '视频已导出，历史记录保存失败。': 'Video exported, but the history could not be saved.',
+  '已保存到相册，历史记录更新失败。': 'Saved to gallery, but the history could not be updated.',
   '标签': 'Label',
   '开始导出': 'Start export',
   '每个片段原样导出': 'Export each clip separately',

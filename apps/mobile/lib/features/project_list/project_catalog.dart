@@ -44,6 +44,7 @@ Future<ProjectCatalog> readProjectCatalog(Directory data) async {
       );
       final project = const ProjectPackageCodec().decode(
         await File(path).readAsString(),
+        includeLocalHistory: true,
       );
       if (project.id != id) {
         throw const FormatException('Project ID does not match file');

@@ -38,11 +38,12 @@ extension MobileProjectManagement on MobileAppState {
         if (!await file.exists()) return false;
         final old = const ProjectPackageCodec().decode(
           await file.readAsString(),
+          includeLocalHistory: true,
         );
         if (old.id != id) throw const FormatException('Project ID mismatch');
         final next = old.copyWith(name: value);
         await commitProjectFiles({
-          file: const ProjectPackageCodec().encode(next),
+          file: const ProjectPackageCodec().encode(next, includeLocalHistory: true),
         });
         recentProjects = [
           for (final p in recentProjects)

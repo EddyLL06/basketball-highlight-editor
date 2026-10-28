@@ -46,6 +46,7 @@ part 'features/operation_status/uncertain_task_notice.dart';
 part 'features/export/export_overlap_notice.dart';
 part 'features/project_list/project_list_page.dart';
 part 'features/export/export_modes_ui.dart';
+part 'features/export_history/export_history_ui.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 
@@ -75,6 +76,7 @@ class _BheMobileAppState extends State<BheMobileApp> {
   DateTime? _lastBackPress;
   bool _wasExporting = false;
   bool _starPromptHandled = false;
+  String? _lastHistoryWarning;
 
   @override
   void initState() {
@@ -141,6 +143,23 @@ class _BheMobileAppState extends State<BheMobileApp> {
   }
 
   void _handleStateChange() {
+    final warning = state.exportHistoryWarning;
+    if (warning != _lastHistoryWarning) {
+      _lastHistoryWarning = warning;
+      if (warning != null) {
+        final diagnostic = state.diagnosticError;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || state.exportHistoryWarning != warning) return;
+          final context = _navigatorKey.currentContext;
+          if (context == null || !context.mounted) return;
+          _messengerKey.currentState?.showSnackBar(SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text(context.bheText(warning)),
+            action: SnackBarAction(label: context.bheText('反馈'), onPressed: () => showMobileDiagnostics(context, error: diagnostic)),
+          ));
+        });
+      }
+    }
     final exportCompleted =
         _wasExporting &&
         !state.exporting &&
@@ -4304,6 +4323,7 @@ class _ExportViewState extends State<_ExportView> {
             ],
             _ExportOverlapNotice(state: state),
             _ExportAudioNotice(state: state),
+            _ExportHistorySection(key: ValueKey('history-${state.project.id}'), state: state),
             VideoSourceNotice(state: state),
           ],
         ),

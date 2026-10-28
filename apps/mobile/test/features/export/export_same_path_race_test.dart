@@ -6,7 +6,7 @@ import '../../support/mobile_video_fixture.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
-    'returning to old project must not launch on same output path before prior merge drains',
+    'returning to old project waits for prior merge and uses a unique output path',
     () async {
       final f = MobileVideoFixture();
       const channel = MethodChannel('com.bhe.bhe/mobile_media');
@@ -55,7 +55,13 @@ void main() {
         await f.state.openProject('A');
         expect(f.state.project.id, 'A');
         final next = f.state.mergeClips();
-        await pumpEventQueue();
+        for (
+          var attempt = 0;
+          attempt < 100 && f.state.progressMessage != '正在结束上一次导出';
+          attempt++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
         expect(calls, 1);
         expect(f.state.progressMessage, '正在结束上一次导出');
         finish.completeError(PlatformException(code: 'EXPORT_CANCELLED'));
@@ -66,12 +72,12 @@ void main() {
         expect(cancels, [ids.first]);
         expect(ids.first, isNot(ids.last));
         expect(f.state.exportedPaths.single, paths.last);
-        expect(paths.last, paths.first);
+        expect(paths.last, isNot(paths.first));
         expect(
           maxActive,
           1,
           reason:
-              'previous native merge remains active when same output path is requested again',
+              'previous native merge remains active until its worker drains',
         );
       } finally {
         if (!finish.isCompleted) {

@@ -1,3 +1,4 @@
+import 'export_history.dart';
 import 'package:meta/meta.dart';
 
 enum CandidateSelection { included, excluded }
@@ -124,10 +125,12 @@ class EvidencePoint {
           : timeSeconds is num
           ? (timeSeconds * 1000).round()
           : 0,
-      x: (json['x'] as num?)?.toDouble() ??
+      x:
+          (json['x'] as num?)?.toDouble() ??
           (json['landing_x'] as num?)?.toDouble() ??
           0,
-      y: (json['y'] as num?)?.toDouble() ??
+      y:
+          (json['y'] as num?)?.toDouble() ??
           (json['landing_y'] as num?)?.toDouble() ??
           0,
       confidence: (json['confidence'] as num?)?.toDouble(),
@@ -381,8 +384,7 @@ class Candidate {
     if (lateralExit != null) 'lateral_exit': lateralExit,
     if (postCrossingLateralRecovery != null)
       'post_crossing_lateral_recovery': postCrossingLateralRecovery,
-    if (postCrossingPoints != null)
-      'post_crossing_points': postCrossingPoints,
+    if (postCrossingPoints != null) 'post_crossing_points': postCrossingPoints,
     if (ballPersistence != null) 'ball_persistence': ballPersistence,
     if (netSignalAvailable != null) 'net_signal_available': netSignalAvailable,
     if (netSupport != null) 'net_support': netSupport,
@@ -414,7 +416,8 @@ class Candidate {
     final crossingValue =
         json['crossing'] ?? overlay['crossing'] ?? evidence['crossing'];
     final rawPrediction = json['prediction'];
-    final predictionValue = rawPrediction is Map &&
+    final predictionValue =
+        rawPrediction is Map &&
             (rawPrediction['landing_x'] != null ||
                 rawPrediction['x'] != null ||
                 rawPrediction['landing_y'] != null)
@@ -497,13 +500,14 @@ class Candidate {
             (rawPrediction is Map ? rawPrediction['landing_center'] : null) ??
             (predictionValue is Map ? predictionValue['landing_center'] : null),
       ),
-      predictionPointCount: predictionValue is Map &&
-              predictionValue['point_count'] is num
+      predictionPointCount:
+          predictionValue is Map && predictionValue['point_count'] is num
           ? _intValue(predictionValue['point_count'])
           : json['prediction_point_count'] is num
           ? _intValue(json['prediction_point_count'])
           : null,
-      predictionReview: json['prediction_review'] == true ||
+      predictionReview:
+          json['prediction_review'] == true ||
           (json['gates'] is Map &&
               (json['gates'] as Map)['prediction_review'] == true),
       compositeScore: _scoreValueOrNull(json['composite_score']),
@@ -643,10 +647,12 @@ class AnalysisSettings {
   final ClipSettings clip;
   final int startMs;
   final int? endMs;
+
   /// Sampling rate used by the mobile runtime. When omitted, it follows the
   /// selected mode so old project files keep their previous behavior.
   final double? sampleFps;
   final double confidenceThreshold;
+
   /// ONNX input size. The bundled mobile model is 640; keep this explicit in
   /// the project schema so a future model cannot silently change results.
   final int? modelSize;
@@ -732,6 +738,7 @@ class ProjectSnapshot {
     this.lastAnalysisProgressPercent,
     this.lastAnalysisMessage,
     this.lastExportDurationMs,
+    this.exportHistory = const [],
   });
 
   final String id;
@@ -751,6 +758,7 @@ class ProjectSnapshot {
   final int? lastAnalysisProgressPercent;
   final String? lastAnalysisMessage;
   final int? lastExportDurationMs;
+  final List<ExportHistoryEntry> exportHistory;
 
   int get includedCount => candidates
       .where((candidate) => candidate.selection == CandidateSelection.included)
@@ -781,6 +789,7 @@ class ProjectSnapshot {
     String? lastAnalysisMessage,
     bool clearLastAnalysis = false,
     int? lastExportDurationMs,
+    List<ExportHistoryEntry>? exportHistory,
   }) => ProjectSnapshot(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -807,6 +816,7 @@ class ProjectSnapshot {
         ? null
         : (lastAnalysisMessage ?? this.lastAnalysisMessage),
     lastExportDurationMs: lastExportDurationMs ?? this.lastExportDurationMs,
+    exportHistory: exportHistory ?? this.exportHistory,
   );
 
   Map<String, dynamic> toJson() => {
@@ -830,6 +840,8 @@ class ProjectSnapshot {
       'last_analysis_message': lastAnalysisMessage,
     if (lastExportDurationMs != null)
       'last_export_duration_ms': lastExportDurationMs,
+    if (exportHistory.isNotEmpty)
+      'export_history': exportHistory.map((e) => e.toJson()).toList(),
   };
 
   factory ProjectSnapshot.fromJson(Map<String, dynamic> json) =>
@@ -861,6 +873,7 @@ class ProjectSnapshot {
         lastAnalysisMessage: json['last_analysis_message'] as String?,
         lastExportDurationMs: (json['last_export_duration_ms'] as num?)
             ?.toInt(),
+        exportHistory: ExportHistoryEntry.readList(json['export_history']),
       );
 }
 
