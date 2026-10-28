@@ -1301,6 +1301,7 @@ class _ReviewViewState extends State<_ReviewView> {
   int _completionGeneration = 0;
   bool _fullscreen = false;
   int _undoRevision = 0;
+  int _reviewNoticeRevision = 0;
   int _playerMutationRevision = 0;
   DateTime _lastVideoPaint = DateTime.fromMillisecondsSinceEpoch(0);
   String statusFilter = 'all';
@@ -1359,6 +1360,7 @@ class _ReviewViewState extends State<_ReviewView> {
       ]),
     );
     _undoRevision = state.undoRevision;
+    _reviewNoticeRevision = state.reviewRevision;
     _playerMutationRevision = state.playerMutationRevision;
     state.addListener(_onUndo);
     _openVideo();
@@ -1366,6 +1368,18 @@ class _ReviewViewState extends State<_ReviewView> {
 
   void _onUndo() {
     if (!mounted) return;
+    if (_reviewNoticeRevision != state.reviewRevision) {
+      _reviewNoticeRevision = state.reviewRevision;
+      if (state.reviewNotice == '保存失败，请重试') {
+        final failure = state.reviewDiagnosticError;
+        final session = state.projectSession;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && state.projectSession == session) {
+            _showReviewSaveFailure(context, failure);
+          }
+        });
+      }
+    }
     if (_playerMutationRevision != state.playerMutationRevision) {
       _playerMutationRevision = state.playerMutationRevision;
       if (playerFilter == 'player:${state.lastPlayerOldName}') {
@@ -1772,7 +1786,7 @@ class _ReviewViewState extends State<_ReviewView> {
       onBatchRange: () => _showBatchRangeSheet(context),
     );
     if (candidate == null) {
-      return Column(children: [Expanded(child: rail), _ReviewUndoNotice(state: state)]);
+      return rail;
     }
     final video = state.project.video!;
     return LayoutBuilder(
@@ -1800,7 +1814,6 @@ class _ReviewViewState extends State<_ReviewView> {
                 ),
               ),
               )),
-              Positioned(left: 0, bottom: 0, width: math.min(300, constraints.maxWidth), child: _ReviewUndoNotice(state: state)),
             ]),
           ),
           _ReviewActionBar(
@@ -2516,7 +2529,6 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
                         upper: upper,
                         maxValue: maxValue,
                       )),
-                      Positioned(left: 0, bottom: 0, width: math.min(300, size.width - (_railVisible ? railWidth : 0)), child: _ReviewUndoNotice(state: widget.state)),
                     ]),
                   ),
                   if (_railVisible) ...[
@@ -2619,6 +2631,19 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
                   },
                 ),
                 const SizedBox(width: 6),
+                PopupMenuButton<String>(
+                  key: const ValueKey('review-fullscreen-menu'),
+                  tooltip: context.bheText('更多操作'),
+                  icon: const Icon(LucideIcons.ellipsis, color: Colors.white70, size: 18),
+                  onSelected: (_) => unawaited(widget.state.undoReview()),
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'undo',
+                      enabled: widget.state.canUndoReview,
+                      child: Text(context.bheText('撤销上一步')),
+                    ),
+                  ],
+                ),
                 _LandscapeIconButton(
                   icon: LucideIcons.minimize,
                   tooltip: context.bheText('退出横屏审核'),

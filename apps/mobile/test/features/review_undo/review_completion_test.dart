@@ -84,6 +84,8 @@ void main() {
         await waitProjectWrites(tester, f.state.pendingProjectWrites);
         await tester.pump();
         if (scenario == 'failure') {
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 300));
           expect(
             find.byKey(const ValueKey('review-feedback-action')),
             findsOneWidget,
@@ -113,9 +115,9 @@ void main() {
           return;
         }
         if (scenario == 'undo') {
-          await tester.tap(
-            find.byKey(const ValueKey('review-undo-action')).last,
-          );
+          await tester.tap(find.byType(PopupMenuButton<String>).first);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(l10n.text('撤销上一步')));
           await tester.pump();
           await waitProjectWrites(tester, f.state.pendingProjectWrites);
         }

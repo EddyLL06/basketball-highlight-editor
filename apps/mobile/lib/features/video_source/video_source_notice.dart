@@ -6,12 +6,10 @@ class _InlineNotice extends StatelessWidget {
     required this.message,
     this.error = false,
     this.action,
-    this.textColor,
   });
   final String message;
   final bool error;
   final Widget? action;
-  final Color? textColor;
 
   @override
   Widget build(BuildContext context) {
@@ -46,9 +44,7 @@ class _InlineNotice extends StatelessWidget {
               children: [
                 Text(
                   l10n?.text(message) ?? message,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: textColor),
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
                 ?action,
               ],
@@ -61,14 +57,26 @@ class _InlineNotice extends StatelessWidget {
 }
 
 class VideoSourceNotice extends StatelessWidget {
-  const VideoSourceNotice({super.key, required this.state});
+  const VideoSourceNotice({
+    super.key,
+    required this.state,
+    this.suppressReviewFailure = false,
+  });
   final MobileAppState state;
+  final bool suppressReviewFailure;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: state,
     builder: (context, _) {
-      if (state.errorMessage == null && !state.relinkingVideo) {
+      final reviewFailure =
+          suppressReviewFailure &&
+          state.reviewDiagnosticError != null &&
+          identical(state.diagnosticError, state.reviewDiagnosticError);
+      final message = reviewFailure
+          ? state.videoSourceFailure?.message
+          : state.errorMessage;
+      if (message == null && !state.relinkingVideo) {
         return const SizedBox.shrink();
       }
       final busy = state.relinkingVideo;
@@ -82,7 +90,7 @@ class VideoSourceNotice extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: _InlineNotice(
           key: const ValueKey('video-source-notice'),
-          message: context.bheText(state.errorMessage ?? '正在重新选择视频'),
+          message: context.bheText(message ?? '正在重新选择视频'),
           error: true,
           action: Column(
             mainAxisSize: MainAxisSize.min,
@@ -129,15 +137,15 @@ class VideoSourceNotice extends StatelessWidget {
                   style: actionStyle,
                   child: Text(context.bheText('取消')),
                 ),
-              if (state.errorMessage != null)
+              if (message != null)
                 TextButton(
                   key: const ValueKey('video-feedback'),
                   onPressed: () => showMobileDiagnostics(
                     context,
                     error:
-                        state.diagnosticError ??
+                        (reviewFailure ? null : state.diagnosticError) ??
                         DiagnosticErrorRecord(
-                          StateError(state.errorMessage!),
+                          StateError(message),
                           null,
                           'video',
                         ),
@@ -160,7 +168,7 @@ class VideoSourcePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      VideoSourceNotice(state: state),
+      VideoSourceNotice(state: state, suppressReviewFailure: true),
       Expanded(child: child),
     ],
   );

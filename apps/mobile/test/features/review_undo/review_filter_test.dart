@@ -38,8 +38,14 @@ void main() {
             fixture.state.toggleCandidate('goal', CandidateSelection.excluded),
       );
       await tester.pump();
-      expect(find.byKey(const ValueKey('review-undo-action')), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('review-undo-action')));
+      final rail = find.byWidgetPredicate(
+        (widget) => widget.runtimeType.toString() == '_CandidateRail',
+      );
+      expect(tester.getRect(rail).bottom, closeTo(800, 1));
+      expect(find.byKey(const ValueKey('review-notice-surface')), findsNothing);
+      await tester.tap(find.byType(PopupMenuButton<String>).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.text('撤销上一步')));
       await tester.pump();
       await waitProjectWrites(tester, fixture.state.pendingProjectWrites);
       await tester.pump();

@@ -23,115 +23,69 @@ void main() {
   tearDown(() => f.close());
   for (final brightness in Brightness.values) {
     for (final language in ['zh', 'en']) {
-      for (final failure in [false, true]) {
-        testWidgets(
-          'review notice text and action contrast on black and white frames: $brightness $language failure=$failure',
-          (tester) async {
-            final previous = VideoPlayerPlatform.instance;
-            VideoPlayerPlatform.instance = FakeVideoPlatform();
-            tester.binding.platformDispatcher.localeTestValue = Locale(
-              language,
-            );
-            await tester.binding.setSurfaceSize(const Size(360, 800));
-            try {
-              f.state.project = f.project('${f.root.path}/missing.mp4');
-              await tester.pumpWidget(BheMobileApp(appState: f.state));
-              await tester.pump();
-              if (brightness == Brightness.light) {
-                tester
-                    .widget<PopupMenuButton<String>>(
-                      find.byType(PopupMenuButton<String>),
-                    )
-                    .onSelected!('theme');
-                await tester.pump();
-              }
-              final l10n = Localizations.of<BheLocalizations>(
-                tester.element(find.byType(Scaffold).first),
-                BheLocalizations,
-              )!;
-              await tester.ensureVisible(find.text(l10n.reviewCount(1)));
-              await tester.pump();
-              await tester.tap(find.text(l10n.reviewCount(1)));
-              await tester.pump();
-              if (failure) {
-                TestDefaultBinaryMessengerBinding
-                    .instance
-                    .defaultBinaryMessenger
-                    .setMockMethodCallHandler(
-                      const MethodChannel('plugins.flutter.io/path_provider'),
-                      (_) async => throw PlatformException(
-                        code: 'injected_contrast_failure',
-                      ),
-                    );
-              }
-              await tester.runAsync(
-                () => f.state.toggleCandidate(
-                  'goal',
-                  CandidateSelection.excluded,
-                ),
+      testWidgets('save failure SnackBar fits $brightness $language', (
+        tester,
+      ) async {
+        final previous = VideoPlayerPlatform.instance;
+        VideoPlayerPlatform.instance = FakeVideoPlatform();
+        tester.binding.platformDispatcher.localeTestValue = Locale(language);
+        tester.binding.platformDispatcher.textScaleFactorTestValue = 1.3;
+        await tester.binding.setSurfaceSize(const Size(360, 800));
+        try {
+          f.state.project = f.project('${f.root.path}/missing.mp4');
+          await tester.pumpWidget(BheMobileApp(appState: f.state));
+          await tester.pump();
+          if (brightness == Brightness.light) {
+            tester
+                .widget<PopupMenuButton<String>>(
+                  find.byType(PopupMenuButton<String>),
+                )
+                .onSelected!('theme');
+            await tester.pump();
+          }
+          final l10n = Localizations.of<BheLocalizations>(
+            tester.element(find.byType(Scaffold).first),
+            BheLocalizations,
+          )!;
+          await tester.ensureVisible(find.text(l10n.reviewCount(1)));
+          await tester.pump();
+          await tester.tap(find.text(l10n.reviewCount(1)));
+          await tester.pump();
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMethodCallHandler(
+                const MethodChannel('plugins.flutter.io/path_provider'),
+                (_) async =>
+                    throw PlatformException(code: 'injected_contrast_failure'),
               );
-              await tester.pump();
-              final surface = find
-                  .byKey(const ValueKey('review-notice-surface'))
-                  .last;
-              final surfaceColor = tester.widget<Material>(surface).color!;
-              final tintContainer = tester.widget<Container>(
-                find
-                    .descendant(
-                      of: surface,
-                      matching: find.byWidgetPredicate(
-                        (widget) =>
-                            widget is Container &&
-                            widget.decoration is BoxDecoration,
-                      ),
-                    )
-                    .first,
-              );
-              final tint = (tintContainer.decoration! as BoxDecoration).color!;
-              final text = tester.widget<Text>(
-                find.text(l10n.text(failure ? '保存失败，请重试' : '已排除')).last,
-              );
-              final foreground = text.style!.color!;
-              final action = tester.widget<TextButton>(
-                find
-                    .byKey(
-                      ValueKey(
-                        failure
-                            ? 'review-feedback-action'
-                            : 'review-undo-action',
-                      ),
-                    )
-                    .last,
-              );
-              final actionColor = action.style!.foregroundColor!.resolve(
-                <WidgetState>{},
-              )!;
-              expect(surfaceColor.a, 1.0);
-              for (final frame in [Colors.black, Colors.white]) {
-                final background = Color.alphaBlend(
-                  tint,
-                  Color.alphaBlend(surfaceColor, frame),
-                );
-                expect(
-                  contrast(foreground, background),
-                  greaterThanOrEqualTo(4.5),
-                );
-                expect(
-                  contrast(actionColor, background),
-                  greaterThanOrEqualTo(4.5),
-                );
-              }
-              expect(tester.takeException(), isNull);
-            } finally {
-              await tester.pumpWidget(const SizedBox());
-              await tester.runAsync(() => pumpEventQueue());
-              VideoPlayerPlatform.instance = previous;
-              tester.binding.platformDispatcher.clearLocaleTestValue();
-              await tester.binding.setSurfaceSize(null);
-            }
-          },
-        );
-      }
+          await tester.runAsync(
+            () => f.state.toggleCandidate('goal', CandidateSelection.excluded),
+          );
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 300));
+          final snack = find.byKey(const ValueKey('review-save-failure'));
+          expect(snack, findsOneWidget);
+          final widget = tester.widget<SnackBar>(snack);
+          expect(widget.behavior, SnackBarBehavior.floating);
+          expect(
+            find.byKey(const ValueKey('review-feedback-action')),
+            findsOneWidget,
+          );
+          final text = find.text(l10n.text('保存失败，请重试'));
+          expect(text, findsOneWidget);
+          final textElement = tester.element(text);
+          final foreground = DefaultTextStyle.of(textElement).style.color!;
+          final background = Theme.of(textElement).colorScheme.inverseSurface;
+          expect(contrast(foreground, background), greaterThanOrEqualTo(4.5));
+          expect(tester.takeException(), isNull);
+        } finally {
+          await tester.pumpWidget(const SizedBox());
+          await tester.runAsync(() => pumpEventQueue());
+          VideoPlayerPlatform.instance = previous;
+          tester.binding.platformDispatcher.clearLocaleTestValue();
+          tester.binding.platformDispatcher.clearTextScaleFactorTestValue();
+          await tester.binding.setSurfaceSize(null);
+        }
+      });
     }
   }
 }

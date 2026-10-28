@@ -87,15 +87,15 @@ void main() {
               ),
             );
             await tester.pump();
-            final notice = find
-                .byKey(const ValueKey('review-undo-action'))
-                .last;
             expect(tester.getRect(keep), before);
-            expect(tester.getRect(notice).overlaps(before), isFalse);
+            expect(find.byKey(const ValueKey('review-undo-action')), findsNothing);
+            expect(find.byType(SnackBar), findsNothing);
             final error = tester.takeException();
             if (error != null) debugPrint(error.toString());
             expect(error, isNull);
-            await tester.tap(notice);
+            await tester.tap(find.byKey(const ValueKey('review-fullscreen-menu')));
+            await tester.pumpAndSettle();
+            await tester.tap(find.text(l10n.text('撤销上一步')).last);
             await tester.pump();
             await waitProjectWrites(tester, fixture.state.pendingProjectWrites);
             await tester.pump();

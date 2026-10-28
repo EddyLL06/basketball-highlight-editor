@@ -76,15 +76,26 @@ void main() {
             await tester.pump();
             expect(
               find.byKey(const ValueKey('review-undo-action')),
-              findsOneWidget,
+              findsNothing,
             );
+            expect(find.byType(SnackBar), findsNothing);
             expect(tester.takeException(), isNull);
             expect(tester.getRect(keep), before);
-            final notice = tester.getRect(
-              find.byKey(const ValueKey('review-undo-action')),
+            await tester.tap(find.byType(PopupMenuButton<String>).first);
+            await tester.pumpAndSettle();
+            final undo = find.text(localizations.text('撤销上一步'));
+            expect(
+              tester
+                  .widget<PopupMenuItem<String>>(
+                    find.ancestor(
+                      of: undo,
+                      matching: find.byType(PopupMenuItem<String>),
+                    ),
+                  )
+                  .enabled,
+              isTrue,
             );
-            expect(notice.overlaps(before), isFalse);
-            await tester.tap(find.byKey(const ValueKey('review-undo-action')));
+            await tester.tap(undo);
             await tester.pump();
             await waitProjectWrites(tester, fixture.state.pendingProjectWrites);
             await tester.pump();
@@ -92,11 +103,7 @@ void main() {
               fixture.state.project.candidates.single.selection,
               CandidateSelection.included,
             );
-            await tester.pump(const Duration(seconds: 5));
-            expect(
-              find.byKey(const ValueKey('review-undo-action')),
-              findsNothing,
-            );
+            expect(find.byType(SnackBar), findsNothing);
             expect(tester.takeException(), isNull);
             expect(tester.getRect(keep), before);
           } finally {
