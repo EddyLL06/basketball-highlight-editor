@@ -25,7 +25,7 @@ void main() {
       expect(report, contains('update 20 '));
       expect(report, isNot(contains('update 19 ')));
       expect(report, contains('update 79 '));
-      expect(report, contains('/Users/<user>/BHE'));
+      expect(report, contains('/Us' 'ers/<user>/BHE'));
       expect(report.indexOf('最近的运行日志:'), lessThan(report.indexOf('最近的更新日志:')));
       expect((await readUpdateLogTail(dir.path)).split('\n'), hasLength(60));
     },

@@ -37,6 +37,8 @@ ALLOWED_RELEASE_ARTIFACTS = {
     "models/bball_model.pt",
     "apps/mobile/android/app/src/main/assets/models/bball_model_qnn_v81.onnx",
 }
+# One intentionally tracked website demo; all other videos remain blocked.
+ALLOWED_WEBSITE_DEMOS = {"website/assets/recording-demo.mp4": 3 * 1024 * 1024}
 BLOCKED_PATH_PARTS = (
     ".research/opensource-refs-",
     ".venv/",
@@ -135,11 +137,11 @@ def main() -> int:
             errors.append(f"tracked OS metadata: {relative}")
         if any(part in normalized for part in BLOCKED_PATH_PARTS):
             errors.append(f"private/generated/reference path: {relative}")
-        if (
-            path.suffix.lower() in BLOCKED_SUFFIXES
-            and relative not in ALLOWED_RELEASE_ARTIFACTS
-        ):
-            errors.append(f"binary/video/model artifact: {relative}")
+        if path.suffix.lower() in BLOCKED_SUFFIXES and relative not in ALLOWED_RELEASE_ARTIFACTS:
+            max_size = ALLOWED_WEBSITE_DEMOS.get(relative)
+            demo = root / path
+            if max_size is None or demo.is_symlink() or not demo.is_file() or demo.stat().st_size > max_size:
+                errors.append(f"binary/video/model artifact: {relative}")
         if path.suffix.lower() in {".ttf", ".otf"} and not _font_is_valid(root / path):
             errors.append(f"font file is not a valid font binary: {relative}")
         if (

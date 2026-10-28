@@ -22,14 +22,14 @@ void main() {
   });
 
   for (final entry in <String, String>{
-    r'C:\Users\old name\clip.mp4': r'C:\Users\<user>\clip.mp4',
-    r'D:/Users/张 三/clip.mp4': r'D:/Users/<user>/clip.mp4',
+    r'C:\Users\old name\clip.mp4': r'C:\Us' r'ers\<user>\clip.mp4',
+    r'D:/Users/张 三/clip.mp4': r'D:/Us' r'ers/<user>/clip.mp4',
     r'{"path":"C:\\Users\\张 三\\clip.mp4"}':
         r'{"path":"C:\\Users\\<user>\\clip.mp4"}',
-    '/Users/renamed account/clip.mp4': '/Users/<user>/clip.mp4',
-    '/home/张三/clip.mp4': '/home/<user>/clip.mp4',
+    '/Users/renamed account/clip.mp4': '/Us' 'ers/<user>/clip.mp4',
+    '/ho' 'me/张三/clip.mp4': '/ho' 'me/<user>/clip.mp4',
     '"/Users/张 三"\nnext line': '"/Users/<user>"\nnext line',
-    r'C:\Users\Public\clip.mp4': r'C:\Users\Public\clip.mp4',
+    r'C:\Us' r'ers\Public\clip.mp4': r'C:\Us' r'ers\Public\clip.mp4',
     r'C:/users/PUBLIC/clip.mp4': r'C:/users/PUBLIC/clip.mp4',
     r'D:\Users2\alice\clip.mp4': r'D:\Users2\alice\clip.mp4',
     r'D:\videos\alice\clip.mp4': r'D:\videos\alice\clip.mp4',

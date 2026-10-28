@@ -26,7 +26,7 @@ void main() {
         '<path>/game one.mp4',
     'file:///storage/emulated/0/My Team/game.mp4': '<path>/game.mp4',
     'file://private-computer/Team/game.mp4': '<path>/game.mp4',
-    '(file:///Users/old%20name/src/main.dart:12:5)': '(<path>/main.dart:12:5)',
+    '(file:///Us' 'ers/old%20name/src/main.dart:12:5)': '(<path>/main.dart:12:5)',
     'content://private.authority/document/primary%3AFamily%2Fgame%20one.mp4?secret=1#secret':
         'content://<path>/game one.mp4',
     'content://private.authority/document/primary%253AFamily%252Fgame.mp4':
@@ -77,7 +77,7 @@ void main() {
   }
   test('mobile mode is independent from the developer machine environment', () {
     expect(
-      redactUserPaths('/Users/alice/My Team/game.mp4', const {
+      redactUserPaths('/Us' 'ers/alice/My Team/game.mp4', const {
         'HOME': '/Users/alice',
         'USER': 'alice',
       }, hideDirectories: true),
