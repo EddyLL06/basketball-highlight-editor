@@ -26,6 +26,7 @@ class _ExportHistorySectionState extends State<_ExportHistorySection> {
                 context.bheText('导出历史'),
                 style: Theme.of(context).textTheme.titleMedium,
               ),
+              const SizedBox(height: 4),
               if (state.exportHistoryWarning case final warning?) ...[
                 Text(context.bheText(warning)),
                 TextButton(
@@ -45,6 +46,7 @@ class _ExportHistorySectionState extends State<_ExportHistorySection> {
                 _HistoryEntryTile(state: state, entry: entry),
               if (entries.length > 3)
                 TextButton(
+                  style: _exportActionStyle,
                   onPressed: () => setState(() => showAll = !showAll),
                   child: Text(
                     context.bheText(
@@ -68,25 +70,56 @@ class _HistoryEntryTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final date = entry.createdAt.toLocal();
     String two(int n) => n.toString().padLeft(2, '0');
+    final sameYear = date.year == DateTime.now().year;
     final dateText =
-        '${date.year}-${two(date.month)}-${two(date.day)} ${two(date.hour)}:${two(date.minute)}';
+        '${sameYear ? '' : '${date.year}-'}${two(date.month)}-${two(date.day)} ${two(date.hour)}:${two(date.minute)}';
     final mode = switch (entry.mode) {
       'merged' => '合并成一个视频',
       'labels' => '每个标签各合成一个视频',
       _ => '每个片段原样导出',
     };
+    final theme = Theme.of(context);
+    final statusColor = entry.isPartial ? BhePalette.gold : BhePalette.green;
     return ExpansionTile(
       key: ValueKey('history-entry-${entry.id}'),
       expandedCrossAxisAlignment: CrossAxisAlignment.start,
       expandedAlignment: Alignment.centerLeft,
       tilePadding: EdgeInsets.zero,
+      shape: const Border(),
+      collapsedShape: const Border(),
       title: Text(
         context.bheText(mode),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.titleSmall,
       ),
-      subtitle: Text(
-        '$dateText · ${context.bheText(entry.isPartial ? '部分完成' : '全部完成')} · ${entry.files.length}/${entry.plannedCount} · ${_formatMs(entry.durationMs)}',
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$dateText · ${_formatMs(entry.durationMs)}', style: theme.textTheme.bodySmall),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    entry.isPartial
+                        ? context.bheText('部分完成 ${entry.files.length}/${entry.plannedCount}')
+                        : context.bheText('全部完成 ${entry.files.length}'),
+                    style: theme.textTheme.bodySmall?.copyWith(color: statusColor),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
       children: [
         for (final file in entry.files)
@@ -121,11 +154,13 @@ class _HistoryFileRow extends StatelessWidget {
               spacing: 8,
               children: [
                 TextButton(
+                  style: _exportActionStyle,
                   onPressed: () =>
                       unawaited(state.shareExportedFiles(paths: [value])),
                   child: Text(context.bheText('分享')),
                 ),
                 TextButton(
+                  style: _exportActionStyle,
                   onPressed: state.exportStartBlockReason == null
                       ? () => unawaited(state.saveExportedFiles(paths: [value]))
                       : null,

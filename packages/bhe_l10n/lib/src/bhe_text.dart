@@ -95,6 +95,12 @@ String? _translateDynamic(String source) {
         ? '${gameStatsSummary.group(1)} kept'
         : '${gameStatsSummary.group(1)} kept · est. hit rate $rate%';
   }
+  final historyPartial = RegExp(r'^部分完成 (\d+)/(\d+)$').firstMatch(source);
+  if (historyPartial != null) {
+    return 'Partial ${historyPartial.group(1)}/${historyPartial.group(2)}';
+  }
+  final historyDone = RegExp(r'^全部完成 (\d+)$').firstMatch(source);
+  if (historyDone != null) return 'Done · ${historyDone.group(1)}';
   final excludedSplit = RegExp(r'^手动 (\d+) · 复核 (\d+)$').firstMatch(source);
   if (excludedSplit != null) {
     return 'Manual ${excludedSplit.group(1)} · Rim ${excludedSplit.group(2)}';

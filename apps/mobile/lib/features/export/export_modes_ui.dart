@@ -155,6 +155,9 @@ class _ExportModeCard extends StatelessWidget {
   }
 }
 
+// 导出结果里的明确操作用强调色，避免被主题的灰色文字按钮看成不可点。
+final _exportActionStyle = TextButton.styleFrom(foregroundColor: BhePalette.orange);
+
 class _LabelExportResultRow extends StatelessWidget {
   const _LabelExportResultRow({required this.state, required this.item});
   final MobileAppState state;
@@ -181,11 +184,13 @@ class _LabelExportResultRow extends StatelessWidget {
           spacing: 8,
           children: [
             TextButton(
+              style: _exportActionStyle,
               onPressed: () =>
                   unawaited(state.shareExportedFiles(paths: [item.path])),
               child: Text(context.bheText('分享')),
             ),
             TextButton(
+              style: _exportActionStyle,
               onPressed: state.exportStartBlockReason == null
                   ? () => unawaited(state.saveExportedFiles(paths: [item.path]))
                   : null,
