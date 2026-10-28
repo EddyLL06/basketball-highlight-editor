@@ -155,3 +155,46 @@ def test_strict_json_rejects_duplicate_nested_fields_and_nonfinite_values():
 def test_present_invalid_package_version_is_not_a_fallback(release, value):
     release.previous['packages']['android-arm64-v8a']['version'] = value
     with pytest.raises(ValueError): manifest.validate_manifest(release.previous)
+
+
+@pytest.mark.parametrize('separator', ['/', '\\'])
+def test_windows_inventory_accepts_both_zip_separators(release, separator):
+    tag = 'v0.1.13-windows.1'
+    release.notes(tag)
+    assets = release.assets(tag)
+    archive = next(assets.glob('*.zip'))
+    with zipfile.ZipFile(archive, 'w') as package:
+        package.writestr(separator.join(['BHE', 'bhe-release.json']), json.dumps({
+            'schema': 1, 'version': '0.1.13', 'release_version': '0.1.13-windows.1',
+        }))
+    release.checksum(archive)
+    entries = manifest.package_entries(assets, tag[1:], 'https://example.invalid', 'https://example.invalid')
+    manifest.validate_assets(assets, tag, 'windows', entries)
+
+
+@pytest.mark.parametrize('names', [
+    [],
+    ['BHE/bhe-release.json', 'BHE/bhe-release.json'],
+    ['BHE/bhe-release.json', r'BHE\bhe-release.json'],
+    ['BHE/bhe-release.json', r'BHE\BHE-RELEASE.JSON'],
+    ['BHE/BHE-RELEASE.JSON'],
+    ['BHE/bhe-release.json/'],
+    ['BHE/bhe-release.json', 'BHE\\bhe-release.json\\'],
+])
+def test_windows_inventory_rejects_missing_and_equivalent_duplicates(release, names):
+    import warnings
+
+    tag = 'v0.1.13-windows.1'
+    assets = release.assets(tag)
+    archive = next(assets.glob('*.zip'))
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', UserWarning)
+        with zipfile.ZipFile(archive, 'w') as package:
+            for name in names:
+                package.writestr(name, json.dumps({
+                    'schema': 1, 'version': '0.1.13', 'release_version': '0.1.13-windows.1',
+                }))
+    release.checksum(archive)
+    entries = manifest.package_entries(assets, tag[1:], 'https://example.invalid', 'https://example.invalid')
+    with pytest.raises(ValueError, match='Windows 文件清单缺失或重复'):
+        manifest.validate_assets(assets, tag, 'windows', entries)

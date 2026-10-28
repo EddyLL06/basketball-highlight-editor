@@ -183,10 +183,13 @@ def validate_assets(assets: Path, tag: str, platform: str, entries: dict) -> Non
     if 'windows-x64' in entries:
         path = assets / Path(entries['windows-x64']['url']).name
         with zipfile.ZipFile(path) as archive:
-            names = archive.namelist()
-            if names.count('BHE/bhe-release.json') != 1:
+            # PowerShell 5.1 can store Windows separators in ZIP entry names.
+            # Compare normalized paths, but read the exact original ZipInfo.
+            manifests = [info for info in archive.infolist()
+                         if info.filename.replace('\\', '/').rstrip('/').lower() == 'bhe/bhe-release.json']
+            if len(manifests) != 1 or manifests[0].filename.replace('\\', '/') != 'BHE/bhe-release.json':
                 raise ValueError('Windows 文件清单缺失或重复')
-            inventory = strict_json(archive.read('BHE/bhe-release.json'))
+            inventory = strict_json(archive.read(manifests[0]))
         # Old clients send manifest.version, not the package patch version.
         # Do not publish a ZIP which their unchanged strict helper would reject.
         if inventory.get('schema') != 1 or inventory.get('version') != base:
