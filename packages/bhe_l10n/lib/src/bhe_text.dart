@@ -510,6 +510,7 @@ const _englishText = <String, String>{
 
   '检查分析引擎': 'Checking analysis engine',
   '收起': 'Collapse',
+  '可多选': 'Multi-select',
   '本次导出会包含这些片段。': 'This export will include them.',
   '仍然导出': 'Export anyway',
   '展开': 'Expand',

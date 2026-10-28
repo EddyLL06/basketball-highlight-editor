@@ -4001,13 +4001,40 @@ Color _playerTagColor(String player) {
   return colors[(player.hashCode & 0x7fffffff) % colors.length];
 }
 
+class _ScopeChoiceChip extends StatelessWidget {
+  const _ScopeChoiceChip({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onSelected,
+  });
+  final String label;
+  final int count;
+  final bool selected;
+  final ValueChanged<bool>? onSelected;
+
+  @override
+  Widget build(BuildContext context) => FilterChip(
+    label: Text('$label  $count'),
+    selected: selected,
+    onSelected: onSelected,
+    showCheckmark: false,
+    selectedColor: BhePalette.orange.withValues(alpha: .28),
+    side: BorderSide(
+      color: selected ? BhePalette.orange : BhePalette.borderStrong,
+    ),
+  );
+}
+
 class _PlayerChoiceChip extends StatelessWidget {
   const _PlayerChoiceChip({
     required this.player,
+    required this.count,
     required this.selected,
     required this.onSelected,
   });
   final String player;
+  final int count;
   final bool selected;
   final ValueChanged<bool> onSelected;
 
@@ -4015,7 +4042,7 @@ class _PlayerChoiceChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _playerTagColor(player);
     return InputChip(
-      label: Text(player),
+      label: Text('$player  $count'),
       selected: selected,
       onSelected: onSelected,
       side: BorderSide(color: color.withValues(alpha: .65)),
@@ -4144,7 +4171,7 @@ class _ExportView extends StatefulWidget {
 }
 
 class _ExportViewState extends State<_ExportView> {
-  String? selectedPlayer;
+  ExportScope scope = ExportScope.all;
   MobileOutputMode outputMode = MobileOutputMode.clips;
 
   MobileAppState get state => widget.state;
@@ -4153,7 +4180,7 @@ class _ExportViewState extends State<_ExportView> {
 
   Future<void> _startExport(BuildContext context) async {
     if (_reminding) return;
-    final untagged = _untaggedReminderCount(state, selectedPlayer, outputMode);
+    final untagged = _untaggedReminderCount(state, scope, outputMode);
     if (untagged > 0) {
       _reminding = true;
       final choice = await _showUntaggedReminder(context, untagged);
@@ -4167,11 +4194,11 @@ class _ExportViewState extends State<_ExportView> {
     }
     switch (outputMode) {
       case MobileOutputMode.clips:
-        unawaited(state.exportClipsForPlayer(selectedPlayer));
+        unawaited(state.exportClipsInScope(scope));
       case MobileOutputMode.merged:
-        unawaited(state.mergeClipsForPlayer(selectedPlayer));
+        unawaited(state.mergeClipsInScope(scope));
       case MobileOutputMode.labels:
-        unawaited(state.exportByLabels(player: selectedPlayer));
+        unawaited(state.exportByLabels(scope: scope));
     }
   }
 
@@ -4185,6 +4212,29 @@ class _ExportViewState extends State<_ExportView> {
       0,
       (sum, item) => sum + item.duration.inMilliseconds,
     );
+    final labelCounts = <String, int>{
+      for (final player in state.project.players) player: 0,
+    };
+    var untaggedCount = 0;
+    for (final candidate in included) {
+      final name = candidate.player;
+      if (name == null || name.trim().isEmpty) {
+        untaggedCount++;
+      } else {
+        labelCounts[name] = (labelCounts[name] ?? 0) + 1;
+      }
+    }
+    if (labelCounts.isEmpty) untaggedCount = 0;
+    // 切换项目或标签被改名/删除后，丢掉已不存在的选择。
+    if (scope.active &&
+        (scope.players.any((name) => !labelCounts.containsKey(name)) ||
+            (scope.includeUntagged && untaggedCount == 0))) {
+      scope = ExportScope.only(
+        scope.players.where(labelCounts.containsKey).toSet(),
+        includeUntagged: scope.includeUntagged && untaggedCount > 0,
+      ).normalized;
+    }
+    final blocked = state.exportStartBlockReason != null;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 700),
@@ -4231,25 +4281,53 @@ class _ExportViewState extends State<_ExportView> {
             ),
             const SizedBox(height: 14),
             _GameStatsSection(state: state),
-            if (state.project.players.isNotEmpty) ...[
+            if (labelCounts.isNotEmpty) ...[
               _SectionHeader(
-                title: l10n?.playerExport ?? '按球员导出',
-                action: l10n?.optional ?? '可选',
+                title: l10n?.exportScope ?? '导出范围',
+                action: context.bheText('可多选'),
               ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  for (final player in state.project.players)
+                  _ScopeChoiceChip(
+                    label: context.bheText('全部球员'),
+                    count: included.length,
+                    selected: !scope.active,
+                    onSelected: blocked
+                        ? null
+                        : (_) => setState(() => scope = ExportScope.all),
+                  ),
+                  for (final entry in labelCounts.entries)
                     _PlayerChoiceChip(
-                      player: player,
-                      selected: selectedPlayer == player,
-                      onSelected: (state.exportStartBlockReason != null)
+                      player: entry.key,
+                      count: entry.value,
+                      selected: scope.active && scope.players.contains(entry.key),
+                      onSelected: blocked
                           ? (_) {}
-                          : (selected) => setState(
-                              () => selectedPlayer = selected ? player : null,
-                            ),
+                          : (on) => setState(() {
+                              final players = {...scope.players};
+                              on ? players.add(entry.key) : players.remove(entry.key);
+                              scope = ExportScope.only(
+                                players,
+                                includeUntagged: scope.active && scope.includeUntagged,
+                              ).normalized;
+                            }),
+                    ),
+                  if (untaggedCount > 0)
+                    _ScopeChoiceChip(
+                      label: context.bheText('未标记'),
+                      count: untaggedCount,
+                      selected: scope.active && scope.includeUntagged,
+                      onSelected: blocked
+                          ? null
+                          : (on) => setState(() {
+                              scope = ExportScope.only(
+                                scope.active ? {...scope.players} : <String>{},
+                                includeUntagged: on,
+                              ).normalized;
+                            }),
                     ),
                 ],
               ),
@@ -4258,7 +4336,7 @@ class _ExportViewState extends State<_ExportView> {
             _ExportModeSelector(
               state: state,
               mode: outputMode,
-              player: selectedPlayer,
+              scope: scope,
               onChanged: (mode) => setState(() => outputMode = mode),
               onStart: () => unawaited(_startExport(context)),
             ),

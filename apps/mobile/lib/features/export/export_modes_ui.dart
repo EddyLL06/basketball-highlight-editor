@@ -10,13 +10,13 @@ class _ExportModeSelector extends StatelessWidget {
   const _ExportModeSelector({
     required this.state,
     required this.mode,
-    required this.player,
+    required this.scope,
     required this.onChanged,
     required this.onStart,
   });
   final MobileAppState state;
   final MobileOutputMode mode;
-  final String? player;
+  final ExportScope scope;
   final ValueChanged<MobileOutputMode> onChanged;
   final VoidCallback onStart;
 
@@ -26,7 +26,7 @@ class _ExportModeSelector extends StatelessWidget {
         .where(
           (c) =>
               c.selection == CandidateSelection.included &&
-              (player == null || c.player == player),
+              scope.matches(c),
         )
         .toList();
     final groups = labelExportGroups(clips);

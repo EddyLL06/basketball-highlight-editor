@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:bhe_mobile/features/export/export_modes.dart';
 import 'package:bhe_mobile/media_bridge.dart';
 import 'package:bhe_mobile/native_analysis_engine.dart';
 import 'package:flutter/services.dart';
@@ -71,9 +72,9 @@ void main() {
         final beforeMessage = f.state.progressMessage;
         final beforeError = f.state.errorMessage;
         await f.state.mergeClips();
-        await f.state.mergeClipsForPlayer('Alice');
+        await f.state.mergeClipsInScope(const ExportScope.only({'Alice'}));
         await f.state.exportClips();
-        await f.state.exportClipsForPlayer('Alice');
+        await f.state.exportClipsInScope(const ExportScope.only({'Alice'}));
         expect(exports, 0);
         expect(f.state.exportStartBlockReason, '正在分析，请等待分析结束。');
         expect(f.state.progress, beforeProgress);

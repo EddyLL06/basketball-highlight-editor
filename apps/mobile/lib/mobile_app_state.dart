@@ -2223,11 +2223,11 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
   }
 
   Future<void> exportClips() async {
-    await exportClipsForPlayer(null);
+    await exportClipsInScope(ExportScope.all);
   }
 
   Future<void> mergeClips() async {
-    await mergeClipsForPlayer(null);
+    await mergeClipsInScope(ExportScope.all);
   }
 
   void _notifyLabelExport() => notifyListeners();
@@ -2264,7 +2264,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     return run;
   }
 
-  Future<void> exportClipsForPlayer(String? player) async {
+  Future<void> exportClipsInScope(ExportScope scope) async {
     final run = _beginExport();
     if (run == null) return;
     final stopwatch = Stopwatch()..start();
@@ -2289,7 +2289,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
           .where(
             (candidate) => candidate.selection == CandidateSelection.included,
           )
-          .where((candidate) => player == null || candidate.player == player)
+          .where(scope.matches)
           .toList();
       if (candidates.isEmpty) {
         errorMessage = '没有符合条件的保留片段。';
@@ -2354,7 +2354,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
     }
   }
 
-  Future<void> mergeClipsForPlayer(String? player) async {
+  Future<void> mergeClipsInScope(ExportScope scope) async {
     final run = _beginExport();
     if (run == null) return;
     final stopwatch = Stopwatch()..start();
@@ -2381,7 +2381,7 @@ class MobileAppState extends ChangeNotifier with MobileDiagnosticState {
                     candidate.selection == CandidateSelection.included,
               )
               .where(
-                (candidate) => player == null || candidate.player == player,
+                (candidate) => scope.matches(candidate),
               )
               .toList()
             ..sort((a, b) => a.startMs.compareTo(b.startMs));

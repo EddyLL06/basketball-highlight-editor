@@ -131,7 +131,7 @@ void main() {
   testWidgets('no reminder when filtered to one player', (tester) async {
     await run(tester, players: const ['Alice'], candidates: withUntagged,
         body: (fixture) async {
-      await tester.tap(find.text('Alice'));
+      await tester.tap(find.text('Alice  1'));
       await tester.pump();
       await tester.tap(find.text('合并成一个视频'));
       await tester.pump();

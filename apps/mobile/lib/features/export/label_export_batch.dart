@@ -1,7 +1,7 @@
 part of '../../mobile_app_state.dart';
 
 extension MobileLabelExport on MobileAppState {
-  Future<void> exportByLabels({String? player}) async {
+  Future<void> exportByLabels({ExportScope scope = ExportScope.all}) async {
     final run = _beginExport();
     if (run == null) return;
     _batchExport = true;
@@ -31,7 +31,7 @@ extension MobileLabelExport on MobileAppState {
           .where(
             (c) =>
                 c.selection == CandidateSelection.included &&
-                (player == null || c.player == player),
+                scope.matches(c),
           )
           .toList();
       final groups = labelExportGroups(selected);
