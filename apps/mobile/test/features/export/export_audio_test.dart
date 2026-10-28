@@ -143,6 +143,10 @@ void main() {
               : 'Merging reduced the clip count by 2.';
           await tester.scrollUntilVisible(find.text(message), 300);
           expect(find.text(message), findsOneWidget);
+          await tester.scrollUntilVisible(
+            find.text(l10n.text('导出成功，部分音轨无法保留')),
+            300,
+          );
           expect(find.text(l10n.text('导出成功，部分音轨无法保留')), findsOneWidget);
           skipAudio = false;
           await tester.runAsync(() => fixture.state.mergeClips());
