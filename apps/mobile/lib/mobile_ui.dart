@@ -22,6 +22,7 @@ import 'mobile_app_state.dart';
 import 'features/diagnostics/mobile_diagnostics.dart';
 import 'features/diagnostics/diagnostic_report.dart';
 import 'mobile_theme.dart';
+import 'features/game_stats/game_stats.dart';
 
 export 'mobile_theme.dart' show BhePalette, bheTheme;
 
@@ -31,6 +32,7 @@ part 'features/video_source/review_video_source.dart';
 part 'features/video_source/video_preview.dart';
 part 'features/video_source/review_controls.dart';
 part 'features/export/export_audio_notice.dart';
+part 'features/game_stats/game_stats_section.dart';
 part 'features/roi_editor/roi_editor_sheet.dart';
 part 'features/review_undo/review_notice.dart';
 part 'features/player_tags/player_tag_sheet.dart';
@@ -4176,6 +4178,7 @@ class _ExportViewState extends State<_ExportView> {
               ),
             ),
             const SizedBox(height: 14),
+            _GameStatsSection(state: state),
             if (state.project.players.isNotEmpty) ...[
               _SectionHeader(
                 title: l10n?.playerExport ?? '按球员导出',

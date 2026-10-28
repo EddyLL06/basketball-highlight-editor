@@ -82,6 +82,17 @@ String? _translateDynamic(String source) {
   final mobileFormat = RegExp(r'^这个视频的格式（(.+)）手机无法处理。$').firstMatch(source);
   if (mobileFormat != null) return 'This phone cannot process this video format (${mobileFormat.group(1)}).';
 
+  final gameStatsSummary = RegExp(r'^保留 (\d+) 个(?: · 命中率估算 (\d+)%)?$').firstMatch(source);
+  if (gameStatsSummary != null) {
+    final rate = gameStatsSummary.group(2);
+    return rate == null
+        ? '${gameStatsSummary.group(1)} kept'
+        : '${gameStatsSummary.group(1)} kept · est. hit rate $rate%';
+  }
+  final excludedSplit = RegExp(r'^手动 (\d+) · 复核 (\d+)$').firstMatch(source);
+  if (excludedSplit != null) {
+    return 'Manual ${excludedSplit.group(1)} · Rim ${excludedSplit.group(2)}';
+  }
   final reducedClips = RegExp(r'^合并后减少了 (\d+) 个片段$').firstMatch(source);
   if (reducedClips != null) {
     return 'Merging reduced the clip count by ${reducedClips.group(1)}.';
@@ -445,6 +456,10 @@ const _englishText = <String, String>{
   '保存失败，请重试': 'Could not save. Try again.',
 
   '检查分析引擎': 'Checking analysis engine',
+  '收起': 'Collapse',
+  '展开': 'Expand',
+  '从视频开头算起': 'From the start of the video',
+  '保留 ÷ 候选，粗略估算，非真实命中率': 'Kept ÷ candidates. Rough estimate, not a real rate.',
   '引擎自检': 'Engine check',
   '分析引擎缺少模型加载依赖，请安装最新版本的应用，仍然不行请发送诊断信息。':
       'The analysis engine is missing a dependency required to load the model. Install the latest version of the app. If the problem persists, send us diagnostic information.',
