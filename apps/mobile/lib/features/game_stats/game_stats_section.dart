@@ -147,15 +147,14 @@ class _GameStatsBody extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 16),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
+        Wrap(
+          spacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Text(
               context.bheText('命中率（估算）'),
               style: theme.textTheme.bodySmall,
             ),
-            const SizedBox(width: 10),
             Text(
               rate == null ? '—' : '${(rate * 100).round()}%',
               key: const ValueKey('game-stats-rate'),
