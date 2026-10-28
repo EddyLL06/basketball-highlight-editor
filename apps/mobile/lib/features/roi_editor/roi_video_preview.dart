@@ -77,7 +77,24 @@ class RoiVideoPreview extends ChangeNotifier {
   }
 
   void _changed() {
-    if (!_disposed) notifyListeners();
+    if (_disposed) return;
+    final player = controller;
+    if (player != null && player.value.hasError) {
+      final error = StateError(
+        player.value.errorDescription ?? 'playback_failed',
+      );
+      diagnosticError = MobileDiagnostics.instance.error(
+        error,
+        StackTrace.current,
+        operation: 'playback',
+      );
+      controller = null;
+      player.removeListener(_changed);
+      unawaited(_release(player));
+      _failed();
+      return;
+    }
+    notifyListeners();
   }
 
   void _failed() {
@@ -99,7 +116,9 @@ class RoiVideoPreview extends ChangeNotifier {
         stack,
         operation: 'playback',
       );
-      if (_disposed || generation != _generation) return;
+      if (_disposed || generation != _generation || controller != player) {
+        return;
+      }
       diagnosticError = diagnostic;
       controller = null;
       player.removeListener(_changed);

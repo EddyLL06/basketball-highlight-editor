@@ -35,6 +35,9 @@ class _RoiEditorSheetState extends State<_RoiEditorSheet> {
   double _gestureStartZoom = 1;
   int previewPositionMs = 0;
   int _lastPreviewPositionMs = -1;
+  VideoPlayerController? _lastPreviewController;
+  VideoPlayerValue? _lastPreviewState;
+  VideoSourceFailure? _lastPreviewFailure;
   bool _redrawMode = false;
   Offset? _drawStart;
   Offset? _drawEnd;
@@ -70,17 +73,28 @@ class _RoiEditorSheetState extends State<_RoiEditorSheet> {
       _reportedFailure = failure;
       widget.onVideoFailure(failure);
     }
-    final position = controller?.value.position.inMilliseconds;
-    if (failure != null ||
-        position == null ||
-        (position - _lastPreviewPositionMs).abs() >= 100) {
-      setState(() {
-        if (position != null) {
-          _lastPreviewPositionMs = position;
-          previewPositionMs = position;
-        }
-      });
-    }
+    final player = controller;
+    final value = player?.value;
+    final position = value?.position.inMilliseconds;
+    // Position alone is throttled; readiness and playback state must repaint.
+    final playerState = value?.copyWith(position: Duration.zero);
+    final controllerChanged = !identical(player, _lastPreviewController);
+    final stateChanged =
+        controllerChanged ||
+        playerState != _lastPreviewState ||
+        failure != _lastPreviewFailure;
+    final positionChanged =
+        position != null && (position - _lastPreviewPositionMs).abs() >= 100;
+    if (!stateChanged && !positionChanged) return;
+    setState(() {
+      _lastPreviewController = player;
+      _lastPreviewState = playerState;
+      _lastPreviewFailure = failure;
+      if (position != null && (controllerChanged || positionChanged)) {
+        _lastPreviewPositionMs = position;
+        previewPositionMs = position;
+      }
+    });
   }
 
   Future<void> _togglePreview() => _preview.run((player) async {
