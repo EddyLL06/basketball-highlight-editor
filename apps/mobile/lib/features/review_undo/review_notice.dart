@@ -15,6 +15,8 @@ void _showReviewSaveFailure(
       SnackBar(
         key: const ValueKey('review-save-failure'),
         behavior: SnackBarBehavior.floating,
+        // Keep the retry buttons (不选/选中) reachable while the notice shows.
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 84),
         duration: const Duration(seconds: 5),
         content: Text(context.bheText('保存失败，请重试')),
         action: SnackBarAction(

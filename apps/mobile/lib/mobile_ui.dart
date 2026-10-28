@@ -551,10 +551,14 @@ class _TopBar extends StatelessWidget {
               }
             },
             itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'theme',
-                child: Text(context.bheText(dark ? '切换浅色主题' : '切换深色主题')),
-              ),
+              if (section == _WorkspaceSection.review) ...[
+                PopupMenuItem(
+                  value: 'undo',
+                  enabled: state.canUndoReview,
+                  child: Text(context.bheText('撤销上一步')),
+                ),
+                const PopupMenuDivider(),
+              ],
               PopupMenuItem(
                 value: 'new',
                 child: Text(l10n?.newProject ?? '新建项目'),
@@ -564,8 +568,21 @@ class _TopBar extends StatelessWidget {
                 child: Text(l10n?.openPackage ?? '打开项目包'),
               ),
               PopupMenuItem(
+                value: 'renameProject',
+                enabled: state.project.video != null || state.recentProjects.any((p) => p.id == state.project.id),
+                child: Text(context.bheText('重命名项目')),
+              ),
+              PopupMenuItem(
                 value: 'delete',
-                child: Text(l10n?.deleteProject ?? '删除当前项目'),
+                child: Text(
+                  l10n?.deleteProject ?? '删除当前项目',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'theme',
+                child: Text(context.bheText(dark ? '切换浅色主题' : '切换深色主题')),
               ),
               PopupMenuItem(
                 value: 'update',
@@ -575,9 +592,6 @@ class _TopBar extends StatelessWidget {
                 value: 'diagnostics',
                 child: Text(context.bheText('反馈与诊断')),
               ),
-              if (section == _WorkspaceSection.review)
-                PopupMenuItem(value: 'undo', enabled: state.canUndoReview, child: Text(context.bheText('撤销上一步'))),
-              PopupMenuItem(value: 'renameProject', enabled: state.project.video != null || state.recentProjects.any((p) => p.id == state.project.id), child: Text(context.bheText('重命名项目'))),
             ],
           ),
         ],
