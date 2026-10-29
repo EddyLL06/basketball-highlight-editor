@@ -1,0 +1,4 @@
+# Intel macOS uses PyTorch 2.2.x, which requires NumPy 1.x for from_numpy.
+# OpenCV 5 requires NumPy 2, so the two packages must be constrained together.
+numpy>=1.26,<2
+opencv-python==4.11.0.86

@@ -310,3 +310,23 @@ def test_manual_missing_input_defaults_to_dry_run_through_every_gate(tmp_path):
         args = arglog.read_text().splitlines()
         assert ('--dry-run' in args) is not production
         assert ('--oss-config' in args) is production
+
+
+def test_macos_intel_constraints_are_scoped_to_intel_runtime(tmp_path):
+    workflow = yaml.safe_load((ROOT / '.github/workflows/release-packages.yml').read_text())
+    steps = workflow['jobs']['macos']['steps']
+    install = next(step for step in steps if step.get('name') == 'Install Python runtime dependencies')
+    script = install['run']
+    subprocess.run(['bash', '-n'], input=script, text=True, check=True)
+    fake_python = tmp_path / 'bin' / 'python3'
+    fake_python.parent.mkdir()
+    fake_python.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$BHE_TEST_PIP_LOG"\n')
+    fake_python.chmod(0o755)
+    for arch in ('x86_64', 'arm64'):
+        log = tmp_path / f'{arch}.log'
+        env = {**os.environ, 'ARCH': arch, 'PYTHON_ROOT': str(tmp_path), 'BHE_TEST_PIP_LOG': str(log)}
+        subprocess.run(['bash', '-c', script], env=env, check=True, capture_output=True, text=True)
+        commands = log.read_text().splitlines()
+        install_command = next(command for command in commands if '-r requirements.txt' in command)
+        assert ('-c requirements-macos-intel-constraints.txt' in install_command) == (arch == 'x86_64')
+        assert any(command == '-m pip check' for command in commands) == (arch == 'x86_64')

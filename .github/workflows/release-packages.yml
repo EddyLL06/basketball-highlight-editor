@@ -200,11 +200,17 @@ jobs:
         shell: bash
         env:
           PYTHON_ROOT: ${{ steps.python.outputs.root }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           export PIP_DISABLE_PIP_VERSION_CHECK=1
           "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir --upgrade pip
-          "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -r requirements.txt
+          if [[ "$ARCH" == "x86_64" ]]; then
+            "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -c requirements-macos-intel-constraints.txt -r requirements.txt
+            "$PYTHON_ROOT/bin/python3" -m pip check
+          else
+            "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -r requirements.txt
+          fi
           "$PYTHON_ROOT/bin/python3" -c 'import cv2, numpy, pandas, psutil, torch, ultralytics; print("runtime imports: OK")'
 
       - name: Install CoreML acceleration and export static ONNX
