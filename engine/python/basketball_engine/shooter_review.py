@@ -198,6 +198,23 @@ def render_evidence(
     return evidence
 
 
+def shooter_candidate_inputs(service, store, candidates):
+    """Adapt Engine overlay coordinates to the attribution CLI contract."""
+    result = []
+    for candidate in candidates:
+        rim = service._candidate_rim(store, candidate)
+        result.append(
+            {
+                "id": candidate["id"],
+                "event_time_ms": candidate["event_time_ms"],
+                "rim": {"center_x": rim["x"], "rim_y": rim["y"], "width": rim["width"]}
+                if rim
+                else None,
+            }
+        )
+    return result
+
+
 def persist_evidence(store, evidence):
     with store.connect() as connection:
         for item in evidence:
@@ -384,14 +401,7 @@ class ShooterReviewMixin:
                         )
                     predictions = json.loads(path.read_text(encoding="utf-8"))
                 else:
-                    inputs = [
-                        {
-                            "id": c["id"],
-                            "event_time_ms": c["event_time_ms"],
-                            "rim": self._candidate_rim(store, c),
-                        }
-                        for c in rows
-                    ]
+                    inputs = shooter_candidate_inputs(self, store, rows)
                     input_path, output_path = (
                         destination / "candidates.json",
                         destination / "predictions.json",

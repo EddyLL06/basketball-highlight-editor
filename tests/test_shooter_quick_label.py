@@ -16,6 +16,7 @@ from engine.python.basketball_engine.storage import ProjectStore
 from engine.python.basketball_engine.shooter_review import (
     persist_evidence,
     render_evidence,
+    shooter_candidate_inputs,
 )
 
 
@@ -139,6 +140,20 @@ def label_payload(sheet, evidence, **extra):
         "review_state": "confirmed",
         **extra,
     }
+
+
+def test_engine_rim_coordinates_are_accepted_by_attribution_cli(sheet):
+    from src.basketball_highlight.shooter_attribution import load_scoring_events
+
+    candidate = dict(sheet["candidates"][0])
+    candidate["evidence_json"] = json.dumps(
+        {"overlay": {"rim": {"center_x": 180.5, "rim_y": 45.25, "width": 30}}}
+    )
+    rows = shooter_candidate_inputs(sheet["service"], sheet["store"], [candidate])
+    event = load_scoring_events({"candidates": rows})[0]
+    assert event.candidate_id == candidate["id"]
+    assert event.timestamp == candidate["event_time_ms"] / 1000
+    assert event.rim == {"center_x": 180.5, "rim_y": 45.25, "width": 30}
 
 
 def test_real_frames_preserve_people_and_context(sheet):
