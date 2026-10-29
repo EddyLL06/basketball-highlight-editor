@@ -330,3 +330,14 @@ def test_macos_intel_constraints_are_scoped_to_intel_runtime(tmp_path):
         install_command = next(command for command in commands if '-r requirements.txt' in command)
         assert ('-c requirements-macos-intel-constraints.txt' in install_command) == (arch == 'x86_64')
         assert any(command == '-m pip check' for command in commands) == (arch == 'x86_64')
+
+
+def test_macos_release_tests_bundled_numpy_preprocessing():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/release-packages.yml').read_text())
+    build = next(step for step in workflow['jobs']['macos']['steps'] if step.get('name') == 'Build macOS package')
+    script = build['run']
+    subprocess.run(['bash', '-n'], input=script, text=True, check=True)
+    assert 'BHE.app/Contents/Resources/runtime/python/bin/python3' in script
+    assert 'torch.from_numpy(np.zeros(1))' in script
+    assert 'predictor.preprocess([np.zeros((32, 32, 3), dtype=np.uint8)])' in script
+    assert script.index('scripts/build_macos_release.sh') < script.index('torch.from_numpy')
