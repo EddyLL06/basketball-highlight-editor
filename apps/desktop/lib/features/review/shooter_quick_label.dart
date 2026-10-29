@@ -260,7 +260,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     final id = _id(row),
         frames = _frames(row),
         evidence = _map(row['shooter_evidence']);
-    if (_saving.isNotEmpty || evidence.isEmpty || frames.isEmpty || row['draft'] == true) {
+    if (_saving.isNotEmpty ||
+        evidence.isEmpty ||
+        frames.isEmpty ||
+        row['draft'] == true) {
       return;
     }
     final frame = frames[_frameIndex(row)];
@@ -484,13 +487,15 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                       children: [
                         Expanded(
                           child: Text(
-                            _job?['type'] == 'analysis' ? t(
-                              '分析中：出手画面会陆续出现，完成后可标注射手。',
-                              'Analysis in progress: release stills appear here; label shooters after completion.',
-                            ) : t(
-                              '正在准备出手画面，原有标签保留。可关闭此页，稍后回来。',
-                              'Preparing frames; existing labels are preserved. You can return later.',
-                            ),
+                            _job?['type'] == 'analysis'
+                                ? t(
+                                    '分析中：出手画面会陆续出现，完成后可标注射手。',
+                                    'Analysis in progress: release stills appear here; label shooters after completion.',
+                                  )
+                                : t(
+                                    '正在准备出手画面，原有标签保留。可关闭此页，稍后回来。',
+                                    'Preparing frames; existing labels are preserved. You can return later.',
+                                  ),
                           ),
                         ),
                         TextButton(
@@ -588,7 +593,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     final uncertain = evidence['release_uncertain'] == true;
     final state = row['shooter_review_state'];
     final canSave =
-        evidence.isNotEmpty && !draft && !_saving.contains(id) && _saving.isEmpty;
+        evidence.isNotEmpty &&
+        !draft &&
+        !_saving.contains(id) &&
+        _saving.isEmpty;
     final active = _activeId == id;
     return Card(
       key: ValueKey('shooter-card-$id'),
@@ -621,7 +629,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                     ),
                   ),
                   Text(
-                    draft ? t('分析中预览', 'Analysis preview') : state == 'confirmed'
+                    draft
+                        ? t('分析中预览', 'Analysis preview')
+                        : state == 'confirmed'
                         ? t('已保存', 'Saved')
                         : state == 'uncertain'
                         ? t('不确定', 'Uncertain')
@@ -638,8 +648,11 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: _image(
-                  (_context ? frame['context_path']
-                      : person?['crop_path'] ?? focus['crop_path'] ?? frame['context_path'])
+                  (_context
+                          ? frame['context_path']
+                          : person?['crop_path'] ??
+                                focus['crop_path'] ??
+                                frame['context_path'])
                       as String?,
                 ),
               ),
@@ -653,7 +666,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                             )
                           : t('尚未生成出手画面', 'Frames not prepared')
                     : light
-                    ? t('出手附近 · ${_time(frame['time_ms'])}', 'Near release · ${_time(frame['time_ms'])}')
+                    ? t(
+                        '出手附近 · ${_time(frame['time_ms'])}',
+                        'Near release · ${_time(frame['time_ms'])}',
+                      )
                     : uncertain
                     ? t(
                         '出手时刻待核实 · ${_time(frame['time_ms'])}',
@@ -670,92 +686,99 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    for (var i = 0; i < frames.length; i++)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 3),
-                        child: ChoiceChip(
-                          label: Text(
-                            '${((frames[i]['time_ms'] as num) - (evidence['release_time_ms'] as num)).round()} ms',
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (var i = 0; i < frames.length; i++)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: ChoiceChip(
+                            label: Text(
+                              '${((frames[i]['time_ms'] as num) - (evidence['release_time_ms'] as num)).round()} ms',
+                            ),
+                            selected: i == _frameIndex(row),
+                            onSelected: (_) => setState(() {
+                              _activeId = id;
+                              _frameChoices[id] = i;
+                            }),
+                            visualDensity: VisualDensity.compact,
                           ),
-                          selected: i == _frameIndex(row),
-                          onSelected: (_) => setState(() {
-                            _activeId = id;
-                            _frameChoices[id] = i;
-                          }),
-                          visualDensity: VisualDensity.compact,
                         ),
-                      ),
-                  ],
+                    ],
                   ),
                 ),
               ),
-              if (light) Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(t('蓝框仅表示大致出手区域，请自行确认射手。', 'The blue region is approximate. Choose the shooter by sight.'),
-                  style: Theme.of(context).textTheme.bodySmall),
-              ),
-              if (!light) SizedBox(
-                height: 58,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    for (final p in people)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: Semantics(
-                          button: true,
-                          selected: track == p['track_id'],
-                          label: 'Track ${p['track_id']}',
-                          child: InkWell(
-                            key: ValueKey(
-                              'shooter-person-$id-${p['track_id']}',
-                            ),
-                            onTap: () {
-                              setState(() {
-                                _activeId = id;
-                                _trackChoices[id] = p['track_id'] as int;
-                              });
-                              _focus.requestFocus();
-                            },
-                            child: Container(
-                              width: 72,
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: track == p['track_id']
-                                      ? Colors.lightBlueAccent
-                                      : Theme.of(context).dividerColor,
-                                  width: 2,
+              if (light)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    t(
+                      '蓝框仅表示大致出手区域，请自行确认射手。',
+                      'The blue region is approximate. Choose the shooter by sight.',
+                    ),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              if (!light)
+                SizedBox(
+                  height: 58,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final p in people)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Semantics(
+                            button: true,
+                            selected: track == p['track_id'],
+                            label: 'Track ${p['track_id']}',
+                            child: InkWell(
+                              key: ValueKey(
+                                'shooter-person-$id-${p['track_id']}',
+                              ),
+                              onTap: () {
+                                setState(() {
+                                  _activeId = id;
+                                  _trackChoices[id] = p['track_id'] as int;
+                                });
+                                _focus.requestFocus();
+                              },
+                              child: Container(
+                                width: 72,
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: track == p['track_id']
+                                        ? Colors.lightBlueAccent
+                                        : Theme.of(context).dividerColor,
+                                    width: 2,
+                                  ),
+                                ),
+                                child: Column(
+                                  children: [
+                                    Expanded(
+                                      child: _image(p['crop_path'] as String?),
+                                    ),
+                                    Text(
+                                      'Track ${p['track_id']}',
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              child: Column(
-                                children: [
-                                  Expanded(
-                                    child: _image(p['crop_path'] as String?),
-                                  ),
-                                  Text(
-                                    'Track ${p['track_id']}',
-                                    style: const TextStyle(fontSize: 11),
-                                  ),
-                                ],
-                              ),
                             ),
                           ),
                         ),
-                      ),
-                    if (people.isEmpty)
-                      Center(
-                        child: Text(
-                          t(
-                            '无人框；可按名字标注或看视频',
-                            'No person box; label by name or watch video',
+                      if (people.isEmpty)
+                        Center(
+                          child: Text(
+                            t(
+                              '无人框；可按名字标注或看视频',
+                              'No person box; label by name or watch video',
+                            ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
               const SizedBox(height: 6),
               Text(
                 row['player_name'] == null

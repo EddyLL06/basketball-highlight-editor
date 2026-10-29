@@ -133,6 +133,25 @@ def test_missing_launch_evidence_gives_uncertain_wide_frame(release_project):
     )
 
 
+def test_rim_bounce_does_not_replace_the_original_release():
+    candidate = {"event_time_ms": 5000, "evidence_json": "{}"}
+    points = [
+        {"time": t, "x": 100 + (t - 4) * 10, "y": 20 + 150 * (t - 4) ** 2}
+        for t in (4.3, 4.4, 4.5, 4.6, 4.7)
+    ]
+    points.extend(
+        [
+            {"time": 4.8, "x": 110, "y": 50},
+            {"time": 4.9, "x": 110, "y": 35},
+            {"time": 5, "x": 110, "y": 40},
+        ]
+    )
+    release = estimate_release(candidate, points, 320, 240)
+    assert 3000 < release["time_ms"] < 4000
+    assert release["reason"] == "existing_ball_flight_backprojection"
+    assert release["bbox"] is not None
+
+
 def test_cached_proxy_must_match_source_and_stay_in_project(release_project, tmp_path):
     _, store, video, _, source, proxy, checkpoint = release_project
     assert cached_context(store, video, source)["proxy"] == proxy

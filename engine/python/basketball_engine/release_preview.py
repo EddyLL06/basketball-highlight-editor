@@ -11,9 +11,8 @@ import json
 import math
 from pathlib import Path
 
-from basketball_highlight.tracking import link_ball_detections
-
 from .adapters.analysis import PipelineCancelled
+from basketball_highlight.tracking import link_ball_detections
 from .protocol import ProtocolError
 
 METHOD = "ball_release_preview_v1"
@@ -114,6 +113,21 @@ def ball_points(candidate, coarse, scale):
 def estimate_release(candidate, points, width, height):
     """Find a sustained upward launch, or explicitly fall back to a wide view."""
     event = candidate["event_time_ms"] / 1000
+    # A post-rim bounce is a new motion segment, not the original release.
+    for index in range(2, len(points)):
+        a, b, c = points[index - 2 : index + 1]
+        dt1, dt2 = b["time"] - a["time"], c["time"] - b["time"]
+        if not (0 < dt1 <= 0.5 and 0 < dt2 <= 0.5):
+            continue
+        vy1, vy2 = (b["y"] - a["y"]) / dt1, (c["y"] - b["y"]) / dt2
+        if vy1 > height * 0.1 and vy2 < -height * 0.05 and vy1 - vy2 > height * 0.3:
+            points = points[:index]
+            break
+    rim = (read_json_string(candidate.get("evidence_json")).get("overlay") or {}).get(
+        "rim"
+    ) or {}
+    band = max(height * 0.38, float(rim.get("rim_y", height * 0.35)) + height * 0.05)
+    band = min(height * 0.68, band)
     runs, run = [], []
     for left, right in zip(points, points[1:]):
         dt = right["time"] - left["time"]
@@ -138,18 +152,57 @@ def estimate_release(candidate, points, width, height):
         and r[0]["time"] < event - 0.15
         and r[0]["y"] - r[-1]["y"] > height * 0.035
     ]
-    if not runs:
+    point, reason = None, "upward_ball_motion_estimate"
+    if runs:
+        launch = max(runs, key=lambda r: r[0]["y"] - r[-1]["y"])
+        point = dict(launch[0])
+        for left, right in zip(launch, launch[1:]):
+            if left["y"] >= band >= right["y"]:
+                fraction = (left["y"] - band) / (left["y"] - right["y"])
+                point = {
+                    key: left[key] + (right[key] - left[key]) * fraction
+                    for key in ("time", "x", "y")
+                }
+                break
+    # A crop around the rim often sees only the descending flight. A bounded
+    # quadratic back-projection can recover an approximate earlier launch view.
+    if (
+        len(points) >= 5
+        and points[-1]["time"] - points[0]["time"] >= 0.3
+        and (point is None or point["y"] < band)
+    ):
+        import numpy as np
+
+        ts = np.array([p["time"] - event for p in points])
+        ys = np.array([p["y"] for p in points])
+        xs = np.array([p["x"] for p in points])
+        design = np.column_stack((ts * ts, ts, np.ones_like(ts)))
+        a, b, c = np.linalg.lstsq(design, ys, rcond=None)[0]
+        fit = design @ np.array([a, b, c])
+        total = float(np.sum((ys - ys.mean()) ** 2))
+        r2 = 1 - float(np.sum((ys - fit) ** 2)) / total if total > 1 else 0
+        discriminant = b * b - 4 * a * (c - band)
+        if height * 0.03 < a < height * 5 and r2 >= 0.8 and discriminant > 0:
+            launch_t = float((-b - math.sqrt(discriminant)) / (2 * a))
+            mx, bx = np.linalg.lstsq(
+                np.column_stack((ts, np.ones_like(ts))), xs, rcond=None
+            )[0]
+            launch_x = float(mx * launch_t + bx)
+            back = points[0]["time"] - (event + launch_t)
+            if (
+                0.25 <= -launch_t <= 2.8
+                and -0.15 <= back <= 1.6
+                and 0 <= launch_x <= width
+            ):
+                point = {"time": event + launch_t, "x": launch_x, "y": band}
+                reason = "existing_ball_flight_backprojection"
+    if point is None:
         return {
-            "time_ms": max(0, candidate["event_time_ms"] - 1100),
+            "time_ms": max(0, candidate["event_time_ms"] - 1300),
             "bbox": None,
             "reason": "release_not_visible_in_existing_ball_track",
         }
-    launch = max(runs, key=lambda r: (r[-1]["time"], r[0]["y"] - r[-1]["y"]))
-    # A small offset includes the lift/hand separation around the motion onset.
-    point = launch[0]
-    time_ms = round(
-        (point["time"] + min(0.12, (launch[-1]["time"] - point["time"]) / 2)) * 1000
-    )
+    time_ms = round(point["time"] * 1000)
     cx, cy = point["x"], point["y"]
     # Keep a generous area below the rising ball: a region, not a person box.
     box_width, box_height = width * 0.38, height * 0.76
@@ -158,7 +211,7 @@ def estimate_release(candidate, points, width, height):
     return {
         "time_ms": time_ms,
         "bbox": [left, top, left + box_width, top + box_height],
-        "reason": "upward_ball_motion_estimate",
+        "reason": reason,
     }
 
 
