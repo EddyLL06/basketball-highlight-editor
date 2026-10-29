@@ -99,6 +99,18 @@ See [CHANGELOG](CHANGELOG.md) for all changes. Windows one-click updates start w
 | v0.1.1 – v0.1.3 | 2026-09-16 – 09-23 | Full Chinese and English UI on desktop and mobile; fixed Android native library loading and the ONNX Runtime version |
 | v0.1.0 | 2026-09-14 | First preview release: automated macOS, Windows, and Android test builds, downloadable from the website; mobile ported the desktop analysis algorithm |
 
+## Support and community
+
+If this helps you, buy the author a coffee.
+
+<p align="center"><img src="docs/images/coffee-wechat.png" alt="WeChat Pay QR code" width="180"></p>
+
+### BHE user group
+
+Scan to add me on WeChat and note "BHE group".
+
+<p align="center"><img src="website/assets/wechat-qr.png" alt="Author's WeChat QR code" width="150"></p>
+
 ## Documentation
 
 - [Getting started](docs/GETTING_STARTED.en.md) · [Development](docs/DEVELOPMENT.en.md) · [Architecture](docs/architecture/ARCHITECTURE_V1.md) · [Mobile capabilities](docs/MOBILE_PC_FEATURE_MATRIX.md)

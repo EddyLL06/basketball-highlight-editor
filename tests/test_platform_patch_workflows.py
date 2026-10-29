@@ -331,3 +331,47 @@ def test_manual_missing_input_defaults_to_dry_run_through_every_gate(tmp_path):
         args = arglog.read_text().splitlines()
         assert ('--dry-run' in args) is not production
         assert ('--oss-config' in args) is production
+
+
+def test_macos_intel_constraints_are_scoped_to_intel_runtime(tmp_path):
+    workflow = yaml.safe_load((ROOT / '.github/workflows/release-packages.yml').read_text())
+    steps = workflow['jobs']['macos']['steps']
+    install = next(step for step in steps if step.get('name') == 'Install Python runtime dependencies')
+    script = install['run']
+    subprocess.run(['bash', '-n'], input=script, text=True, check=True)
+    fake_python = tmp_path / 'bin' / 'python3'
+    fake_python.parent.mkdir()
+    fake_python.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$BHE_TEST_PIP_LOG"\n')
+    fake_python.chmod(0o755)
+    for arch in ('x86_64', 'arm64'):
+        log = tmp_path / f'{arch}.log'
+        env = {**os.environ, 'ARCH': arch, 'PYTHON_ROOT': str(tmp_path), 'BHE_TEST_PIP_LOG': str(log)}
+        subprocess.run(['bash', '-c', script], env=env, check=True, capture_output=True, text=True)
+        commands = log.read_text().splitlines()
+        install_command = next(command for command in commands if '-r requirements.txt' in command)
+        assert ('-c requirements-macos-intel-constraints.txt' in install_command) == (arch == 'x86_64')
+        assert any(command == '-m pip check' for command in commands) == (arch == 'x86_64')
+
+
+def test_macos_release_tests_bundled_numpy_preprocessing():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/release-packages.yml').read_text())
+    build = next(step for step in workflow['jobs']['macos']['steps'] if step.get('name') == 'Build macOS package')
+    script = build['run']
+    subprocess.run(['bash', '-n'], input=script, text=True, check=True)
+    assert 'BHE.app/Contents/Resources/runtime/python/bin/python3' in script
+    assert 'scripts/check_numpy_preprocess.py --python' in script
+    assert script.index('scripts/build_macos_release.sh') < script.index('scripts/check_numpy_preprocess.py')
+
+
+def test_native_intel_smoke_uses_release_constraints():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/python-tests.yml').read_text())
+    assert workflow['permissions'] == {'contents': 'read'}
+    job = workflow['jobs']['macos-intel-runtime']
+    assert job['runs-on'] == 'macos-15-intel'
+    install = next(step['run'] for step in job['steps'] if step.get('name') == 'Install Intel runtime dependencies')
+    subprocess.run(['bash', '-n'], input=install, text=True, check=True)
+    assert '-c requirements-macos-intel-constraints.txt -r requirements.txt' in install
+    assert 'python -m pip check' in install
+    assert 'pytest' not in install
+    smoke = next(step for step in job['steps'] if step.get('name') == 'Check NumPy and preprocessing')
+    assert smoke['run'] == 'python scripts/check_numpy_preprocess.py'

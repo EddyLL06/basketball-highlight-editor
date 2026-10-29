@@ -97,6 +97,18 @@ BHE 在自己的电脑或安卓手机上分析，先把疑似进球排好队，�
 | v0.1.1 – v0.1.3 | 2026-09-16 – 09-23 | 桌面端和移动端完整中英文界面；修复 Android 原生库加载和 ONNX Runtime 版本 |
 | v0.1.0 | 2026-09-14 | 首个正式预览版：自动构建 macOS、Windows 安装包和 Android 测试包，可从官网下载；移动端完成桌面算法移植 |
 
+## 支持与交流
+
+如果对您有帮助，请作者喝杯咖啡
+
+<p align="center"><img src="docs/images/coffee-wechat.png" alt="微信收款码" width="180"></p>
+
+### BHE 用户交流群
+
+扫码加微信，备注「进群」。
+
+<p align="center"><img src="website/assets/wechat-qr.png" alt="作者微信二维码" width="150"></p>
+
 ## 文档
 
 - [用户流程](docs/USER_FLOW_V1.md) · [开发说明](docs/DEVELOPMENT.md) · [架构](docs/architecture/ARCHITECTURE_V1.md) · [移动端能力](docs/MOBILE_PC_FEATURE_MATRIX.md)

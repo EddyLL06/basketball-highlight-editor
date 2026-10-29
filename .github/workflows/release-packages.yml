@@ -239,13 +239,16 @@ jobs:
         shell: bash
         env:
           PYTHON_ROOT: ${{ steps.python.outputs.root }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           export PIP_DISABLE_PIP_VERSION_CHECK=1
           "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir --upgrade pip
-          "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -r requirements.txt
-          if [[ "${{ inputs.include_shooter }}" == "true" ]]; then
-            "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -r requirements-shooter.txt
+          if [[ "$ARCH" == "x86_64" ]]; then
+            "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -c requirements-macos-intel-constraints.txt -r requirements.txt
+            "$PYTHON_ROOT/bin/python3" -m pip check
+          else
+            "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -r requirements.txt
           fi
           "$PYTHON_ROOT/bin/python3" -c 'import cv2, numpy, pandas, psutil, torch, ultralytics; print("runtime imports: OK")'
 
@@ -346,6 +349,11 @@ jobs:
           scripts/build_macos_release.sh
           file "apps/desktop/build/macos/Build/Products/Release/BHE.app/Contents/MacOS/BHE"
           codesign --verify --deep --strict "apps/desktop/build/macos/Build/Products/Release/BHE.app"
+          # Test the bundled interpreter after runtime copying and signing.
+          export PYTHONDONTWRITEBYTECODE=1 YOLO_AUTOINSTALL=false
+          export YOLO_CONFIG_DIR="$RUNNER_TEMP/bhe-yolo-smoke"
+          python3 scripts/check_numpy_preprocess.py --python \
+            "apps/desktop/build/macos/Build/Products/Release/BHE.app/Contents/Resources/runtime/python/bin/python3"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4

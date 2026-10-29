@@ -30,7 +30,7 @@
 <meta name="twitter:image" content="https://bhe.jafir.top/assets/demo-cover.jpg">
 <link rel="sitemap" type="application/xml" href="/sitemap.xml">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="../styles.css?v=7">
+<link rel="stylesheet" href="../styles-d013.css">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -101,6 +101,20 @@
   ]
 }
 </script>
+<style>
+.support-blocks{max-width:1080px;margin:auto;display:flex;flex-wrap:wrap;gap:1rem}
+.support-card{display:flex;align-items:center;gap:1.25rem;flex:1 1 420px;min-width:0;max-width:34rem;padding:1.25rem;border:1px solid #303846;border-radius:12px}
+.support-card img{display:block;flex:none;max-width:100%;height:auto;border-radius:8px}
+.support-card p{margin:.5rem 0 0;color:#c8ced7}
+.support-card h2{font-size:1.2rem;color:#e9ecef}
+@media(max-width:620px){.support-card{flex-direction:column;text-align:center}}
+</style>
+<style>
+html{scroll-behavior:auto}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+#download{scroll-margin-top:90px}
+.dl-card.recommended{border-color:var(--ball);box-shadow:0 0 0 1px var(--ball)}
+</style>
 </head>
 <body>
 
@@ -134,7 +148,7 @@
       remove the misses, and export the highlights — without uploading your video or paying a subscription.
     </p>
     <div class="hero-cta">
-      <a class="btn btn-ball" href="#download">Download desktop</a>
+      <a class="btn btn-ball" id="hero-download" href="#download">Download desktop</a>
       <a class="btn btn-ghost" href="#demo">Watch the demo</a>
     </div>
   </div>
@@ -181,9 +195,9 @@
 
 <section class="section section-paper section-tight">
   <figure class="shot reveal">
-    <img src="../assets/workbench.jpg" alt="Review workbench with a large video preview and a candidate list with keep or remove controls" loading="lazy" width="1680" height="1050">
+    <img src="../assets/mac-013/review.webp" alt="Review workbench showing the Chinese-language interface" loading="lazy" width="1680" height="1050">
     <figcaption>
-      The review workbench keeps the video large and the candidates in time order.
+      The review workbench keeps the video large and the candidates in time order. Screenshot shows the Chinese-language interface.
       <span class="mono">Orange = candidate clips.</span>
     </figcaption>
   </figure>
@@ -261,6 +275,17 @@
     </article>
   </div>
 
+  <div class="support-blocks" style="margin-top:2rem">
+    <div class="support-card">
+      <img src="../assets/coffee-wechat-d017.png" alt="WeChat Pay QR code" width="180" height="245" loading="lazy">
+      <p>If this helps you, buy the author a coffee.</p>
+    </div>
+    <div class="support-card">
+      <img src="../assets/wechat-qr.png" alt="Author's WeChat QR code" width="180" height="268" loading="lazy">
+      <div><h2>BHE user group</h2><p>Scan to add me on WeChat and note &quot;BHE group&quot;.</p></div>
+    </div>
+  </div>
+
   <noscript>
     <p class="dl-fine">Enable JavaScript to see the latest download buttons, or visit <a href="https://github.com/fly7632785/basketball-highlight-editor/releases">GitHub Releases</a> to download manually.</p>
   </noscript>
@@ -317,7 +342,7 @@
   </div>
 </footer>
 
-<script src="app.js?v=6"></script>
+<script src="app-d019.js"></script>
 <script src="../language.js?v=3"></script>
 </body>
 </html>

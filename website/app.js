@@ -72,3 +72,29 @@ function setupReveal() {
 
 renderDownloads();
 setupReveal();
+
+// Architecture is not reliably exposed by all browsers. Mac defaults to Apple
+// silicon while keeping Intel and every other download visible in the list.
+function setupRecommendedDownload() {
+  const ua = navigator.userAgent || "";
+  let os = null;
+  if (/Android/i.test(ua)) os = "android-arm64";
+  else if (/Windows/i.test(ua)) os = "win-x64";
+  else if (/Macintosh|Mac OS X/i.test(ua) && !/iPhone|iPad|iPod/i.test(ua)) os = "mac-arm64";
+  const hero = document.getElementById("hero-download");
+  if (!hero || !os) return;
+  const box = document.querySelector(`.dl-actions[data-os="${os}"]`);
+  const link = box && box.querySelector("a.btn");
+  if (!link) return;
+  box.closest(".dl-card").classList.add("recommended");
+  hero.href = link.href;
+  hero.textContent = ({"mac-arm64":"下载 Mac 版（Apple 芯片）", "win-x64":"下载 Windows 版", "android-arm64":"下载 Android 版"})[os];
+  if (os === "mac-arm64") {
+    const intel = document.createElement("a");
+    intel.className = "hero-intel";
+    intel.href = "#download";
+    intel.textContent = "Intel Mac 或其他系统";
+    hero.after(intel);
+  }
+}
+setupRecommendedDownload();
