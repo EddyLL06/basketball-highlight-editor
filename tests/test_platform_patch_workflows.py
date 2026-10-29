@@ -51,6 +51,27 @@ def test_release_plan_platform_and_oss_controls(tmp_path):
             assert fields['build_android'] == 'true'
 
 
+def test_branch_preview_cannot_publish_release_or_oss(tmp_path):
+    workflow = yaml.safe_load((ROOT / '.github/workflows/release-packages.yml').read_text())
+    script = workflow['jobs']['release-plan']['steps'][0]['run']
+    for publish, oss in [('false', 'false'), ('true', 'false'), ('false', 'true'), ('true', 'true')]:
+        output = tmp_path / 'preview-output'
+        output.write_text('')
+        env = dict(os.environ, EVENT_NAME='workflow_dispatch', REF_NAME='codex/preview', SHA='abc',
+                   INPUT_TAG='v0.1.13-shooter.1', INPUT_PLATFORM='macos', INPUT_PUBLISH=publish,
+                   INPUT_PUBLISH_OSS=oss, INPUT_DRY_RUN='false', INPUT_SOURCE_REF='a' * 40,
+                   GITHUB_OUTPUT=str(output), GITHUB_STEP_SUMMARY=str(tmp_path / 'summary'))
+        result = subprocess.run(['bash', '-euo', 'pipefail', '-c', script], env=env, capture_output=True, text=True)
+        allowed = publish == oss == 'false'
+        assert (result.returncode == 0) == allowed
+        if allowed:
+            fields = dict(line.split('=', 1) for line in output.read_text().splitlines())
+            assert fields['source_ref'] == 'a' * 40
+            assert fields['publish'] == fields['publish_oss'] == 'false'
+            assert fields['build_macos'] == 'true'
+            assert fields['build_windows'] == fields['build_android'] == 'false'
+
+
 def test_all_workflow_yaml_and_bash_scripts_parse():
     for path in (ROOT / '.github/workflows').glob('*.yml'):
         workflow = yaml.safe_load(path.read_text())

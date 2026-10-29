@@ -283,6 +283,50 @@ JOB_CANCELLED
 
 `open_project` 和 `list_recent_projects` 返回的视频对象还包含 `source_exists` 和 `source_status`。当原始视频被移动后，调用方应显示重新定位入口；`relink_video` 只更新视频引用和重新读取的媒体元数据，不删除候选、审核记录或项目数据库。
 
+### 射手快标（桌面预览，向后兼容扩展）
+
+三个命令均要求显式 `project_root`，且只操作现有项目：
+
+| 命令 | 附加请求字段 | 响应 |
+|---|---|---|
+| `list_shooter_review` | 无 | `candidates`, `players`, `videos`, 最近的 `jobs` |
+| `prepare_shooter_review` | 可选 `video_id`；可选本地 `predictions_path`（仅单段视频） | 异步 `job` |
+| `set_candidate_shooter` | `candidate_id`, `generation`, `player_id`, `review_state`；可选 `time_ms`, `track_id` | `updated`, `selection`, `review_state` |
+
+`list_shooter_review` 的候选保留 `list_candidates` 字段，并增加
+`shooter_evidence`、`shooter_evidence_stale`、`shooter_selection`、
+`shooter_review_state`。证据包含独立 `generation`、视频指纹、临时
+`tracking_scope`、估计出手时间、`release_uncertain`、建议轨迹 ID，及最多三帧
+`frames[{time_ms,context_path,people:[{track_id,bbox,crop_path}]}]`。
+图片由 Engine 从本地源视频生成，不信任导入 JSON 内的图片路径。
+
+准备任务类型为 `shooter_review`，使用 `get_job` / `cancel_job` 轮询和取消，
+与分析、导出互斥。导入要求视频名称、大小、mtime、完整候选 ID 集合、事件时间和
+跟踪会话均匹配。失败或取消不替换已有证据和人工标签。应用退出会终止其检测子进程。
+
+保存示例：
+
+```json
+{
+  "project_root": "/path/to/project",
+  "candidate_id": "candidate-1",
+  "generation": "job-example",
+  "time_ms": 121800,
+  "track_id": 2,
+  "player_id": "player-example",
+  "review_state": "confirmed"
+}
+```
+
+`review_state` 为 `confirmed` 时必须指定本项目球员；`pending` / `uncertain`
+要求 `player_id:null`。`track_id:null` 允许人工只按名字标记，不伪造人物框。
+非空轨迹必须存在于指定帧和当前证据代次中。保存同时更新独立证据表中的人工选择
+和 `candidate_reviews.player_id`，不修改片段保留、进球判断、备注和审核耗时。
+重跑保留人工标签及旧选择的原始代次，但旧代次请求不能覆盖新证据。
+错误码包括 `SHOOTER_EVIDENCE_CHANGED`、`SHOOTER_CANDIDATES_CHANGED`、
+`SHOOTER_MODEL_MISSING`、`SHOOTER_FRAME_MISMATCH`；源视频变化沿用
+`VIDEO_SOURCE_CHANGED`。客户端应保留未保存状态并明确展示失败。
+
 ### `list_recent_projects`
 
 请求 payload：

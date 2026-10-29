@@ -35,3 +35,37 @@ The preview workflow reuses the existing macOS runtime/build scripts on GitHub
 Actions. SDK installation and packaging run on the hosted runner. Preview
 artifacts are for local validation; no production Release or OSS publication is
 performed by this feature branch workflow.
+
+## Local validation
+
+Open a project in the desktop app, complete candidate analysis, then choose
+**射手快标 / Shooter quick label** in Review. Add roster names if needed and choose
+**Prepare frames**. Select a different detected person or adjacent frame when the
+suggested release is ambiguous. Click a name to save immediately. **Uncertain**
+and **Clear** explicitly remove the player label; **Undo** restores the last
+successful label change in this page. **Watch clip** returns to ordinary video
+review. The same project-player labels drive the existing player export filters.
+
+Preparation can cover a selected video or all project videos. The page can be
+closed while its job runs; reopen it to resume progress polling. A cancelled or
+interrupted job can be cancelled from the page before starting another one.
+Images belong to the project folder, which should remain private alongside its
+source footage. No cross-clip identity propagation is inferred from Track IDs.
+
+## GitHub-only macOS build
+
+The existing `.github/workflows/release-packages.yml` accepts an optional
+`source_ref` for a branch/SHA preview, guarded by `publish=false` and
+`publish_oss=false`. Keep `dry_run=false` (the upstream dry-run feature rehearses
+production-channel publication and has different prerequisites). Set
+`include_shooter=true` and `platform=macos`; use a preview tag-shaped version
+such as `v0.1.13-shooter.1`. No Git tag needs to be created for a SHA preview.
+The two macOS architectures reuse the upstream portable runtime, FFmpeg,
+Flutter build, ad-hoc signing and DMG scripts. Flutter analysis and widget tests
+run on the GitHub runners. No SDK installation or app compilation is needed on
+the local development machine. Model source and checksum are recorded in
+[the shooter model notice](SHOOTER_MODEL_NOTICES.md).
+
+The preview is a semi-automatic labeling interface, not a new accuracy claim.
+The frozen v4 automatic algorithm remains unchanged, and crowded multi-player
+footage still requires independent validation.

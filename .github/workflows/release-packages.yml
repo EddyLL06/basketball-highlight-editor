@@ -102,7 +102,7 @@ jobs:
             platform="$INPUT_PLATFORM"
             publish="$INPUT_PUBLISH"
             publish_oss="$INPUT_PUBLISH_OSS"
-            if [[ -n "$INPUT_SOURCE_REF" ]]; then
+            if [[ -n "${INPUT_SOURCE_REF:-}" ]]; then
               [[ "$publish" == "false" && "$publish_oss" == "false" ]] || {
                 echo "A branch preview requires publish=false and publish_oss=false" >&2
                 exit 1
