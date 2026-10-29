@@ -30,6 +30,36 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pytest -q
 
+  macos-intel-runtime:
+    name: macOS Intel runtime (frozen dependency set)
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the Intel runtime lock file
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --only-binary=:all: \
+            -r requirements-macos-intel.txt pytest PyYAML
+      - name: Verify torch can actually reach numpy
+        # Intel 上 torch 冻结在 2.2.0，与 numpy 2.x 的 ABI 不兼容时两个包都能
+        # import，只有 torch.from_numpy 抛 "Numpy is not available"。这一步
+        # 保证锁文件里的组合真的能跑，而不是仅能导入。
+        run: |
+          python - <<'PY'
+          import sys
+          from scripts.check_runtime import _check_numpy_bridge
+          ok, detail = _check_numpy_bridge(sys.executable)
+          print(detail)
+          raise SystemExit(0 if ok else 1)
+          PY
+      - name: Install FFmpeg
+        run: brew install ffmpeg
+      - name: Run the test suite on the frozen dependency set
+        run: python -m pytest -q
+
   windows-media:
     name: Windows bundled media pipeline
     runs-on: windows-2022

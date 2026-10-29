@@ -86,6 +86,28 @@ portable-python/
 
 It must import `cv2`, `numpy`, `ultralytics`, and `torch`. Do not copy a developer `.venv` that contains absolute paths or machine-local libraries.
 
+#### Intel (x86_64) runtimes are pinned separately
+
+Intel Macs need a different dependency set, pinned in `requirements-macos-intel.txt`:
+
+- PyTorch has deprecated macOS x86, and `2.2.x` is the last release with x64 wheels, so torch is frozen at `2.2.0` on Intel;
+- `torch<2.3` was compiled against the NumPy 1.x ABI. With `numpy>=2`, `import numpy` and `import torch` both succeed, but `torch.from_numpy` raises `RuntimeError: Numpy is not available`, so analysis fails as soon as inference starts;
+- `numpy 1.x` in turn caps the layers above it: `pandas 3.x` requires `numpy>=2.0.2` and `opencv-python 4.12+` requires `numpy>=2`, which leaves Intel on `pandas 2.3.x` / `opencv-python 4.11.x`.
+
+Prepare an Intel runtime with:
+
+```bash
+python3.11 -m pip install --only-binary=:all: -r requirements-macos-intel.txt
+```
+
+Apple Silicon has none of these constraints and keeps using `requirements.txt`. Before bumping any line in the Intel lock file, run the `numpy_bridge` check in `scripts/check_runtime.py`: it performs a real `torch.from_numpy` call and catches the case where both packages import but the bridge is broken.
+
+The main binary is universal while the Python runtime is single-architecture, so cross-arch packaging also checks architecture. `BHE_TARGET_ARCH` makes the prepare script verify that the interpreter, numpy, and torch share the same architecture via `lipo`:
+
+```bash
+BHE_TARGET_ARCH=x86_64 scripts/build_macos_release.sh
+```
+
 Use a self-contained or static FFmpeg/FFprobe build. Homebrew-dependent binaries are for local testing only; `BHE_ALLOW_EXTERNAL_FFMPEG=1` can be used explicitly for that purpose, but it is not a distribution solution.
 
 Ephemeral GitHub macOS runners disable Spotlight indexing to reduce contention during DMG creation. `scripts/create_macos_dmg.sh` uses HFS+ and attempts `Resource busy` failures at most five times; other errors fail immediately. It runs `hdiutil verify` before checksumming and uploading the image. See the [reported GitHub runner issue](https://github.com/actions/runner-images/issues/7522).

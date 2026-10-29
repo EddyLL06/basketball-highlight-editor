@@ -18,7 +18,9 @@ if [[ ! -x "$FLUTTER" ]]; then
 fi
 
 if [[ "${BHE_SKIP_RUNTIME_PREPARE:-0}" != "1" ]]; then
-  "$ROOT/scripts/prepare_macos_runtime.sh" "$RUNTIME_OUT"
+  # 把目标架构传给准备脚本：主程序是 universal，Python 运行时却是单架构，
+  # 交叉打包时最容易在这里错配，准备脚本会用 lipo 逐个核对。
+  BHE_TARGET_ARCH="$ARCH" "$ROOT/scripts/prepare_macos_runtime.sh" "$RUNTIME_OUT"
 fi
 (
   cd "$ROOT/apps/desktop"

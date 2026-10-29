@@ -70,6 +70,32 @@ fi
 cp "$FFMPEG" "$OUT/bin/ffmpeg"
 cp "$FFPROBE" "$OUT/bin/ffprobe"
 
+# 目标架构校验。主程序是 universal 二进制，但 Python 运行时是单架构的：
+# 一旦把 arm64 的解释器或 arm64 的 numpy/torch 打进 Intel 包，问题只会在
+# 用户机器上暴露（Intel 上解释器直接无法执行，或 .so 架构不符导致 import
+# 失败）。这里在同一处把三件东西一起对齐，只在显式指定 BHE_TARGET_ARCH 时生效。
+if [[ "$(uname -s)" == "Darwin" && -n "${BHE_TARGET_ARCH:-}" ]]; then
+  assert_arch() {
+    local label="$1" path="$2"
+    if [[ -z "$path" || ! -e "$path" ]]; then
+      echo "Architecture check: missing $label" >&2
+      exit 2
+    fi
+    local archs
+    archs="$(lipo -archs "$path" 2>/dev/null || true)"
+    if [[ " $archs " != *" $BHE_TARGET_ARCH "* ]]; then
+      echo "Architecture check: $label is '${archs:-unknown}', expected $BHE_TARGET_ARCH" >&2
+      echo "  $path" >&2
+      exit 2
+    fi
+  }
+  PY_SITE="$(find "$OUT"/python/lib -maxdepth 3 -type d -name site-packages -print -quit 2>/dev/null || true)"
+  assert_arch "python3" "$OUT/python/bin/python3"
+  assert_arch "numpy" "$(find "$PY_SITE/numpy" -name '_multiarray_umath*.so' -type f -print -quit 2>/dev/null || true)"
+  assert_arch "torch" "$(find "$PY_SITE/torch" -maxdepth 1 -name '_C*.so' -type f -print -quit 2>/dev/null || true)"
+  echo "Architecture check: python3, numpy, torch are all $BHE_TARGET_ARCH"
+fi
+
 "$OUT/python/bin/python3" "$OUT/scripts/check_runtime.py" \
   --root "$OUT" \
   --python "$OUT/python/bin/python3" \

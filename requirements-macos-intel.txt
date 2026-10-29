@@ -1,0 +1,31 @@
+# macOS Intel(x86_64)发布运行时专用锁文件。
+#
+# 为什么单独一份:
+#   PyTorch 官方已弃用 macOS x86,2.2.x 是最后一个提供 x64 wheel 的版本
+#   (https://pytorch.org/blog/pytorch2-2/),所以 Intel 运行时的 torch 冻结在 2.2.0。
+#   torch<2.3 是按 NumPy 1.x ABI 编译的,配 numpy>=2 时 torch 只打印
+#   "Failed to initialize NumPy: _ARRAY_API not found",随后任何 torch.from_numpy
+#   都抛 "RuntimeError: Numpy is not available" —— 表现为分析一到推理就失败。
+#
+#   numpy 1.x 又反过来压住上层:pandas 3.x 要求 numpy>=2.0.2,opencv-python 5.x
+#   与 4.12 要求 numpy>=2,在 Intel 上都装不了,只能停在 pandas 2.3.x /
+#   opencv-python 4.11.x。Apple Silicon 没有这些限制,继续用 requirements.txt。
+#
+# 用法(在 Intel Mac 上准备便携运行时时):
+#   python3.11 -m pip install --only-binary=:all: -r requirements-macos-intel.txt
+#
+# 升级任何一行之前,先用新组合跑一遍 scripts/check_runtime.py 的 numpy_bridge 检查。
+
+# --- 冻结项:Intel 上无法再升级 ---
+torch==2.2.0
+torchvision==0.17.0
+numpy==1.26.4
+
+# --- 被 numpy 1.x 连带压住的上层 ---
+opencv-python==4.11.0.86       # 4.12+ 要求 numpy>=2
+pandas==2.3.3                  # 3.x 要求 numpy>=2.0.2
+
+# --- 与上面组合兼容 ---
+ultralytics==8.4.191
+matplotlib==3.11.2             # numpy>=1.25,兼容 1.26
+psutil>=5.9

@@ -42,9 +42,50 @@ def _check_imports(python_path: str) -> tuple[bool, str]:
     ]
     try:
         subprocess.run(command, check=True, capture_output=True, text=True)
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except OSError as exc:
         return False, str(exc)
+    except subprocess.CalledProcessError as exc:
+        # CalledProcessError 的 str() 只有命令和退出码，真正原因在 stderr。
+        detail = [line for line in (exc.stderr or "").strip().splitlines() if line.strip()]
+        return False, " | ".join(detail[-6:]) or str(exc)
     return True, "ok"
+
+
+def _check_numpy_bridge(python_path: str) -> tuple[bool, str]:
+    """确认 torch 真的能接上 numpy，而不只是两者都能 import。
+
+    torch 在导入时按编译期 NumPy ABI 初始化 ``PyArray_API``。运行期 numpy
+    大版本与编译期不一致时（典型：torch<=2.2 由 NumPy 1.x 编译，却装了
+    numpy>=2），torch 只打印一行 ``Failed to initialize NumPy: _ARRAY_API
+    not found``，之后任何 ``torch.from_numpy`` 都抛 ``RuntimeError: Numpy is
+    not available``，而 ``import numpy`` 和 ``import torch`` 全都正常。
+
+    只 import 的检查会放过这种组合，坏运行时于是顺利出厂，到用户机器上
+    才在扫描阶段炸。这里做一次真实桥接调用把它挡在构建阶段。
+    """
+    probe = (
+        "import numpy, torch\n"
+        "tensor = torch.from_numpy(numpy.zeros(1, dtype='float32'))\n"
+        "print(f'numpy={numpy.__version__} torch={torch.__version__} "
+        "ok={tuple(tensor.shape)}')\n"
+    )
+    try:
+        result = subprocess.run(
+            [python_path, "-c", probe],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except OSError as exc:
+        return False, str(exc)
+    except subprocess.CalledProcessError as exc:
+        detail = [line for line in (exc.stderr or "").strip().splitlines() if line.strip()]
+        head = " | ".join(detail[:4])
+        tail = " | ".join(detail[-3:])
+        return False, f"{head} ... {tail}" if head != tail else head
+    return True, result.stdout.strip()
+
 
 
 def _check_binary(path: str | None, expected_name: str) -> tuple[bool, str]:
@@ -137,6 +178,8 @@ def main() -> int:
         "python": args.python_path,
         "detail": imports_detail,
     }
+    bridge_ok, bridge_detail = _check_numpy_bridge(args.python_path)
+    checks["numpy_bridge"] = {"ok": bridge_ok, "detail": bridge_detail}
     ffmpeg_ok, ffmpeg_detail = _check_binary(args.ffmpeg, "ffmpeg")
     ffprobe_ok, ffprobe_detail = _check_binary(args.ffprobe, "ffprobe")
     checks["ffmpeg"] = {"ok": ffmpeg_ok, "detail": ffmpeg_detail}

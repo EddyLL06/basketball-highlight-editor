@@ -1,7 +1,9 @@
 import sys
 from pathlib import Path
 
-from scripts.check_runtime import _check_binary
+import pytest
+
+from scripts.check_runtime import _check_binary, _check_numpy_bridge
 
 
 def _write_tool(path: Path, version: str) -> None:
@@ -61,6 +63,7 @@ def test_missing_detector_check_fails_runtime_validation(tmp_path, monkeypatch, 
     monkeypatch.setattr(check_runtime, '_parse_args', lambda: SimpleNamespace(
         root=tmp_path, model=None, python_path=sys.executable, ffmpeg='ffmpeg', ffprobe='ffprobe', json=True))
     monkeypatch.setattr(check_runtime, '_check_imports', lambda _: (True, 'ok'))
+    monkeypatch.setattr(check_runtime, '_check_numpy_bridge', lambda _: (True, 'ok'))
     monkeypatch.setattr(check_runtime, '_check_binary', lambda *args: (True, 'ok'))
     monkeypatch.setattr(check_runtime, '_acceleration_report', lambda *args: {})
     assert check_runtime.main() == 1
@@ -69,3 +72,44 @@ def test_missing_detector_check_fails_runtime_validation(tmp_path, monkeypatch, 
     (tmp_path / 'scripts/check_detector.py').write_text('script')
     assert check_runtime.main() == 0
     assert json.loads(capsys.readouterr().out)['ok'] is True
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="用 POSIX shell 脚本伪造解释器")
+def test_numpy_bridge_fails_when_torch_cannot_reach_numpy(tmp_path: Path):
+    """numpy 和 torch 都能 import，但桥接失败时必须判 FAILED。
+
+    现场对应：torch<=2.2 按 NumPy 1.x ABI 编译，运行时装了 numpy>=2，
+    两个 import 都正常，只有 torch.from_numpy 抛 "Numpy is not available"。
+    """
+    fake = tmp_path / "python"
+    fake.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' 'A module that was compiled using NumPy 1.x cannot be run in NumPy 2.4.6' >&2\n"
+        "printf '%s\\n' 'RuntimeError: Numpy is not available' >&2\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+
+    ok, detail = _check_numpy_bridge(str(fake))
+
+    assert not ok
+    assert "Numpy is not available" in detail
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="用 POSIX shell 脚本伪造解释器")
+def test_numpy_bridge_reports_versions_on_success(tmp_path: Path):
+    fake = tmp_path / "python"
+    fake.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' 'numpy=1.26.4 torch=2.2.0 ok=(1,)'\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+
+    ok, detail = _check_numpy_bridge(str(fake))
+
+    assert ok
+    assert "numpy=1.26.4" in detail
+

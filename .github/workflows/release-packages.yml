@@ -200,12 +200,21 @@ jobs:
         shell: bash
         env:
           PYTHON_ROOT: ${{ steps.python.outputs.root }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           export PIP_DISABLE_PIP_VERSION_CHECK=1
+          # Intel 上 torch 只能到 2.2.0、numpy 必须 <2，且连带压住 pandas / opencv，
+          # 整份组合单独维护在 requirements-macos-intel.txt。用通用 requirements.txt
+          # 会让 pip 在 numpy<2 与 pandas/opencv 的 numpy>=2 之间反复回溯。
+          requirements="requirements.txt"
+          if [[ "$ARCH" != "arm64" ]]; then
+            requirements="requirements-macos-intel.txt"
+          fi
+          echo "Installing runtime dependencies from $requirements ($ARCH)"
           "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir --upgrade pip
-          "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -r requirements.txt
-          "$PYTHON_ROOT/bin/python3" -c 'import cv2, numpy, pandas, psutil, torch, ultralytics; print("runtime imports: OK")'
+          "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -r "$requirements"
+          "$PYTHON_ROOT/bin/python3" -c 'import cv2, numpy, pandas, psutil, torch, ultralytics, dill; print("runtime imports: OK")'
 
       - name: Install CoreML acceleration and export static ONNX
         shell: bash

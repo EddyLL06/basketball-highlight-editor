@@ -86,6 +86,28 @@ portable-python/
 
 该 Python 应能导入 `cv2`、`numpy`、`ultralytics` 和 `torch`。不要直接复制带有开发机绝对路径或本机动态库引用的 `.venv`。
 
+#### Intel(x86_64)运行时单独维护
+
+Intel Mac 的依赖组合和 Apple Silicon 不同，单独锁在 `requirements-macos-intel.txt`：
+
+- PyTorch 官方已弃用 macOS x86，`2.2.x` 是最后一个提供 x64 wheel 的版本，所以 Intel 上 torch 冻结在 `2.2.0`；
+- `torch<2.3` 是按 NumPy 1.x ABI 编译的。配 `numpy>=2` 时 `import numpy` 和 `import torch` 都正常，但 `torch.from_numpy` 会抛 `RuntimeError: Numpy is not available`，表现为分析一开始推理就失败；
+- `numpy 1.x` 又反过来压住上层：`pandas 3.x` 要求 `numpy>=2.0.2`，`opencv-python 4.12+` 要求 `numpy>=2`，Intel 上只能停在 `pandas 2.3.x` / `opencv-python 4.11.x`。
+
+准备 Intel 运行时用：
+
+```bash
+python3.11 -m pip install --only-binary=:all: -r requirements-macos-intel.txt
+```
+
+Apple Silicon 不受这些限制，继续用 `requirements.txt`。升级锁文件里任何一行之前，先跑 `scripts/check_runtime.py` 的 `numpy_bridge` 检查：它真实调用一次 `torch.from_numpy`，能拦住"两个包都能 import 但桥接失败"的组合。
+
+主程序是 universal 二进制，Python 运行时却是单架构的，所以交叉打包时还要核对架构。`BHE_TARGET_ARCH` 会让准备脚本用 `lipo` 逐个检查解释器、numpy、torch 是否为同一架构：
+
+```bash
+BHE_TARGET_ARCH=x86_64 scripts/build_macos_release.sh
+```
+
 FFmpeg 和 FFprobe 应使用自包含或静态构建。依赖 Homebrew 的版本只适合本机临时验证，可显式设置 `BHE_ALLOW_EXTERNAL_FFMPEG=1`，但这不代表可分发。
 
 GitHub 临时 macOS 构建机会关闭 Spotlight 索引，以减少制作 DMG 时的资源占用。`scripts/create_macos_dmg.sh` 使用 HFS+，仅对 `Resource busy` 最多尝试 5 次；其他错误立即失败。镜像创建后执行 `hdiutil verify`，验证通过才生成摘要并上传。该策略对应 [GitHub runner 的已报告问题](https://github.com/actions/runner-images/issues/7522)。

@@ -2,6 +2,12 @@ ultralytics>=8.4,<9
 # bball_model.pt references dill._dill when loading the checkpoint.
 dill>=0.4.1,<0.5
 opencv-python>=4.8
-numpy>=1.26
+# Intel Mac 上 torch 只能停在 2.2.0(PyTorch 已弃用 macOS x86,2.2.x 是最后一个
+# 提供 x64 wheel 的版本),而 torch<2.3 是按 NumPy 1.x ABI 编译的。装成 numpy>=2
+# 时 import torch 只打印一行 "Failed to initialize NumPy: _ARRAY_API not found",
+# 之后任何 torch.from_numpy 都抛 "RuntimeError: Numpy is not available",扫描直接失败。
+# 发布用的完整 Intel 组合见 requirements-macos-intel.txt。
+numpy>=1.26,<2; sys_platform == "darwin" and platform_machine == "x86_64"
+numpy>=1.26; sys_platform != "darwin" or platform_machine != "x86_64"
 pandas>=2.0
 psutil>=5.9

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复 Intel Mac 上分析一到推理就报 `RuntimeError: Numpy is not available`：Intel 侧依赖改为单独锁定在 `requirements-macos-intel.txt`（torch 2.2.0、numpy 1.26.4、opencv-python 4.11、pandas 2.3），运行时自检新增一次真实的 `torch.from_numpy` 桥接检查，不再被「numpy 和 torch 都能 import」骗过；打包时按目标架构核对解释器、numpy、torch 是否一致，CI 增加 macOS Intel 运行时任务；
+
 ## [0.1.13] - 2026-10-28
 
 ### Added
