@@ -364,6 +364,11 @@ footer .wrap{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .support-card h2{font-size:1.2rem;color:#e9ecef}
 @media(max-width:620px){.support-card{flex-direction:column;text-align:center}}
 </style>
+<style>
+html{scroll-behavior:auto}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+#download{scroll-margin-top:90px}
+</style>
 </head>
 <body>
 <header class="nav"><div class="wrap"><a class="brand" href="#top"><i></i>BHE<span style="font-weight:400;color:var(--t-ink-dim);font-size:.85rem">篮球集锦剪辑器</span></a>
@@ -444,6 +449,12 @@ footer .wrap{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
       <article class="dl-card"><h3>Windows</h3><p class="dl-meta mono">Windows 10 / 11 · .zip</p><div class="dl-actions" data-os="win-x64"></div></article>
       <article class="dl-card"><h3>Android</h3><p class="dl-meta mono">arm64-v8a · 侧载测试包</p><div class="dl-actions" data-os="android-arm64"></div></article>
     </div>
+    <div class="support-blocks" style="margin-top:2rem">
+      <div class="support-card">
+        <img src="assets/coffee-wechat-d017.png" alt="微信收款码" width="180" height="245" loading="lazy">
+        <p>如果对您有帮助，请作者喝杯咖啡</p>
+      </div>
+    </div>
     <p class="dl-fine">Mac 首次打开要右键选「打开」；安卓需允许安装未知来源应用，当前是测试包，不是应用商店正式版。每个包在 GitHub Release 附带 .sha256 校验文件。</p>
   <noscript><p class="dl-fine">请启用 JavaScript 查看下载按钮，或前往 <a href="https://github.com/fly7632785/basketball-highlight-editor/releases">GitHub Releases</a>。</p></noscript>
   </div>
@@ -477,10 +488,6 @@ footer .wrap{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 <section aria-label="支持与交流" style="background:#0e1116;color:#e9ecef;padding:3.5rem 1.5rem">
   <div class="support-blocks">
     <div class="support-card">
-      <img src="assets/coffee-wechat-d017.png" alt="微信收款码" width="180" height="245" loading="lazy">
-      <p>如果对您有帮助，请作者喝杯咖啡</p>
-    </div>
-    <div class="support-card">
       <img src="assets/wechat-qr.png" alt="作者微信二维码" width="150" height="223" loading="lazy">
       <div><h2>BHE 用户交流群</h2><p>扫码加微信，备注「进群」。</p></div>
     </div>
@@ -493,7 +500,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 </footer>
 
 
-<script src="app-d013.js"></script>
+<script src="app-d019.js"></script>
 <script src="language.js?v=3"></script>
 </body>
 </html>

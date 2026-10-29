@@ -109,6 +109,12 @@
 .support-card h2{font-size:1.2rem;color:#e9ecef}
 @media(max-width:620px){.support-card{flex-direction:column;text-align:center}}
 </style>
+<style>
+html{scroll-behavior:auto}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+#download{scroll-margin-top:90px}
+.dl-card.recommended{border-color:var(--ball);box-shadow:0 0 0 1px var(--ball)}
+</style>
 </head>
 <body>
 
@@ -142,7 +148,7 @@
       remove the misses, and export the highlights — without uploading your video or paying a subscription.
     </p>
     <div class="hero-cta">
-      <a class="btn btn-ball" href="#download">Download desktop</a>
+      <a class="btn btn-ball" id="hero-download" href="#download">Download desktop</a>
       <a class="btn btn-ghost" href="#demo">Watch the demo</a>
     </div>
   </div>
@@ -269,6 +275,13 @@
     </article>
   </div>
 
+  <div class="support-blocks" style="margin-top:2rem">
+    <div class="support-card">
+      <img src="../assets/coffee-wechat-d017.png" alt="WeChat Pay QR code" width="180" height="245" loading="lazy">
+      <p>If this helps you, buy the author a coffee.</p>
+    </div>
+  </div>
+
   <noscript>
     <p class="dl-fine">Enable JavaScript to see the latest download buttons, or visit <a href="https://github.com/fly7632785/basketball-highlight-editor/releases">GitHub Releases</a> to download manually.</p>
   </noscript>
@@ -313,10 +326,6 @@
 <section aria-label="Support and community" style="background:#0e1116;color:#e9ecef;padding:3.5rem 1.5rem">
   <div class="support-blocks">
     <div class="support-card">
-      <img src="../assets/coffee-wechat-d017.png" alt="WeChat Pay QR code" width="180" height="245" loading="lazy">
-      <p>If this helps you, buy the author a coffee.</p>
-    </div>
-    <div class="support-card">
       <img src="../assets/wechat-qr.png" alt="Author's WeChat QR code" width="150" height="223" loading="lazy">
       <div><h2>BHE user group</h2><p>Scan to add me on WeChat and note &quot;BHE group&quot;.</p></div>
     </div>
@@ -337,7 +346,7 @@
   </div>
 </footer>
 
-<script src="app-d013.js"></script>
+<script src="app-d019.js"></script>
 <script src="../language.js?v=3"></script>
 </body>
 </html>
