@@ -30,6 +30,7 @@ def sheet(tmp_path):
         image = np.full((240, 320, 3), (40, 80, 120), dtype=np.uint8)
         image[50:210, 30:100] = (30, 30, 230)
         image[50:210, 220:290] = (30, 230, 30)
+        cv2.circle(image, (149, 28), 8, (30, 230, 230), -1)
         writer.write(image)
     writer.release()
     service = EngineService()
@@ -150,6 +151,8 @@ def test_real_frames_preserve_people_and_context(sheet):
         red, green = [cv2.imread(p["crop_path"]) for p in frame["people"]]
         assert red[:, :, 2].mean() > red[:, :, 1].mean()
         assert green[:, :, 1].mean() > green[:, :, 2].mean()
+        # The released ball/raised arm can be outside the body detector box.
+        assert ((red[:, :, 1] > 180) & (red[:, :, 2] > 180)).sum() > 30
         assert all(
             Path(p["crop_path"]).is_relative_to(sheet["root"]) for p in frame["people"]
         )

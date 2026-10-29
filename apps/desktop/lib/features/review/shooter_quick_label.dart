@@ -133,7 +133,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
       }
       final result = await widget.request('prepare_shooter_review', {
         if (_videoId != null) 'video_id': _videoId,
-        if (path != null) 'predictions_path': path,
+        'predictions_path': ?path,
       });
       if (!mounted) return;
       setState(() => _job = _map(result['job']));
@@ -192,12 +192,14 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     if (selected != null) return selected.clamp(0, frames.length - 1).toInt();
     final saved = _map(row['shooter_selection']);
     final evidence = _map(row['shooter_evidence']);
-    final time = saved['generation'] == evidence['generation']
-        ? saved['time_ms'] : evidence['release_time_ms'];
+    final time = (saved['generation'] == evidence['generation']
+        ? saved['time_ms'] : evidence['release_time_ms']) as num? ?? 0;
     var best = 0;
     for (var i = 1; i < frames.length; i++) {
-      if (((frames[i]['time_ms'] as num) - (time as num? ?? 0)).abs() <
-          ((frames[best]['time_ms'] as num) - (time as num? ?? 0)).abs()) best = i;
+      if (((frames[i]['time_ms'] as num) - time).abs() <
+          ((frames[best]['time_ms'] as num) - time).abs()) {
+        best = i;
+      }
     }
     return best;
   }

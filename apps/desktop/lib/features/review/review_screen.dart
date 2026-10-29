@@ -151,9 +151,11 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
           .where((row) => row['id'] == candidateId).firstOrNull;
       if (candidate != null) _selectCandidate(candidate);
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString())),
+        );
+      }
     }
   }
 

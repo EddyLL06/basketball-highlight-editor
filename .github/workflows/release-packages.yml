@@ -190,10 +190,25 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
+          cache: true
 
       - name: Install Flutter dependencies
         working-directory: apps/desktop
         run: flutter pub get
+
+      - name: Format shooter quick-label sources
+        if: inputs.include_shooter == true
+        working-directory: apps/desktop
+        run: dart format lib/features/review/shooter_quick_label.dart test/shooter_quick_label_test.dart
+
+      - name: Preserve formatted shooter sources
+        if: inputs.include_shooter == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: shooter-formatted-${{ matrix.arch }}
+          path: |
+            apps/desktop/lib/features/review/shooter_quick_label.dart
+            apps/desktop/test/shooter_quick_label_test.dart
 
       - name: Validate shooter desktop preview
         if: inputs.include_shooter == true

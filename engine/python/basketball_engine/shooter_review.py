@@ -115,15 +115,24 @@ def render_evidence(
                     if x2 <= x1 or y2 <= y1:
                         continue
                     bw, bh = x2 - x1, y2 - y1
+                    crop_width = max(bw * 1.7, bh * 1.2)
+                    center_x = (x1 + x2) / 2
                     left, right = (
-                        max(0, round(x1 - bw * 0.35)),
-                        min(width, round(x2 + bw * 0.35)),
+                        max(0, round(center_x - crop_width / 2)),
+                        min(width, round(center_x + crop_width / 2)),
                     )
                     top, bottom = (
                         max(0, round(y1 - bh * 0.35)),
                         min(height, round(y2 + bh * 0.08)),
                     )
-                    crop = image[top:bottom, left:right]
+                    crop = image[top:bottom, left:right].copy()
+                    cv2.rectangle(
+                        crop,
+                        (x1 - left, y1 - top),
+                        (x2 - left, y2 - top),
+                        (235, 165, 55),
+                        2,
+                    )
                     crop_path = (
                         directory
                         / f"{token}_{time_ms}_person_{int(track['track_id'])}.jpg"
