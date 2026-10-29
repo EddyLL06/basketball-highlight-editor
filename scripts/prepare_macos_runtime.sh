@@ -61,6 +61,7 @@ cp "$MODEL" "$OUT/models/bball_model.pt"
 if [[ -f "$ROOT/models/yolo11n.pt" ]]; then
   cp "$ROOT/models/yolo11n.pt" "$OUT/models/yolo11n.pt"
   cp "$ROOT/docs/SHOOTER_MODEL_NOTICES.md" "$OUT/models/SHOOTER_MODEL_NOTICES.md"
+  cp "$ROOT/models/AGPL-3.0.txt" "$OUT/models/AGPL-3.0.txt"
 fi
 # CoreML 用的静态 batch=1 模型是可选的:构建时导出过就一起打包,
 # 没有就只保留 Metal/CPU 路径(引擎会在缺文件时自动降级,不会报错)。

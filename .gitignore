@@ -43,6 +43,7 @@ apps/mobile/android/app/src/main/jniLibs/**/*.so
 models/*.onnx
 models/*.onnx.names.json
 models/yolo11n.pt
+models/AGPL-3.0.txt
 /bin/
 /.zcode/
 

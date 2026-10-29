@@ -215,17 +215,17 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     final id = _id(row), frames = _frames(row), evidence = _map(row['shooter_evidence']);
     if (_saving.isNotEmpty || evidence.isEmpty || frames.isEmpty) return;
     final frame = frames[_frameIndex(row)];
+    final previous = _map(row['shooter_selection']);
+    final sameGeneration = previous['generation'] == evidence['generation'];
     final prior = <String, dynamic>{
       'candidate_id': id, 'generation': evidence['generation'],
       'player_id': row['player_id'], 'review_state': row['shooter_review_state'],
-      ..._map(row['shooter_selection']),
+      'time_ms': sameGeneration ? previous['time_ms'] : null,
+      'track_id': sameGeneration ? previous['track_id'] : null,
     };
     // Labels assigned in the ordinary review page predate this evidence. They
     // can be restored as a name-only confirmation, without inventing a track.
     if (prior['player_id'] != null) prior['review_state'] = 'confirmed';
-    prior['player_id'] = row['player_id'];
-    if (row['player_id'] == null && prior['review_state'] == 'confirmed') prior['review_state'] = 'pending';
-    prior['generation'] = evidence['generation'];
     setState(() { _saving.add(id); _error = null; _activeId = id; });
     try {
       final result = await widget.request('set_candidate_shooter', {
