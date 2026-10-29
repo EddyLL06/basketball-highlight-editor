@@ -274,7 +274,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .shot{position:relative;border-radius:12px;overflow:hidden;border:1px solid var(--line);box-shadow:0 18px 50px rgba(14,17,22,.14);background:#0b0d11}
 .shot img{width:100%;height:100%;object-fit:cover;object-position:top left}
 .shot-land{aspect-ratio:16/10}            /* 横图：电脑端 1680×1050 */
-.shot-port{aspect-ratio:9/19.5;max-width:230px;border-radius:26px} /* 竖图：手机 1080×2340 */
+.shot-port{aspect-ratio:9/19.5;width:min(230px,100%);border-radius:26px} /* 竖图：手机 1080×2340 */
 .ph-box{width:100%;height:100%;border:2px dashed #3a4250;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.4rem;padding:1rem;text-align:center;color:#aeb6c2;font-size:.85rem;background:#13161c}
 .ph-box b{color:var(--ball);font-family:var(--mono);font-size:.72rem}
 .old-note{font-family:var(--mono);font-size:.74rem;color:var(--t-dim);margin-top:.6rem}
@@ -343,7 +343,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 </div></section>
 
 <section class="s-paper" id="fast"><div class="wrap">
-<div class="row flip"><figure class="pic reveal"><div class="shot shot-land"><div class="ph-box">审核页，键盘提示和倍速选择可见</div></div></figure>
+<div class="row flip"><figure class="pic reveal"><div class="shot shot-land"><img src="assets/mac-013/shortcuts.webp" alt="审核页面快捷键面板" width="501" height="365" loading="lazy" style="object-fit:contain;object-position:center;padding:1rem"></div></figure>
 <div class="txt reveal"><p class="kicker mono">快</p><h2>手不离键盘，审得很快。</h2>
 <p>倍速开到 1.5 或 2，很快过一遍。想看清楚，就放慢速度。</p>
 <div class="keys">
@@ -378,8 +378,8 @@ footer .wrap{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 <p class="kicker mono">MOBILE</p><h2>安卓手机上也能用。</h2>
 <div class="mini-row">
 <div class="txt reveal"><p>分析、审核、导出都在手机上完成，视频同样不上传。有项目列表，分析前选球员分组，审核可撤销，导出可选三种方式。</p><p class="note-tiny">iPhone 目前能播放、审核、导出，还不能分析。</p></div>
-<div class="shot shot-port reveal"><div class="ph-box">手机：项目列表</div></div>
-<div class="shot shot-port reveal"><div class="ph-box">手机：导出输出方式</div></div>
+<div class="shot shot-port reveal"><img src="assets/mobile-013/analysis.webp" alt="手机分析配置页面" width="900" height="1950" loading="lazy"></div>
+<div class="shot shot-port reveal"><img src="assets/mobile-013/export.webp" alt="手机导出范围与三种输出方式" width="900" height="1950" loading="lazy"></div>
 </div></div></section>
 
 <section class="s-white" id="demo"><div class="wrap"><h2>从导入到导出，完整走一遍</h2><p class="lead"><a href="assets/recording-demo.mp4">查看原有操作演示（旧版界面）</a></p></div></section>
