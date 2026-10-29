@@ -623,7 +623,7 @@ class _TopBar extends StatelessWidget {
               PopupMenuItem(
                 value: 'delete',
                 child: Text(
-                  l10n?.deleteProject ?? '删除当前项目',
+                  l10n?.deleteProject ?? '删除项目',
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ),

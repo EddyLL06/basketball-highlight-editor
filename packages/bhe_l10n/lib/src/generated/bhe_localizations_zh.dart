@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'bhe_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -39,7 +38,7 @@ class BheLocalizationsZh extends BheLocalizations {
   String get openPackage => '打开项目包';
 
   @override
-  String get deleteProject => '删除当前项目';
+  String get deleteProject => '删除项目';
 
   @override
   String get renameProject => '重命名项目';

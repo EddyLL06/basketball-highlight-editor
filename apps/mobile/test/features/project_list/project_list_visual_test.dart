@@ -30,11 +30,17 @@ void main() {
       await material.load();
     }
   });
-  for (final landscape in [false, true]) {
-    testWidgets('project list $landscape', (tester) async {
+  for (final (language, landscape) in [
+    ('zh', false),
+    ('zh', true),
+    ('en', false),
+    ('en', true),
+  ]) {
+    testWidgets('project list $language $landscape', (tester) async {
+      final english = language == 'en';
       final fixture = MobileVideoFixture();
       await tester.runAsync(fixture.init);
-      tester.binding.platformDispatcher.localeTestValue = const Locale('zh');
+      tester.binding.platformDispatcher.localeTestValue = Locale(language);
       tester.binding.platformDispatcher.textScaleFactorTestValue = 1.3;
       await tester.binding.setSurfaceSize(
         landscape ? const Size(800, 360) : const Size(360, 800),
@@ -42,7 +48,7 @@ void main() {
       final root = GlobalKey();
       Future<void> capture(String name) async {
         final path = Platform.environment['BHE_PROJECT_LIST_CAPTURE_DIR'];
-        if (path == null) return;
+        if (path == null || english) return;
         await tester.pump();
         await tester.runAsync(() async {
           final boundary =
@@ -79,11 +85,11 @@ void main() {
           ),
         );
         await tester.pump();
-        await tester.tap(find.byTooltip('更多').first);
+        await tester.tap(find.byTooltip(english ? 'More' : '更多').first);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
         await tester.runAsync(() async {
-          await tester.tap(find.text('项目列表').last);
+          await tester.tap(find.text(english ? 'Projects' : '项目列表').last);
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 500));
           await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -99,14 +105,26 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         expect(find.text('主队比赛'), findsOneWidget);
         expect(find.text('客队比赛'), findsOneWidget);
-        expect(find.text('当前'), findsOneWidget);
+        expect(find.text(english ? 'Current' : '当前'), findsOneWidget);
         await capture('list');
-        await tester.tap(find.byTooltip('更多操作').last);
+        await tester.tap(
+          find.byTooltip(english ? 'More actions' : '更多操作').last,
+        );
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
-        expect(find.text('重命名项目'), findsOneWidget);
-        expect(find.text('关闭项目'), findsOneWidget);
+        expect(find.text(english ? 'Rename project' : '重命名项目'), findsOneWidget);
+        expect(find.text(english ? 'Close project' : '关闭项目'), findsOneWidget);
+        final deleteLabel = english ? 'Delete project' : '删除项目';
+        expect(find.text(deleteLabel), findsOneWidget);
         await capture('menu');
+        await tester.tap(find.text(deleteLabel));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(
+          find.text(english ? 'Delete project?' : '删除项目？'),
+          findsOneWidget,
+        );
+        expect(find.text(deleteLabel), findsOneWidget);
         expect(tester.takeException(), isNull);
       } finally {
         await tester.pumpWidget(const SizedBox());

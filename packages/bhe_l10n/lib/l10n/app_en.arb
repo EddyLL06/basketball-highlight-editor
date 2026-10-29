@@ -10,7 +10,7 @@
   "navExport": "Export",
   "newProject": "New project",
   "openPackage": "Open project package",
-  "deleteProject": "Delete current project",
+  "deleteProject": "Delete project",
   "renameProject": "Rename project",
   "projectName": "Project name",
   "projectNameHint": "e.g. Oct 24 practice game",

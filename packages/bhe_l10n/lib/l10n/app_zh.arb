@@ -10,7 +10,7 @@
   "navExport": "导出",
   "newProject": "新建项目",
   "openPackage": "打开项目包",
-  "deleteProject": "删除当前项目",
+  "deleteProject": "删除项目",
   "renameProject": "重命名项目",
   "projectName": "项目名称",
   "projectNameHint": "例如：10 月 24 日 训练赛",

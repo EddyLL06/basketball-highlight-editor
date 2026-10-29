@@ -56,6 +56,9 @@ void main() {
     expect(english.text('保留 380 / 389'), 'Included 380 / 389');
     expect(english.text('正在保存球员标签…'), 'Saving player tags…');
     expect(english.text('正在删除球员…'), 'Deleting player…');
+    expect(english.deleteProject, 'Delete project');
+    expect(english.text('删除项目'), 'Delete project');
+    expect(english.text('删除'), 'Delete');
     expect(
       english.text('正在保存修改并关闭项目…'),
       'Saving changes and closing the project…',
@@ -78,6 +81,9 @@ void main() {
       ),
     );
     expect(chinese.text('视频解码不完整'), '视频解码不完整');
+    expect(chinese.deleteProject, '删除项目');
+    expect(chinese.text('删除项目'), '删除项目');
+    expect(chinese.text('删除'), '删除');
     expect(chinese.reviewAllTags, '全部标签');
     expect(chinese.reviewBatchRangeScope(12), contains('当前列表的 12 个候选'));
     expect(chinese.reviewFilterCount(2, 389), '显示 2 / 389');

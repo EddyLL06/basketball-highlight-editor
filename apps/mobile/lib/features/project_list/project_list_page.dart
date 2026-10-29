@@ -44,7 +44,7 @@ Future<void> _confirmManagedDelete(
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, true),
-          child: Text(context.bheText('删除')),
+          child: Text(context.bheText('删除项目')),
         ),
       ],
     ),
@@ -300,7 +300,7 @@ class _ProjectListPageState extends State<_ProjectListPage> {
                   PopupMenuItem(
                     value: 'delete',
                     child: Text(
-                      context.bheText('删除'),
+                      context.bheText('删除项目'),
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.error,
                       ),
