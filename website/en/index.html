@@ -101,6 +101,14 @@
   ]
 }
 </script>
+<style>
+.support-blocks{max-width:1080px;margin:auto;display:flex;flex-wrap:wrap;gap:1rem}
+.support-card{display:flex;align-items:center;gap:1.25rem;flex:1 1 420px;min-width:0;max-width:34rem;padding:1.25rem;border:1px solid #303846;border-radius:12px}
+.support-card img{display:block;flex:none;max-width:100%;height:auto;border-radius:8px}
+.support-card p{margin:.5rem 0 0;color:#c8ced7}
+.support-card h2{font-size:1.2rem;color:#e9ecef}
+@media(max-width:620px){.support-card{flex-direction:column;text-align:center}}
+</style>
 </head>
 <body>
 
@@ -302,15 +310,15 @@
   </div>
 </section>
 
-<section aria-label="Coffee / Contact" style="background:#0e1116;color:#e9ecef;padding:3.5rem 1.5rem">
-  <div style="max-width:1080px;margin:auto;display:flex;flex-wrap:wrap;gap:3rem">
-    <div style="flex:1 1 260px;min-width:0">
-      <h2 style="color:#e9ecef">Coffee</h2><p style="margin:1rem 0;color:#c8ced7">Built by one person. If it's useful to you, a coffee is always appreciated.</p>
-      <figure><img src="../assets/coffee-wechat-d017.png" alt="WeChat Pay QR code" width="180" height="245" loading="lazy" style="display:block;max-width:100%;height:auto;border-radius:10px"><figcaption style="margin-top:.5rem;color:#c8ced7">WeChat Pay</figcaption></figure>
+<section aria-label="Support and community" style="background:#0e1116;color:#e9ecef;padding:3.5rem 1.5rem">
+  <div class="support-blocks">
+    <div class="support-card">
+      <img src="../assets/coffee-wechat-d017.png" alt="WeChat Pay QR code" width="180" height="245" loading="lazy">
+      <p>If this helps you, buy the author a coffee.</p>
     </div>
-    <div style="flex:1 1 260px;min-width:0">
-      <h2 style="color:#e9ecef">Contact</h2><p style="margin:1rem 0;color:#c8ced7">Scan to add the author on WeChat (note &quot;BHE&quot;) for feedback or requests.</p>
-      <figure><img src="../assets/wechat-qr.png" alt="Author's WeChat contact QR code" width="180" height="268" loading="lazy" style="display:block;max-width:100%;height:auto;border-radius:10px"><figcaption style="margin-top:.5rem;color:#c8ced7">WeChat contact</figcaption></figure>
+    <div class="support-card">
+      <img src="../assets/wechat-qr.png" alt="Author's WeChat QR code" width="150" height="223" loading="lazy">
+      <div><h2>BHE user group</h2><p>Scan to add me on WeChat and note &quot;BHE group&quot;.</p></div>
     </div>
   </div>
 </section>

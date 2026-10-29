@@ -356,6 +356,14 @@ footer .wrap{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .star-prompt-close:hover, .star-prompt-later:hover { color: var(--t-ink); }
 .star-prompt-close:hover { background: rgba(255, 255, 255, .07); }
 .star-prompt :focus-visible { outline: 2px solid var(--ball); outline-offset: 3px; }</style>
+<style>
+.support-blocks{max-width:1080px;margin:auto;display:flex;flex-wrap:wrap;gap:1rem}
+.support-card{display:flex;align-items:center;gap:1.25rem;flex:1 1 420px;min-width:0;max-width:34rem;padding:1.25rem;border:1px solid #303846;border-radius:12px}
+.support-card img{display:block;flex:none;max-width:100%;height:auto;border-radius:8px}
+.support-card p{margin:.5rem 0 0;color:#c8ced7}
+.support-card h2{font-size:1.2rem;color:#e9ecef}
+@media(max-width:620px){.support-card{flex-direction:column;text-align:center}}
+</style>
 </head>
 <body>
 <header class="nav"><div class="wrap"><a class="brand" href="#top"><i></i>BHE<span style="font-weight:400;color:var(--t-ink-dim);font-size:.85rem">篮球集锦剪辑器</span></a>
@@ -466,15 +474,15 @@ footer .wrap{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
   </div>
   <button class="star-prompt-later" type="button" data-star-later>以后再说</button>
 </dialog>
-<section aria-label="咖啡 / 联系" style="background:#0e1116;color:#e9ecef;padding:3.5rem 1.5rem">
-  <div style="max-width:1080px;margin:auto;display:flex;flex-wrap:wrap;gap:3rem">
-    <div style="flex:1 1 260px;min-width:0">
-      <h2 style="color:#e9ecef">咖啡</h2><p style="margin:1rem 0;color:#c8ced7">一个人在做，有用的话，请我喝杯咖啡呗。</p>
-      <figure><img src="assets/coffee-wechat-d017.png" alt="微信收款码" width="180" height="245" loading="lazy" style="display:block;max-width:100%;height:auto;border-radius:10px"><figcaption style="margin-top:.5rem;color:#c8ced7">微信支付</figcaption></figure>
+<section aria-label="支持与交流" style="background:#0e1116;color:#e9ecef;padding:3.5rem 1.5rem">
+  <div class="support-blocks">
+    <div class="support-card">
+      <img src="assets/coffee-wechat-d017.png" alt="微信收款码" width="180" height="245" loading="lazy">
+      <p>如果对您有帮助，请作者喝杯咖啡</p>
     </div>
-    <div style="flex:1 1 260px;min-width:0">
-      <h2 style="color:#e9ecef">联系</h2><p style="margin:1rem 0;color:#c8ced7">扫码加作者微信，备注「BHE」，反馈问题、提需求都行。</p>
-      <figure><img src="assets/wechat-qr.png" alt="作者微信联系二维码" width="180" height="268" loading="lazy" style="display:block;max-width:100%;height:auto;border-radius:10px"><figcaption style="margin-top:.5rem;color:#c8ced7">微信联系</figcaption></figure>
+    <div class="support-card">
+      <img src="assets/wechat-qr.png" alt="作者微信二维码" width="150" height="223" loading="lazy">
+      <div><h2>BHE 用户交流群</h2><p>扫码加微信，备注「进群」。</p></div>
     </div>
   </div>
 </section>
