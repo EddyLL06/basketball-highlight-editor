@@ -78,7 +78,9 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   ) {
     final ordered = [...candidates];
     ordered.sort((left, right) {
-      final bySegment = _candidateSegment(left).compareTo(_candidateSegment(right));
+      final bySegment = _candidateSegment(
+        left,
+      ).compareTo(_candidateSegment(right));
       return bySegment != 0
           ? bySegment
           : _candidateTime(left).compareTo(_candidateTime(right));
@@ -130,16 +132,24 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   }
 
   Future<void> _switchReviewModule(bool shooter, {String? candidateId}) async {
-    if (_switchingModule || _shooterSaving || (_showShooter == shooter && candidateId == null)) return;
+    if (_switchingModule ||
+        _shooterSaving ||
+        (_showShooter == shooter && candidateId == null)) {
+      return;
+    }
     final session = ref.read(projectSessionProvider);
     setState(() => _switchingModule = true);
     try {
       final scope = session.snapshot();
       await ref.read(projectProvider.notifier).flushReviewQueue();
       if (shooter) {
-        await ref.read(playbackCoordinatorProvider).withPausedPlayback(() async {});
+        await ref
+            .read(playbackCoordinatorProvider)
+            .withPausedPlayback(() async {});
       } else {
-        await ref.read(projectProvider.notifier).refreshCandidates(scope: scope);
+        await ref
+            .read(projectProvider.notifier)
+            .refreshCandidates(scope: scope);
       }
       if (!mounted || session.projectRoot != scope.projectRoot) return;
       setState(() {
@@ -148,14 +158,17 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
         if (shooter) _shooterReloadToken++;
       });
       if (candidateId == null) return;
-      final candidate = ref.read(projectProvider).candidates
-          .where((row) => row['id'] == candidateId).firstOrNull;
+      final candidate = ref
+          .read(projectProvider)
+          .candidates
+          .where((row) => row['id'] == candidateId)
+          .firstOrNull;
       if (candidate != null) _selectCandidate(candidate);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.toString())),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
       }
     } finally {
       if (mounted) setState(() => _switchingModule = false);
@@ -249,103 +262,95 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     final beforeController = TextEditingController(text: '3');
     final afterController = TextEditingController(text: '1');
     var overwriteManual = false;
-    final result =
-        await showDialog<({int before, int after, bool overwrite})>(
-          context: context,
-          builder: (dialogContext) => StatefulBuilder(
-            builder: (context, setDialogState) => AlertDialog(
-              title: Text(context.bheText('批量设置片段时长')),
-              content: SizedBox(
-                width: 380,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    final result = await showDialog<({int before, int after, bool overwrite})>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(context.bheText('批量设置片段时长')),
+          content: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(context.bheText('进球前后时间会以每个候选的进球时刻为中心计算。')),
+                const SizedBox(height: 16),
+                Text(
+                  Localizations.of<BheLocalizations>(
+                        context,
+                        BheLocalizations,
+                      )?.reviewBatchRangeScope(candidates.length) ??
+                      '应用范围：当前列表的 ${candidates.length} 个候选（随状态和球员标签筛选变化）',
+                  key: const Key('batch-range-scope'),
+                ),
+                const SizedBox(height: 8),
+                Row(
                   children: [
-                    Text(context.bheText('进球前后时间会以每个候选的进球时刻为中心计算。')),
-                    const SizedBox(height: 16),
-                    Text(
-                      Localizations.of<BheLocalizations>(
-                            context,
-                            BheLocalizations,
-                          )?.reviewBatchRangeScope(candidates.length) ??
-                          '应用范围：当前列表的 ${candidates.length} 个候选（随状态和球员标签筛选变化）',
-                      key: const Key('batch-range-scope'),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        SizedBox(
-                          width: 72,
-                          child: Text(context.bheText('进球前')),
+                    SizedBox(width: 72, child: Text(context.bheText('进球前'))),
+                    Expanded(
+                      child: TextField(
+                        controller: beforeController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          suffixText: context.bheText('秒'),
                         ),
-                        Expanded(
-                          child: TextField(
-                            controller: beforeController,
-                            keyboardType: TextInputType.number,
-                            decoration: InputDecoration(suffixText: context.bheText('秒')),
-                          ),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        SizedBox(
-                          width: 72,
-                          child: Text(context.bheText('进球后')),
-                        ),
-                        Expanded(
-                          child: TextField(
-                            controller: afterController,
-                            keyboardType: TextInputType.number,
-                            decoration: InputDecoration(suffixText: context.bheText('秒')),
-                          ),
-                        ),
-                      ],
-                    ),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: overwriteManual,
-                      onChanged: (value) => setDialogState(
-                        () => overwriteManual = value ?? false,
                       ),
-                      title: Text(context.bheText('覆盖手动调整过的片段')),
-                      subtitle: Text(context.bheText('关闭时自动保留手动调整的范围')),
                     ),
                   ],
                 ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: Text(context.bheText('取消')),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    final before = int.tryParse(beforeController.text.trim());
-                    final after = int.tryParse(afterController.text.trim());
-                    if (before == null ||
-                        after == null ||
-                        before < 0 ||
-                        after < 0 ||
-                        before + after == 0) {
-                      return;
-                    }
-                    Navigator.pop(dialogContext, (
-                      before: before,
-                      after: after,
-                      overwrite: overwriteManual,
-                    ));
-                  },
-                  child: Text(
-                    context.bheText(
-                      '应用到 ${candidates.length} 个片段',
+                Row(
+                  children: [
+                    SizedBox(width: 72, child: Text(context.bheText('进球后'))),
+                    Expanded(
+                      child: TextField(
+                        controller: afterController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          suffixText: context.bheText('秒'),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: overwriteManual,
+                  onChanged: (value) =>
+                      setDialogState(() => overwriteManual = value ?? false),
+                  title: Text(context.bheText('覆盖手动调整过的片段')),
+                  subtitle: Text(context.bheText('关闭时自动保留手动调整的范围')),
                 ),
               ],
             ),
           ),
-        );
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(context.bheText('取消')),
+            ),
+            FilledButton(
+              onPressed: () {
+                final before = int.tryParse(beforeController.text.trim());
+                final after = int.tryParse(afterController.text.trim());
+                if (before == null ||
+                    after == null ||
+                    before < 0 ||
+                    after < 0 ||
+                    before + after == 0) {
+                  return;
+                }
+                Navigator.pop(dialogContext, (
+                  before: before,
+                  after: after,
+                  overwrite: overwriteManual,
+                ));
+              },
+              child: Text(context.bheText('应用到 ${candidates.length} 个片段')),
+            ),
+          ],
+        ),
+      ),
+    );
     beforeController.dispose();
     afterController.dispose();
     if (result == null || !mounted) return;
@@ -689,9 +694,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                 ? context.bheText(
                     '快速分析可能漏检，建议改用标准模式重新分析。当前候选会在新结果成功后替换，原始视频不会被删除。',
                   )
-                : context.bheText(
-                    '重新分析会替换当前候选列表，但不会删除原始视频。',
-                  ),
+                : context.bheText('重新分析会替换当前候选列表，但不会删除原始视频。'),
           ),
         ),
         actions: [
@@ -718,7 +721,8 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     final state = ref.watch(projectProvider);
     final notifier = ref.read(projectProvider.notifier);
     if (_shooterScope != null &&
-        _shooterScope!.projectRoot != ref.read(projectSessionProvider).projectRoot) {
+        _shooterScope!.projectRoot !=
+            ref.read(projectSessionProvider).projectRoot) {
       _shooterScope = null;
       _showShooter = false;
       _shooterSaving = false;
@@ -768,7 +772,10 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
         ? originalVideoPath
         : reviewVideoPath;
     final reviewLocked = state.busy || state.hydrating;
-    if (!_showShooter && !reviewLocked && selectedId != null && selectedId.isNotEmpty) {
+    if (!_showShooter &&
+        !reviewLocked &&
+        selectedId != null &&
+        selectedId.isNotEmpty) {
       _ensureReviewStarted(selectedId);
     }
     final includedCount = allCandidates
@@ -784,13 +791,15 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       key: const Key('review-shortcut-focus'),
       focusNode: _shortcutFocusNode,
       autofocus: true,
-      onKeyEvent: (_, event) => _showShooter ? KeyEventResult.ignored : _handleShortcut(
-        event,
-        candidates: candidates,
-        selected: selected,
-        reviewLocked: reviewLocked,
-        notifier: notifier,
-      ),
+      onKeyEvent: (_, event) => _showShooter
+          ? KeyEventResult.ignored
+          : _handleShortcut(
+              event,
+              candidates: candidates,
+              selected: selected,
+              reviewLocked: reviewLocked,
+              notifier: notifier,
+            ),
       child: Padding(
         padding: EdgeInsets.zero,
         child: Column(
@@ -808,237 +817,306 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     enabled: !_showShooter,
                     child: ExcludeFocus(
                       excluding: _showShooter,
-                      child: Column(children: [
-            if (analyzing ||
-                jobState == 'failed' ||
-                jobState == 'cancelled' ||
-                job?['recoverable'] == true)
-              Padding(
-                key: const Key('review-status-inset'),
-                padding: EdgeInsets.zero,
-                child: _AnalysisBar(
-                  state: jobState,
-                  stage: job?['stage']?.toString() ?? '',
-                  progress: progress,
-                  startedAt: job?['started_at']?.toString(),
-                  errorMessage: job?['error_message']?.toString(),
-                  recoverable: job?['recoverable'] == true && !analyzing,
-                  onCancel: analyzing ? () => notifier.cancelAnalysis() : null,
-                  onRetry:
-                      (jobState == 'failed' || job?['recoverable'] == true) &&
-                          !state.busy
-                      ? () => notifier.retryAnalysis()
-                      : null,
-                  onReanalyze: !analyzing && !state.busy ? reanalyze : null,
-                ),
-              )
-            else if (jobState == 'completed')
-              Padding(
-                key: const Key('review-status-inset'),
-                padding: EdgeInsets.zero,
-                child: _CompletedLine(
-                  candidateCount: allCandidates.length,
-                  startedAt: job?['started_at']?.toString(),
-                  finishedAt: job?['finished_at']?.toString(),
-                  mode: state.analysisMode,
-                  checkpoint: _decodeJobCheckpoint(job),
-                ),
-              ),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final video = _VideoPane(
-                    controller: _videoController,
-                    videoPath: playbackPath,
-                    candidate: selected,
-                    isOriginalVideo: showingOriginalVideo,
-                    sourceSwitchToken: _videoSourceSwitchToken,
-                    replayToken: _replayToken,
-                    frameSize: _videoFrameSize(state.video),
-                    rotation: _videoRotation(state.video),
-                    hasPrevious: _candidateIndex(candidates, selected) > 0,
-                    hasNext:
-                        _candidateIndex(candidates, selected) <
-                        candidates.length - 1,
-                    onPrevious: () => _moveCandidate(candidates, -1),
-                    onNext: () => _moveCandidate(candidates, 1),
-                    onToggleVideoSource:
-                        reviewVideoPath != null && reviewVideoPath.isNotEmpty
-                        ? _toggleVideoSource
-                        : null,
-                    onInteraction: _focusReviewShortcuts,
-                    onEditRange: selected == null || reviewLocked
-                        ? null
-                        : () => _editClipRange(selected),
-                    onEditNote: selected == null || reviewLocked
-                        ? null
-                        : () => _editCandidateNote(selected),
-                    onCreateManualCandidate:
-                        reviewLocked || !showingOriginalVideo
-                        ? null
-                        : _createManualCandidate,
-                    onUndo: () {
-                      if (!reviewLocked) unawaited(notifier.undoReview());
-                    },
-                    excluded: selected != null && _isExcluded(selected),
-                    reviewLocked: reviewLocked,
-                    players: state.players,
-                    playerColor: selected == null
-                        ? AppColors.of(context).textTertiary
-                        : _playerColor(
-                            AppColors.of(context),
-                            selected['player_id']?.toString(),
-                            _playerIndex(selected, state.players),
-                          ),
-                    onInclude: () {
-                      final id = selectedId;
-                      if (id != null) unawaited(_setCandidateStatus(id, 'included'));
-                    },
-                    onExclude: () {
-                      final id = selectedId;
-                      if (id != null) unawaited(_setCandidateStatus(id, 'excluded'));
-                    },
-                    onSetPlayer: (playerId) {
-                      if (selected != null) {
-                        unawaited(
-                          _setPlayerForCandidate(selected, notifier, playerId),
-                        );
-                      }
-                    },
-                    onCreatePlayer: () {
-                      if (selected != null) {
-                        unawaited(_createPlayerForCandidate(selected, notifier));
-                      }
-                    },
-                    onDeletePlayer: _deletePlayer,
-                  );
-                  final queueWidth = (constraints.maxWidth * 0.30)
-                      .clamp(360.0, 460.0)
-                      .toDouble();
-                  final queue = _CandidatePanel(
-                    candidates: candidates,
-                    overlappingIds: _overlappingCandidateIds(allCandidates),
-                    selectedId: selected?['id']?.toString(),
-                    includedCount: includedCount,
-                    reviewedCount: allCandidates.where(_isReviewed).length,
-                    totalCount: allCandidates.length,
-                    filter: _candidateFilter,
-                    playerFilter: _playerFilter,
-                    rimFilter: _rimFilter,
-                    segmentFilter: _segmentFilter,
-                    statusCandidates: statusCandidates,
-                    busy: reviewLocked,
-                    busyMessage: state.busyMessage,
-                    hydrating: state.hydrating,
-                    hydrateError: state.hydrateError,
-                    analyzing: analyzing,
-                    hasVideo: state.videoPath != null || state.video != null,
-                    analysisMode: state.analysisMode,
-                    analysisCompleted: jobState == 'completed',
-                    onSelect: _selectCandidate,
-                    candidateRowContexts: _candidateRowContexts,
-                    candidateScrollController: _candidateScrollController,
-                    onSetPlayer: (candidate, playerId) =>
-                        _setPlayerForCandidate(candidate, notifier, playerId),
-                    onCreatePlayer: (candidate) =>
-                        _createPlayerForCandidate(candidate, notifier),
-                    players: state.players,
-                    onDeletePlayer: _deletePlayer,
-                    onBatchRange: () =>
-                        _showBatchRangeDialog(context, notifier, candidates),
-                    onSetStatus: (id, status) =>
-                        _setCandidateStatus(id, status),
-                    onLoadCover: state.video == null
-                        ? null
-                        : (id, timeMs) =>
-                              _loadCandidateCover(notifier, id, timeMs),
-                    onFilterChanged: (value) => _changeFilters(status: value),
-                    onPlayerFilterChanged: (value) =>
-                        _changeFilters(player: value),
-                    onRimFilterChanged: (value) => _changeFilters(rim: value),
-                    segments: [
-                      if (state.multiVideo)
-                        for (final (index, video) in state.videos.indexed)
-                          (video['id'].toString(), index + 1),
-                    ],
-                    onSegmentFilterChanged: (value) =>
-                        _changeFilters(segment: value),
-                    onClearFilters: () => _changeFilters(
-                      status: 'all',
-                      player: 'all',
-                      rim: 'all',
-                      segment: 'all',
-                    ),
-                    onReanalyze: !analyzing && !state.busy && !state.hydrating
-                        ? reanalyze
-                        : null,
-                    onRetryHydration:
-                        state.hydrateError != null && !state.hydrating
-                        ? () => notifier.retryProjectHydration()
-                        : null,
-                    onEditRange: selected == null || reviewLocked
-                        ? null
-                        : () => _editClipRange(selected),
-                    onEditNote: selected == null || reviewLocked
-                        ? null
-                        : () => _editCandidateNote(selected),
-                    onCreateManualCandidate:
-                        reviewLocked || !showingOriginalVideo
-                        ? null
-                        : _createManualCandidate,
-                    onUndo: () {
-                      if (!reviewLocked) unawaited(notifier.undoReview());
-                    },
-                    onGoImport: () => context.go('/import'),
-                    onExport: includedCount == 0 || reviewLocked || analyzing
-                        ? null
-                        : () => context.go('/export'),
-                  );
-                  if (constraints.maxWidth >= Breakpoints.md) {
-                    return Container(
-                      color: AppColors.of(context).surface,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                      child: Column(
                         children: [
-                          Expanded(child: video),
-                          VerticalDivider(
-                            width: 1,
-                            thickness: 1,
-                            color: AppColors.of(context).border,
+                          if (analyzing ||
+                              jobState == 'failed' ||
+                              jobState == 'cancelled' ||
+                              job?['recoverable'] == true)
+                            Padding(
+                              key: const Key('review-status-inset'),
+                              padding: EdgeInsets.zero,
+                              child: _AnalysisBar(
+                                state: jobState,
+                                stage: job?['stage']?.toString() ?? '',
+                                progress: progress,
+                                startedAt: job?['started_at']?.toString(),
+                                errorMessage: job?['error_message']?.toString(),
+                                recoverable:
+                                    job?['recoverable'] == true && !analyzing,
+                                onCancel: analyzing
+                                    ? () => notifier.cancelAnalysis()
+                                    : null,
+                                onRetry:
+                                    (jobState == 'failed' ||
+                                            job?['recoverable'] == true) &&
+                                        !state.busy
+                                    ? () => notifier.retryAnalysis()
+                                    : null,
+                                onReanalyze: !analyzing && !state.busy
+                                    ? reanalyze
+                                    : null,
+                              ),
+                            )
+                          else if (jobState == 'completed')
+                            Padding(
+                              key: const Key('review-status-inset'),
+                              padding: EdgeInsets.zero,
+                              child: _CompletedLine(
+                                candidateCount: allCandidates.length,
+                                startedAt: job?['started_at']?.toString(),
+                                finishedAt: job?['finished_at']?.toString(),
+                                mode: state.analysisMode,
+                                checkpoint: _decodeJobCheckpoint(job),
+                              ),
+                            ),
+                          Expanded(
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final video = _VideoPane(
+                                  controller: _videoController,
+                                  videoPath: playbackPath,
+                                  candidate: selected,
+                                  isOriginalVideo: showingOriginalVideo,
+                                  sourceSwitchToken: _videoSourceSwitchToken,
+                                  replayToken: _replayToken,
+                                  frameSize: _videoFrameSize(state.video),
+                                  rotation: _videoRotation(state.video),
+                                  hasPrevious:
+                                      _candidateIndex(candidates, selected) > 0,
+                                  hasNext:
+                                      _candidateIndex(candidates, selected) <
+                                      candidates.length - 1,
+                                  onPrevious: () =>
+                                      _moveCandidate(candidates, -1),
+                                  onNext: () => _moveCandidate(candidates, 1),
+                                  onToggleVideoSource:
+                                      reviewVideoPath != null &&
+                                          reviewVideoPath.isNotEmpty
+                                      ? _toggleVideoSource
+                                      : null,
+                                  onInteraction: _focusReviewShortcuts,
+                                  onEditRange: selected == null || reviewLocked
+                                      ? null
+                                      : () => _editClipRange(selected),
+                                  onEditNote: selected == null || reviewLocked
+                                      ? null
+                                      : () => _editCandidateNote(selected),
+                                  onCreateManualCandidate:
+                                      reviewLocked || !showingOriginalVideo
+                                      ? null
+                                      : _createManualCandidate,
+                                  onUndo: () {
+                                    if (!reviewLocked) {
+                                      unawaited(notifier.undoReview());
+                                    }
+                                  },
+                                  excluded:
+                                      selected != null && _isExcluded(selected),
+                                  reviewLocked: reviewLocked,
+                                  players: state.players,
+                                  playerColor: selected == null
+                                      ? AppColors.of(context).textTertiary
+                                      : _playerColor(
+                                          AppColors.of(context),
+                                          selected['player_id']?.toString(),
+                                          _playerIndex(selected, state.players),
+                                        ),
+                                  onInclude: () {
+                                    final id = selectedId;
+                                    if (id != null) {
+                                      unawaited(
+                                        _setCandidateStatus(id, 'included'),
+                                      );
+                                    }
+                                  },
+                                  onExclude: () {
+                                    final id = selectedId;
+                                    if (id != null) {
+                                      unawaited(
+                                        _setCandidateStatus(id, 'excluded'),
+                                      );
+                                    }
+                                  },
+                                  onSetPlayer: (playerId) {
+                                    if (selected != null) {
+                                      unawaited(
+                                        _setPlayerForCandidate(
+                                          selected,
+                                          notifier,
+                                          playerId,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  onCreatePlayer: () {
+                                    if (selected != null) {
+                                      unawaited(
+                                        _createPlayerForCandidate(
+                                          selected,
+                                          notifier,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  onDeletePlayer: _deletePlayer,
+                                );
+                                final queueWidth = (constraints.maxWidth * 0.30)
+                                    .clamp(360.0, 460.0)
+                                    .toDouble();
+                                final queue = _CandidatePanel(
+                                  candidates: candidates,
+                                  overlappingIds: _overlappingCandidateIds(
+                                    allCandidates,
+                                  ),
+                                  selectedId: selected?['id']?.toString(),
+                                  includedCount: includedCount,
+                                  reviewedCount: allCandidates
+                                      .where(_isReviewed)
+                                      .length,
+                                  totalCount: allCandidates.length,
+                                  filter: _candidateFilter,
+                                  playerFilter: _playerFilter,
+                                  rimFilter: _rimFilter,
+                                  segmentFilter: _segmentFilter,
+                                  statusCandidates: statusCandidates,
+                                  busy: reviewLocked,
+                                  busyMessage: state.busyMessage,
+                                  hydrating: state.hydrating,
+                                  hydrateError: state.hydrateError,
+                                  analyzing: analyzing,
+                                  hasVideo:
+                                      state.videoPath != null ||
+                                      state.video != null,
+                                  analysisMode: state.analysisMode,
+                                  analysisCompleted: jobState == 'completed',
+                                  onSelect: _selectCandidate,
+                                  candidateRowContexts: _candidateRowContexts,
+                                  candidateScrollController:
+                                      _candidateScrollController,
+                                  onSetPlayer: (candidate, playerId) =>
+                                      _setPlayerForCandidate(
+                                        candidate,
+                                        notifier,
+                                        playerId,
+                                      ),
+                                  onCreatePlayer: (candidate) =>
+                                      _createPlayerForCandidate(
+                                        candidate,
+                                        notifier,
+                                      ),
+                                  players: state.players,
+                                  onDeletePlayer: _deletePlayer,
+                                  onBatchRange: () => _showBatchRangeDialog(
+                                    context,
+                                    notifier,
+                                    candidates,
+                                  ),
+                                  onSetStatus: (id, status) =>
+                                      _setCandidateStatus(id, status),
+                                  onLoadCover: state.video == null
+                                      ? null
+                                      : (id, timeMs) => _loadCandidateCover(
+                                          notifier,
+                                          id,
+                                          timeMs,
+                                        ),
+                                  onFilterChanged: (value) =>
+                                      _changeFilters(status: value),
+                                  onPlayerFilterChanged: (value) =>
+                                      _changeFilters(player: value),
+                                  onRimFilterChanged: (value) =>
+                                      _changeFilters(rim: value),
+                                  segments: [
+                                    if (state.multiVideo)
+                                      for (final (index, video)
+                                          in state.videos.indexed)
+                                        (video['id'].toString(), index + 1),
+                                  ],
+                                  onSegmentFilterChanged: (value) =>
+                                      _changeFilters(segment: value),
+                                  onClearFilters: () => _changeFilters(
+                                    status: 'all',
+                                    player: 'all',
+                                    rim: 'all',
+                                    segment: 'all',
+                                  ),
+                                  onReanalyze:
+                                      !analyzing &&
+                                          !state.busy &&
+                                          !state.hydrating
+                                      ? reanalyze
+                                      : null,
+                                  onRetryHydration:
+                                      state.hydrateError != null &&
+                                          !state.hydrating
+                                      ? () => notifier.retryProjectHydration()
+                                      : null,
+                                  onEditRange: selected == null || reviewLocked
+                                      ? null
+                                      : () => _editClipRange(selected),
+                                  onEditNote: selected == null || reviewLocked
+                                      ? null
+                                      : () => _editCandidateNote(selected),
+                                  onCreateManualCandidate:
+                                      reviewLocked || !showingOriginalVideo
+                                      ? null
+                                      : _createManualCandidate,
+                                  onUndo: () {
+                                    if (!reviewLocked) {
+                                      unawaited(notifier.undoReview());
+                                    }
+                                  },
+                                  onGoImport: () => context.go('/import'),
+                                  onExport:
+                                      includedCount == 0 ||
+                                          reviewLocked ||
+                                          analyzing
+                                      ? null
+                                      : () => context.go('/export'),
+                                );
+                                if (constraints.maxWidth >= Breakpoints.md) {
+                                  return Container(
+                                    color: AppColors.of(context).surface,
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Expanded(child: video),
+                                        VerticalDivider(
+                                          width: 1,
+                                          thickness: 1,
+                                          color: AppColors.of(context).border,
+                                        ),
+                                        SizedBox(
+                                          width: queueWidth,
+                                          child: queue,
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                                return SingleChildScrollView(
+                                  padding: const EdgeInsets.only(
+                                    bottom: Spacing.lg,
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      SizedBox(
+                                        // The transport and the current-clip card stack
+                                        // under the frame on narrow screens.
+                                        height:
+                                            (constraints.maxWidth * 0.5625)
+                                                .clamp(240.0, 520.0)
+                                                .toDouble() +
+                                            420,
+                                        child: video,
+                                      ),
+                                      const SizedBox(height: Spacing.sm),
+                                      SizedBox(
+                                        height: (constraints.maxWidth * 0.92)
+                                            .clamp(360.0, 520.0)
+                                            .toDouble(),
+                                        child: queue,
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
                           ),
-                          SizedBox(width: queueWidth, child: queue),
                         ],
                       ),
-                    );
-                  }
-                  return SingleChildScrollView(
-                    padding: const EdgeInsets.only(bottom: Spacing.lg),
-                    child: Column(
-                      children: [
-                        SizedBox(
-                          // The transport and the current-clip card stack
-                          // under the frame on narrow screens.
-                          height:
-                              (constraints.maxWidth * 0.5625)
-                                  .clamp(240.0, 520.0)
-                                  .toDouble() +
-                              420,
-                          child: video,
-                        ),
-                        const SizedBox(height: Spacing.sm),
-                        SizedBox(
-                          height: (constraints.maxWidth * 0.92)
-                              .clamp(360.0, 520.0)
-                              .toDouble(),
-                          child: queue,
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-                      ]),
                     ),
                   ),
                   if (_shooterScope case final scope?)
@@ -1051,10 +1129,14 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                       onSavingChanged: (saving) {
                         if (mounted) setState(() => _shooterSaving = saving);
                       },
-                      onWatchClip: (id) => unawaited(_switchReviewModule(false, candidateId: id)),
-                      request: (command, payload) => scope.engine.client.request(
-                        command, {'project_root': scope.projectRoot, ...payload},
+                      onWatchClip: (id) => unawaited(
+                        _switchReviewModule(false, candidateId: id),
                       ),
+                      request: (command, payload) =>
+                          scope.engine.client.request(command, {
+                            'project_root': scope.projectRoot,
+                            ...payload,
+                          }),
                     ),
                 ],
               ),
@@ -1137,8 +1219,9 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   void _syncPreviewScope(ProjectState state) {
     // 多段项目里选中候选会切换当前段，不能因此清空审核状态。
     final key = state.multiVideo
-        ? ([for (final video in state.videos) video['id'].toString()]..sort())
-              .join('|')
+        ? ([
+            for (final video in state.videos) video['id'].toString(),
+          ]..sort()).join('|')
         : '${state.video?['id'] ?? ''}|${state.videoPath ?? ''}';
     if (_previewScopeKey == key) return;
     _previewScopeKey = key;
@@ -1345,8 +1428,7 @@ class _AnalysisBar extends StatelessWidget {
             _SmallAction(
               label: l10n?.text('反馈问题') ?? '反馈问题',
               icon: Icons.feedback_outlined,
-              onPressed: () =>
-                  showFeedbackDialog(context, error: errorMessage),
+              onPressed: () => showFeedbackDialog(context, error: errorMessage),
             ),
           if (onRetry != null && !attached)
             _SmallAction(
@@ -1458,7 +1540,6 @@ class _SmallAction extends StatelessWidget {
     ),
   );
 }
-
 
 class _VideoPane extends ConsumerStatefulWidget {
   const _VideoPane({
@@ -2082,9 +2163,7 @@ class _VideoPaneState extends ConsumerState<_VideoPane> {
                             ? context.bheText('还没有视频')
                             : context.bheText(_error ?? '视频加载失败'),
                         description: _error == null && hasVideo
-                            ? context.bheText(
-                                '分析完成后会在这里预览候选片段，点击播放开始',
-                              )
+                            ? context.bheText('分析完成后会在这里预览候选片段，点击播放开始')
                             : null,
                         action: _error != null && hasVideo
                             ? CsButton(
@@ -3120,7 +3199,10 @@ class _VideoControlsState extends State<_VideoControls> {
                         crossAxisAlignment: WrapCrossAlignment.center,
                         spacing: Spacing.sm,
                         children: [
-                          Row(mainAxisSize: MainAxisSize.min, children: playback),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: playback,
+                          ),
                           time,
                           Row(mainAxisSize: MainAxisSize.min, children: extras),
                         ],
@@ -3260,7 +3342,9 @@ class _CandidateInspector extends StatelessWidget {
               child: Text(
                 _candidateSegment(candidate) > 0
                     ? '${context.bheText('第 ${_candidateSegment(candidate)} 段')} · ${_formatMs(_candidateTime(candidate))}'
-                    : context.bheText('候选 ${_formatMs(_candidateTime(candidate))}'),
+                    : context.bheText(
+                        '候选 ${_formatMs(_candidateTime(candidate))}',
+                      ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleLarge?.copyWith(
@@ -3296,7 +3380,11 @@ class _CandidateInspector extends StatelessWidget {
           const SizedBox(height: 4),
           Row(
             children: [
-              Icon(Icons.sticky_note_2_outlined, size: 13, color: c.textTertiary),
+              Icon(
+                Icons.sticky_note_2_outlined,
+                size: 13,
+                color: c.textTertiary,
+              ),
               const SizedBox(width: 4),
               Flexible(
                 child: Text(
@@ -5058,28 +5146,30 @@ class _CandidatePanel extends StatelessWidget {
                         id: id,
                         contexts: candidateRowContexts,
                         child: _CandidateRow(
-                        candidate: candidate,
-                        overlapsPrevious: overlappingIds.contains(id),
-                        index: index,
-                        selected: id == selectedId,
-                        excluded: _isExcluded(candidate),
-                        busy: busy,
-                        onTap: () => onSelect(candidate),
-                        onSetPlayer: (playerId) =>
-                            unawaited(onSetPlayer(candidate, playerId)),
-                        onCreatePlayer: () =>
-                            unawaited(onCreatePlayer(candidate)),
-                        onDeletePlayer: onDeletePlayer,
-                        players: players,
-                        playerColor: _playerColor(
-                          c,
-                          candidate['player_id']?.toString(),
-                          _playerIndex(candidate, players),
+                          candidate: candidate,
+                          overlapsPrevious: overlappingIds.contains(id),
+                          index: index,
+                          selected: id == selectedId,
+                          excluded: _isExcluded(candidate),
+                          busy: busy,
+                          onTap: () => onSelect(candidate),
+                          onSetPlayer: (playerId) =>
+                              unawaited(onSetPlayer(candidate, playerId)),
+                          onCreatePlayer: () =>
+                              unawaited(onCreatePlayer(candidate)),
+                          onDeletePlayer: onDeletePlayer,
+                          players: players,
+                          playerColor: _playerColor(
+                            c,
+                            candidate['player_id']?.toString(),
+                            _playerIndex(candidate, players),
+                          ),
+                          onInclude: () =>
+                              unawaited(onSetStatus(id, 'included')),
+                          onExclude: () =>
+                              unawaited(onSetStatus(id, 'excluded')),
+                          coverFuture: coverFuture,
                         ),
-                        onInclude: () => unawaited(onSetStatus(id, 'included')),
-                        onExclude: () => unawaited(onSetStatus(id, 'excluded')),
-                        coverFuture: coverFuture,
-                      ),
                       );
                     },
                   ),
@@ -5109,22 +5199,22 @@ class _CandidatePanel extends StatelessWidget {
                   Flexible(
                     flex: 2,
                     child: Tooltip(
-                    message: context.bheText('从原视频当前时间补漏候选'),
-                    child: OutlinedButton.icon(
-                      key: const Key('create-manual-candidate'),
-                      onPressed: onCreateManualCandidate,
-                      icon: const Icon(Icons.playlist_add_rounded, size: 18),
-                      label: Text(
-                        l10n?.reviewAddMissed ?? '补漏片段',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      message: context.bheText('从原视频当前时间补漏候选'),
+                      child: OutlinedButton.icon(
+                        key: const Key('create-manual-candidate'),
+                        onPressed: onCreateManualCandidate,
+                        icon: const Icon(Icons.playlist_add_rounded, size: 18),
+                        label: Text(
+                          l10n?.reviewAddMissed ?? '补漏片段',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: c.textPrimary,
+                          side: BorderSide(color: c.borderStrong),
+                          minimumSize: const Size(0, 40),
+                        ),
                       ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: c.textPrimary,
-                        side: BorderSide(color: c.borderStrong),
-                        minimumSize: const Size(0, 40),
-                      ),
-                    ),
                     ),
                   ),
                 ],
@@ -5544,16 +5634,16 @@ class _PlayerTagChips extends StatelessWidget {
             return SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
-              children: [
-                for (var index = 0; index < shown.length; index++) ...[
-                  if (index > 0) const SizedBox(width: 6),
-                  _tagChip(context, c, shown[index], counts),
+                children: [
+                  for (var index = 0; index < shown.length; index++) ...[
+                    if (index > 0) const SizedBox(width: 6),
+                    _tagChip(context, c, shown[index], counts),
+                  ],
+                  if (hidden.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    _moreChip(context, c, hidden, counts),
+                  ],
                 ],
-                if (hidden.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  _moreChip(context, c, hidden, counts),
-                ],
-              ],
               ),
             );
           },
@@ -5563,7 +5653,10 @@ class _PlayerTagChips extends StatelessWidget {
   }
 
   static const _chipGap = 6.0;
-  static const _labelStyle = TextStyle(fontSize: 12, fontWeight: FontWeight.w600);
+  static const _labelStyle = TextStyle(
+    fontSize: 12,
+    fontWeight: FontWeight.w600,
+  );
   static const _countStyle = TextStyle(
     fontSize: 11,
     fontFeatures: [FontFeature.tabularFigures()],
@@ -5719,74 +5812,70 @@ class _PlayerTagChips extends StatelessWidget {
     (String, String, Color?) option,
     Map<String, int> counts,
   ) {
-            final (key, label, color) = option;
-            final selected = value == key;
-            return Semantics(
-              button: true,
-              selected: selected,
-              child: Material(
-                key: ValueKey('review-tag-option-$key'),
-                color: selected ? c.surface3 : Colors.transparent,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(CsRadius.full),
-                  side: BorderSide(
-                    color: selected ? c.borderStrong : c.border,
+    final (key, label, color) = option;
+    final selected = value == key;
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Material(
+        key: ValueKey('review-tag-option-$key'),
+        color: selected ? c.surface3 : Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(CsRadius.full),
+          side: BorderSide(color: selected ? c.borderStrong : c.border),
+        ),
+        child: InkWell(
+          onTap: () => onChanged(key),
+          customBorder: const StadiumBorder(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (color != null) ...[
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
                   ),
-                ),
-                child: InkWell(
-                  onTap: () => onChanged(key),
-                  customBorder: const StadiumBorder(),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (color != null) ...[
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: BoxDecoration(
-                              color: color,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 140),
-                          child: Tooltip(
-                            message: label,
-                            child: Text(
-                              label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: selected
-                                    ? c.textPrimary
-                                    : c.textSecondary,
-                                fontSize: 12,
-                                fontWeight: selected
-                                    ? FontWeight.w600
-                                    : FontWeight.w400,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          '${counts[key] ?? 0}',
-                          style: TextStyle(
-                            color: c.textTertiary,
-                            fontSize: 11,
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                      ],
+                  const SizedBox(width: 6),
+                ],
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 140),
+                  child: Tooltip(
+                    message: label,
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: selected ? c.textPrimary : c.textSecondary,
+                        fontSize: 12,
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            );
+                const SizedBox(width: 6),
+                Text(
+                  '${counts[key] ?? 0}',
+                  style: TextStyle(
+                    color: c.textTertiary,
+                    fontSize: 11,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -5937,8 +6026,16 @@ class _CandidateRow extends StatelessWidget {
     final rimStatus = _rimCheckStatus(candidate);
     final statusLabel = excluded
         ? (_isAutoExcluded(candidate) ? '自动排除' : '已排除')
-        : rimStatus == 'made' ? '通过' : rimStatus == 'unsure' ? '未确认' : null;
-    final statusColor = excluded ? c.error : rimStatus == 'made' ? c.success : c.warning;
+        : rimStatus == 'made'
+        ? '通过'
+        : rimStatus == 'unsure'
+        ? '未确认'
+        : null;
+    final statusColor = excluded
+        ? c.error
+        : rimStatus == 'made'
+        ? c.success
+        : c.warning;
     return Semantics(
       button: true,
       selected: selected,
@@ -6036,7 +6133,8 @@ class _CandidateRow extends StatelessWidget {
                                                 fontWeight: FontWeight.w500,
                                               ),
                                             ),
-                                            if (_candidateSegment(candidate) > 0)
+                                            if (_candidateSegment(candidate) >
+                                                0)
                                               TextSpan(
                                                 text:
                                                     '${context.bheText('第 ${_candidateSegment(candidate)} 段')} ',
@@ -6067,12 +6165,15 @@ class _CandidateRow extends StatelessWidget {
                                             ),
                                       ),
                                     ),
-                                    if (adjusted || overlapsPrevious || statusLabel != null) ...[
+                                    if (adjusted ||
+                                        overlapsPrevious ||
+                                        statusLabel != null) ...[
                                       const SizedBox(width: 4),
                                       Flexible(
                                         flex: 4,
                                         child: CandidateStatusLabels(
-                                          candidateId: candidate['id'].toString(),
+                                          candidateId: candidate['id']
+                                              .toString(),
                                           adjusted: adjusted,
                                           overlapsPrevious: overlapsPrevious,
                                           statusLabel: statusLabel,
@@ -6465,10 +6566,22 @@ class _PlayerGroupsDialog extends ConsumerWidget {
                         children: [
                           IconButton(
                             key: ValueKey('player-group-default-${group.name}'),
-                            tooltip: context.bheText(defaultGroup == group.name ? '取消默认' : '设为默认'),
-                            onPressed: () => ref.read(playerGroupsProvider.notifier)
-                                .setDefault(defaultGroup == group.name ? null : group.name),
-                            icon: Icon(defaultGroup == group.name ? Icons.star : Icons.star_border, size: 18),
+                            tooltip: context.bheText(
+                              defaultGroup == group.name ? '取消默认' : '设为默认',
+                            ),
+                            onPressed: () => ref
+                                .read(playerGroupsProvider.notifier)
+                                .setDefault(
+                                  defaultGroup == group.name
+                                      ? null
+                                      : group.name,
+                                ),
+                            icon: Icon(
+                              defaultGroup == group.name
+                                  ? Icons.star
+                                  : Icons.star_border,
+                              size: 18,
+                            ),
                             visualDensity: VisualDensity.compact,
                           ),
                           IconButton(
@@ -6593,11 +6706,7 @@ class _PlayerPickerOption extends StatelessWidget {
   }
 }
 
-Color _playerColor(
-  AppColors c,
-  String? playerId, [
-  int fallbackIndex = -1,
-]) {
+Color _playerColor(AppColors c, String? playerId, [int fallbackIndex = -1]) {
   if (playerId == null || playerId.isEmpty) return c.textTertiary;
   if (fallbackIndex >= 0) return c.player(fallbackIndex);
   final hash = playerId.codeUnits.fold<int>(
@@ -6675,10 +6784,26 @@ class _CandidateCoverState extends State<_CandidateCover> {
                   widget.excluded
                       ? ColorFiltered(
                           colorFilter: const ColorFilter.matrix(<double>[
-                            0.2126, 0.7152, 0.0722, 0, 0,
-                            0.2126, 0.7152, 0.0722, 0, 0,
-                            0.2126, 0.7152, 0.0722, 0, 0,
-                            0, 0, 0, 1, 0,
+                            0.2126,
+                            0.7152,
+                            0.0722,
+                            0,
+                            0,
+                            0.2126,
+                            0.7152,
+                            0.0722,
+                            0,
+                            0,
+                            0.2126,
+                            0.7152,
+                            0.0722,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            1,
+                            0,
                           ]),
                           child: cover,
                         )
@@ -6739,7 +6864,8 @@ String? _rimCheckStatus(Map<String, dynamic> candidate) {
   return switch (value['status']?.toString()) {
     'made' => (label: '通过：球穿过篮网落下', color: c.success),
     'rejected' => (
-      label: const <String, String>{
+      label:
+          const <String, String>{
             'no_crossing': '未通过：没有看到球穿过篮筐',
             'no_entry': '未通过：球不是从篮筐上方落下',
             'off_center': '未通过：球偏离篮筐口',
@@ -6753,7 +6879,8 @@ String? _rimCheckStatus(Map<String, dynamic> candidate) {
       color: c.error,
     ),
     'unsure' => (
-      label: const <String, String>{
+      label:
+          const <String, String>{
             'no_crossing': '未确认：没看清球是否穿过篮筐，请人工确认',
             'no_entry': '未确认：没看清球是否从篮筐上方落下，请人工确认',
             'no_exit': '未确认：没看清球是否从网底落下，请人工确认',
@@ -6764,9 +6891,7 @@ String? _rimCheckStatus(Map<String, dynamic> candidate) {
       color: c.warning,
     ),
     'skipped' => (
-      label: reason == 'small_rim'
-          ? '未复核：篮筐在画面中太小，请人工确认'
-          : '未复核：请人工确认',
+      label: reason == 'small_rim' ? '未复核：篮筐在画面中太小，请人工确认' : '未复核：请人工确认',
       color: c.warning,
     ),
     _ => null,
@@ -6826,7 +6951,8 @@ int _clipEnd(Map<String, dynamic> candidate) {
 
 bool _hasAdjustedRange(Map<String, dynamic> candidate) {
   return (candidate['default_start_ms'] != null &&
-          _clipStart(candidate) != _number(candidate['default_start_ms']).round()) ||
+          _clipStart(candidate) !=
+              _number(candidate['default_start_ms']).round()) ||
       (candidate['default_end_ms'] != null &&
           _clipEnd(candidate) != _number(candidate['default_end_ms']).round());
 }

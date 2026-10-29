@@ -66,7 +66,10 @@ class _ReviewEngine {
     }
     if (command == 'create_player') {
       createdNames.add(payload['name'] as String);
-      final player = <String, dynamic>{'id': 'new-player', 'name': payload['name']};
+      final player = <String, dynamic>{
+        'id': 'new-player',
+        'name': payload['name'],
+      };
       players.add(player);
       return {'player': player};
     }
@@ -84,7 +87,9 @@ class _ReleaseEngine extends _ReviewEngine {
       for (final row in result['candidates'] as List) {
         row['draft'] = draft;
         if (draft) row['id'] = 'draft:${row['id']}';
-        final evidence = Map<String, dynamic>.from(row['shooter_evidence'] as Map);
+        final evidence = Map<String, dynamic>.from(
+          row['shooter_evidence'] as Map,
+        );
         row['shooter_evidence'] = evidence;
         evidence['method'] = 'ball_release_preview_v1';
         evidence['recommended_track_id'] = null;
@@ -102,72 +107,143 @@ class _ReleaseEngine extends _ReviewEngine {
   }
 }
 
-Future<void> _pump(WidgetTester tester, _ReviewEngine engine) async {
-  tester.view.physicalSize = const Size(1400, 1100);
+Future<void> _pump(WidgetTester tester, _ReviewEngine engine, {
+  Size size = const Size(1400, 1100),
+  double textScale = 1,
+}) async {
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(
-    MaterialApp(home: ShooterQuickLabel(request: engine.request)),
+    MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(textScale)),
+        child: child!,
+      ),
+      home: ShooterQuickLabel(request: engine.request),
+    ),
   );
   await tester.pumpAndSettle();
 }
 
 void main() {
-  testWidgets('desktop grid has three compact cards per row and three parallel frames', (tester) async {
-    final engine = _ReleaseEngine()..draft = false..rowCount = 4;
-    await _pump(tester, engine);
-    final cards = [for (var i = 0; i < 4; i++) find.byKey(ValueKey('shooter-card-c$i'))];
-    expect(tester.getTopLeft(cards[0]).dy, tester.getTopLeft(cards[2]).dy);
-    expect(tester.getTopLeft(cards[3]).dy, greaterThan(tester.getTopLeft(cards[0]).dy));
-    expect(tester.getSize(cards[0]).height, lessThan(460));
-    final frames = [for (var i = 0; i < 3; i++) find.byKey(ValueKey('shooter-frame-c0-$i'))];
-    expect(tester.getTopLeft(frames[0]).dy, tester.getTopLeft(frames[2]).dy);
-    expect(tester.getTopLeft(frames[0]).dx, lessThan(tester.getTopLeft(frames[1]).dx));
-    expect(tester.getTopLeft(frames[1]).dx, lessThan(tester.getTopLeft(frames[2]).dx));
+  testWidgets('narrow cards with large text keep player actions usable', (tester) async {
+    final engine = _ReleaseEngine()..draft = false;
+    engine.players.first['name'] = 'A long player name that needs wrapping';
+    await _pump(tester, engine, size: const Size(760, 1100), textScale: 2);
+    final name = find.byKey(const ValueKey('shooter-name-c0-red'));
+    await tester.ensureVisible(name);
+    await tester.tap(name);
+    await tester.pumpAndSettle();
+    expect(engine.saves.single['player_id'], 'red');
     expect(tester.takeException(), isNull);
   });
 
-  for (final emptyRoster in [false, true]) {
-    testWidgets('card add-player is always available and assigns only this shot; empty=$emptyRoster', (tester) async {
-      final engine = _ReleaseEngine()..draft = false;
-      if (emptyRoster) engine.players.clear();
+  testWidgets(
+    'desktop grid has three compact cards per row and three parallel frames',
+    (tester) async {
+      final engine = _ReleaseEngine()
+        ..draft = false
+        ..rowCount = 4;
       await _pump(tester, engine);
-      await tester.tap(find.byKey(const ValueKey('shooter-frame-c0-2')));
-      await tester.tap(find.byKey(const ValueKey('shooter-add-player-c0')));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField), '  New player  ');
-      await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.byType(FilledButton)));
-      await tester.pumpAndSettle();
-      expect(engine.createdNames, ['New player']);
-      expect(engine.saves.single['candidate_id'], 'c0');
-      expect(engine.saves.single['player_id'], 'new-player');
-      expect(engine.saves.single['time_ms'], 1200);
-      expect(engine.saves.single.containsKey('status'), isFalse);
-      expect(engine.saves.single.containsKey('outcome'), isFalse);
-      expect(find.byKey(const ValueKey('shooter-add-player-c0')), findsOneWidget);
-      expect(find.byKey(const ValueKey('shooter-name-c1-new-player')), findsOneWidget);
+      final cards = [
+        for (var i = 0; i < 4; i++) find.byKey(ValueKey('shooter-card-c$i')),
+      ];
+      expect(tester.getTopLeft(cards[0]).dy, tester.getTopLeft(cards[2]).dy);
+      expect(
+        tester.getTopLeft(cards[3]).dy,
+        greaterThan(tester.getTopLeft(cards[0]).dy),
+      );
+      expect(tester.getSize(cards[0]).height, lessThan(460));
+      final frames = [
+        for (var i = 0; i < 3; i++) find.byKey(ValueKey('shooter-frame-c0-$i')),
+      ];
+      expect(tester.getTopLeft(frames[0]).dy, tester.getTopLeft(frames[2]).dy);
+      expect(
+        tester.getTopLeft(frames[0]).dx,
+        lessThan(tester.getTopLeft(frames[1]).dx),
+      );
+      expect(
+        tester.getTopLeft(frames[1]).dx,
+        lessThan(tester.getTopLeft(frames[2]).dx),
+      );
       expect(tester.takeException(), isNull);
-    });
+    },
+  );
+
+  for (final emptyRoster in [false, true]) {
+    testWidgets(
+      'card add-player is always available and assigns only this shot; empty=$emptyRoster',
+      (tester) async {
+        final engine = _ReleaseEngine()..draft = false;
+        if (emptyRoster) engine.players.clear();
+        await _pump(tester, engine);
+        await tester.tap(find.byKey(const ValueKey('shooter-frame-c0-2')));
+        await tester.tap(find.byKey(const ValueKey('shooter-add-player-c0')));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField), '  New player  ');
+        await tester.tap(
+          find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.byType(FilledButton),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(engine.createdNames, ['New player']);
+        expect(engine.saves.single['candidate_id'], 'c0');
+        expect(engine.saves.single['player_id'], 'new-player');
+        expect(engine.saves.single['time_ms'], 1200);
+        expect(engine.saves.single.containsKey('status'), isFalse);
+        expect(engine.saves.single.containsKey('outcome'), isFalse);
+        expect(
+          find.byKey(const ValueKey('shooter-add-player-c0')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('shooter-name-c1-new-player')),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
 
-  testWidgets('embedded watch action calls parent instead of closing review', (tester) async {
+  testWidgets('embedded watch action calls parent instead of closing review', (
+    tester,
+  ) async {
     final engine = _ReleaseEngine()..draft = false;
     String? watched;
-    await tester.pumpWidget(MaterialApp(home: ShooterQuickLabel(
-      embedded: true, request: engine.request, onWatchClip: (id) => watched = id,
-    )));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ShooterQuickLabel(
+          embedded: true,
+          request: engine.request,
+          onWatchClip: (id) => watched = id,
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
     final card = find.byKey(const ValueKey('shooter-card-c0'));
-    await tester.ensureVisible(find.descendant(of: card, matching: find.text('Watch clip')));
-    await tester.tap(find.descendant(of: card, matching: find.text('Watch clip')));
+    await tester.ensureVisible(
+      find.descendant(of: card, matching: find.text('Watch clip')),
+    );
+    await tester.tap(
+      find.descendant(of: card, matching: find.text('Watch clip')),
+    );
     await tester.pumpAndSettle();
     expect(watched, 'c0');
     expect(find.byType(ShooterQuickLabel), findsOneWidget);
     expect(find.byType(AppBar), findsNothing);
-    await tester.pumpWidget(MaterialApp(home: ShooterQuickLabel(
-      embedded: true, active: false, request: engine.request,
-    )));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ShooterQuickLabel(
+          embedded: true,
+          active: false,
+          request: engine.request,
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
     expect(engine.saves, isEmpty);

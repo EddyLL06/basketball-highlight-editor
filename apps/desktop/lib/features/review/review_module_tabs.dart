@@ -34,10 +34,14 @@ class ReviewModuleTabs extends StatelessWidget {
             Semantics(
               selected: shooterSelected == shooter,
               child: TextButton.icon(
-                key: Key(shooter ? 'open-shooter-quick-label' : 'review-basket-tab'),
+                key: Key(
+                  shooter ? 'open-shooter-quick-label' : 'review-basket-tab',
+                ),
                 onPressed: enabled ? () => onSelected(shooter) : null,
                 style: TextButton.styleFrom(
-                  foregroundColor: shooterSelected == shooter ? c.orange : c.textSecondary,
+                  foregroundColor: shooterSelected == shooter
+                      ? c.orange
+                      : c.textSecondary,
                   backgroundColor: shooterSelected == shooter
                       ? c.orange.withValues(alpha: 0.14)
                       : Colors.transparent,
@@ -47,10 +51,17 @@ class ReviewModuleTabs extends StatelessWidget {
                     borderRadius: BorderRadius.circular(CsRadius.sm),
                   ),
                 ),
-                icon: Icon(shooter ? Icons.people_alt_outlined : Icons.sports_basketball_outlined, size: 18),
-                label: Text(shooter
-                    ? (zh ? '射手快标' : 'Shooter quick label')
-                    : (zh ? '进球审核' : 'Basket review')),
+                icon: Icon(
+                  shooter
+                      ? Icons.people_alt_outlined
+                      : Icons.sports_basketball_outlined,
+                  size: 18,
+                ),
+                label: Text(
+                  shooter
+                      ? (zh ? '射手快标' : 'Shooter quick label')
+                      : (zh ? '进球审核' : 'Basket review'),
+                ),
               ),
             ),
         ],
