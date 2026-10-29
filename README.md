@@ -97,13 +97,17 @@ BHE 在自己的电脑或安卓手机上分析，先把疑似进球排好队，�
 | v0.1.1 – v0.1.3 | 2026-09-16 – 09-23 | 桌面端和移动端完整中英文界面；修复 Android 原生库加载和 ONNX Runtime 版本 |
 | v0.1.0 | 2026-09-14 | 首个正式预览版：自动构建 macOS、Windows 安装包和 Android 测试包，可从官网下载；移动端完成桌面算法移植 |
 
-## 觉得好用？
+## 咖啡
 
-BHE 是免费的。要是它帮你少熬了几个夜，想请我喝杯咖啡，扫下面这个码就行，不请也完全没关系。
+一个人在做，有用的话，请我喝杯咖啡呗。
 
-<p align="center"><img src="docs/images/coffee-wechat.png" alt="微信收款码，自愿请作者喝咖啡" width="180"></p>
+<p align="center"><img src="docs/images/coffee-wechat.png" alt="微信收款码" width="180"></p>
 
-<!-- 联系二维码：收到素材后在此添加。 -->
+## 联系
+
+扫码加作者微信，备注「BHE」，反馈问题、提需求都行。
+
+<p align="center"><img src="website/assets/wechat-qr.png" alt="作者微信联系二维码" width="180"></p>
 
 ## 文档
 
