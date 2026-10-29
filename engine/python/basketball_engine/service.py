@@ -42,6 +42,7 @@ from .adapters.export import (
 )
 from .protocol import ProtocolError
 from .storage import ProjectStore, new_id
+from .shooter_review import ShooterReviewMixin
 from .media_tools import resolve_media_tool
 from .diagnostics import folder_summary, log_diagnostic, video_summary
 from basketball_highlight.rim_check import RIM_CHECK_VERSION
@@ -51,7 +52,7 @@ from basketball_highlight.tracking import link_ball_detections
 ANALYSIS_ALGORITHM_VERSION = "python-v2.15-crop-scale-clamp"
 
 
-class EngineService:
+class EngineService(ShooterReviewMixin):
     _MIN_PROCESSING_SPACE_BYTES = 512 * 1024 * 1024
 
     def __init__(self) -> None:
@@ -137,6 +138,9 @@ class EngineService:
             "delete_player": self.delete_player,
             "set_candidate_player": self.set_candidate_player,
             "set_candidates_player": self.set_candidates_player,
+            "list_shooter_review": self.list_shooter_review,
+            "prepare_shooter_review": self.prepare_shooter_review,
+            "set_candidate_shooter": self.set_candidate_shooter,
             "start_review": self.start_review,
             "review_candidate": self.review_candidate,
             "list_review_history": self.list_review_history,
@@ -1135,7 +1139,7 @@ class EngineService:
                 project_id=project_id,
                 states=("queued", "running"),
             )
-            if job.get("type") in {"analysis", "export"}
+            if job.get("type") in {"analysis", "export", "shooter_review"}
         ]
 
     def start_analysis(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -2028,7 +2032,7 @@ class EngineService:
                 raise ProtocolError("VIDEO_NOT_FOUND", "视频不存在")
 
         job_type = payload.get("job_type", "analysis")
-        if job_type not in {"analysis", "export"}:
+        if job_type not in {"analysis", "export", "shooter_review"}:
             raise ProtocolError("INVALID_REQUEST", "job_type 只支持 analysis 或 export")
 
         jobs = store.list_jobs(

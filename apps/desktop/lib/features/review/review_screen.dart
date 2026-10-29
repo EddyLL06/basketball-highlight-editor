@@ -24,6 +24,7 @@ import 'clip_range_timeline.dart';
 import 'media_readiness.dart';
 import 'player_group_editor.dart';
 import 'review_video_viewport.dart';
+import 'shooter_quick_label.dart';
 
 bool _annotationHintSeen = false;
 
@@ -119,6 +120,40 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
 
   void _requestReplay() {
     setState(() => _replayToken++);
+  }
+
+  Future<void> _openShooterQuickLabel() async {
+    final session = ref.read(projectSessionProvider);
+    final scope = session.snapshot();
+    try {
+      await ref.read(projectProvider.notifier).flushReviewQueue();
+      final candidateId = await ref
+          .read(playbackCoordinatorProvider)
+          .withPausedPlayback(() {
+        if (!mounted) return Future<String?>.value();
+        return showDialog<String>(
+          context: context,
+          builder: (context) => Dialog.fullscreen(
+            child: ShooterQuickLabel(
+              initialVideoId: scope.videoId,
+              request: (command, payload) => scope.engine.client.request(
+                command, {'project_root': scope.projectRoot, ...payload},
+              ),
+            ),
+          ),
+        );
+      });
+      if (!mounted || session.projectRoot != scope.projectRoot) return;
+      await ref.read(projectProvider.notifier).refreshCandidates(scope: scope);
+      if (!mounted || candidateId == null) return;
+      final candidate = ref.read(projectProvider).candidates
+          .where((row) => row['id'] == candidateId).firstOrNull;
+      if (candidate != null) _selectCandidate(candidate);
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
   }
 
   void _toggleVideoSource() {
@@ -758,6 +793,17 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
         padding: EdgeInsets.zero,
         child: Column(
           children: [
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                key: const Key('open-shooter-quick-label'),
+                onPressed: allCandidates.isEmpty || reviewLocked || analyzing
+                    ? null : _openShooterQuickLabel,
+                icon: const Icon(Icons.people_alt_outlined),
+                label: Text(Localizations.localeOf(context).languageCode == 'zh'
+                    ? '射手快标' : 'Shooter quick label'),
+              ),
+            ),
             if (analyzing ||
                 jobState == 'failed' ||
                 jobState == 'cancelled' ||

@@ -58,6 +58,10 @@ cp -R "$ROOT/scripts"/. "$OUT/scripts/"
 cp -R "$ROOT/src"/. "$OUT/src/"
 cp "$ROOT/docs/architecture/SQLITE_SCHEMA_V1.sql" "$OUT/docs/architecture/"
 cp "$MODEL" "$OUT/models/bball_model.pt"
+if [[ -f "$ROOT/models/yolo11n.pt" ]]; then
+  cp "$ROOT/models/yolo11n.pt" "$OUT/models/yolo11n.pt"
+  cp "$ROOT/docs/SHOOTER_MODEL_NOTICES.md" "$OUT/models/SHOOTER_MODEL_NOTICES.md"
+fi
 # CoreML 用的静态 batch=1 模型是可选的:构建时导出过就一起打包,
 # 没有就只保留 Metal/CPU 路径(引擎会在缺文件时自动降级,不会报错)。
 STATIC_ONNX="${BHE_STATIC_ONNX:-${MODEL%.*}.static.onnx}"

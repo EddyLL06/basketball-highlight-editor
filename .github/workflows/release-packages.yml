@@ -30,6 +30,15 @@ on:
         required: true
         type: boolean
         default: true
+      source_ref:
+        description: "Optional branch/SHA for a private preview (requires publish=false)"
+        required: false
+        default: ""
+      include_shooter:
+        description: "Bundle the shooter quick-label model and validate desktop UI"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -73,6 +82,7 @@ jobs:
           INPUT_PLATFORM: ${{ inputs.platform }}
           INPUT_PUBLISH: ${{ inputs.publish }}
           INPUT_PUBLISH_OSS: ${{ inputs.publish_oss }}
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           set -euo pipefail
 
@@ -82,6 +92,13 @@ jobs:
             platform="$INPUT_PLATFORM"
             publish="$INPUT_PUBLISH"
             publish_oss="$INPUT_PUBLISH_OSS"
+            if [[ -n "$INPUT_SOURCE_REF" ]]; then
+              [[ "$publish" == "false" && "$publish_oss" == "false" ]] || {
+                echo "A branch preview requires publish=false and publish_oss=false" >&2
+                exit 1
+              }
+              source_ref="$INPUT_SOURCE_REF"
+            fi
           else
             tag="$REF_NAME"
             source_ref="$SHA"
@@ -161,6 +178,13 @@ jobs:
         working-directory: apps/desktop
         run: flutter pub get
 
+      - name: Validate shooter desktop preview
+        if: inputs.include_shooter == true
+        working-directory: apps/desktop
+        run: |
+          flutter analyze
+          flutter test
+
       - name: Download portable Python
         id: python
         shell: bash
@@ -188,7 +212,20 @@ jobs:
           export PIP_DISABLE_PIP_VERSION_CHECK=1
           "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir --upgrade pip
           "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -r requirements.txt
+          if [[ "${{ inputs.include_shooter }}" == "true" ]]; then
+            "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -r requirements-shooter.txt
+          fi
           "$PYTHON_ROOT/bin/python3" -c 'import cv2, numpy, pandas, psutil, torch, ultralytics; print("runtime imports: OK")'
+
+      - name: Download verified shooter person model
+        if: inputs.include_shooter == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt \
+            -o models/yolo11n.pt
+          echo '0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1  models/yolo11n.pt' | shasum -a 256 --check
 
       - name: Install CoreML acceleration and export static ONNX
         shell: bash

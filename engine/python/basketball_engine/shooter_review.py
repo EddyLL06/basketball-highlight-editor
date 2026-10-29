@@ -1,0 +1,300 @@
+"""Desktop contact-sheet preparation and transactional human shooter labels."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import os
+import subprocess
+import sys
+import threading
+from pathlib import Path
+
+from .adapters.analysis import PipelineCancelled, terminate_process
+from .protocol import ProtocolError
+from .storage import now_iso
+
+
+def validate_predictions(predictions, source, candidates):
+    stat = source.stat()
+    fingerprint = {"name": source.name, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    if predictions.get("video_fingerprint") != fingerprint:
+        raise ProtocolError("VIDEO_SOURCE_CHANGED", "射手分析与当前原视频不匹配")
+    expected = {row["id"]: row for row in candidates}
+    results = predictions.get("results", [])
+    if len(results) != len(expected) or {r["candidate_id"] for r in results} != set(expected):
+        raise ProtocolError("SHOOTER_CANDIDATES_CHANGED", "射手分析的候选列表已变化，请重新生成")
+    scopes = {s["tracking_scope"] for s in predictions.get("sessions", [])}
+    for row in results:
+        if row["event_time_ms"] != expected[row["candidate_id"]]["event_time_ms"] or row["tracking_scope"] not in scopes:
+            raise ProtocolError("SHOOTER_CANDIDATES_CHANGED", "射手分析时间或跟踪会话不匹配")
+
+
+def render_evidence(predictions, source, candidates, directory, generation, cancel, progress):
+    """Render only trusted source frames; imported paths are never used."""
+    import cv2
+
+    validate_predictions(predictions, source, candidates)
+    directory.mkdir(parents=True, exist_ok=True)
+    capture = cv2.VideoCapture(str(source))
+    if not capture.isOpened():
+        raise ProtocolError("VIDEO_NOT_FOUND", "无法读取出手画面")
+    fps = capture.get(cv2.CAP_PROP_FPS) or 30
+    frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+    sessions = {s["tracking_scope"]: s for s in predictions["sessions"]}
+    by_id = {c["id"]: c for c in candidates}
+    evidence = []
+    try:
+        for index, result in enumerate(predictions["results"]):
+            if cancel.is_set():
+                raise PipelineCancelled("JOB_CANCELLED")
+            candidate = by_id[result["candidate_id"]]
+            best = result.get("shooter") or next(iter(result.get("rankings", [])), None)
+            release_ms = best["release_time_ms"] if best else max(0, candidate["event_time_ms"] - 1000)
+            token = hashlib.sha256(candidate["id"].encode()).hexdigest()[:20]
+            frames, seen = [], set()
+            for offset in (-100, 0, 100):
+                frame_index = min(max(0, round((release_ms + offset) * fps / 1000)), frame_count - 1)
+                if frame_index in seen:
+                    continue
+                seen.add(frame_index)
+                time_ms = round(frame_index * 1000 / fps)
+                capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                ok, image = capture.read()
+                if not ok:
+                    continue
+                height, width = image.shape[:2]
+                if (width, height) != (predictions["frame_width"], predictions["frame_height"]):
+                    raise ProtocolError("SHOOTER_FRAME_MISMATCH", "出手画面的方向或分辨率已变化")
+                context = image.copy()
+                people = []
+                for track in sessions[result["tracking_scope"]]["tracks"]:
+                    nearest = min(track["observations"], key=lambda p: abs(p["timestamp"] * 1000 - time_ms), default=None)
+                    if nearest is None or abs(nearest["timestamp"] * 1000 - time_ms) > 170:
+                        continue
+                    bbox = nearest["bbox"]
+                    if len(bbox) != 4 or not all(math.isfinite(float(v)) for v in bbox):
+                        continue
+                    x1, y1, x2, y2 = [round(float(v)) for v in bbox]
+                    x1, x2 = max(0, x1), min(width, x2)
+                    y1, y2 = max(0, y1), min(height, y2)
+                    if x2 <= x1 or y2 <= y1:
+                        continue
+                    bw, bh = x2 - x1, y2 - y1
+                    left, right = max(0, round(x1 - bw * .35)), min(width, round(x2 + bw * .35))
+                    top, bottom = max(0, round(y1 - bh * .35)), min(height, round(y2 + bh * .08))
+                    crop = image[top:bottom, left:right]
+                    crop_path = directory / f"{token}_{time_ms}_person_{int(track['track_id'])}.jpg"
+                    if not cv2.imwrite(str(crop_path), crop, [cv2.IMWRITE_JPEG_QUALITY, 88]):
+                        raise OSError("Could not save shooter crop")
+                    cv2.rectangle(context, (x1, y1), (x2, y2), (235, 165, 55), 3)
+                    cv2.putText(context, f"Track {track['track_id']}", (x1, max(22, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, .7, (235, 165, 55), 2)
+                    people.append({"track_id": track["track_id"], "bbox": bbox, "crop_path": str(crop_path)})
+                context_path = directory / f"{token}_{time_ms}_context.jpg"
+                if width > 1280:
+                    context = cv2.resize(context, (1280, round(height * 1280 / width)))
+                if not cv2.imwrite(str(context_path), context, [cv2.IMWRITE_JPEG_QUALITY, 86]):
+                    raise OSError("Could not save shooter frame")
+                frames.append({"time_ms": time_ms, "context_path": str(context_path), "people": people})
+            if not frames:
+                raise ProtocolError("SHOOTER_FRAME_MISSING", "出手画面生成失败，可重试或使用视频审核")
+            evidence.append({
+                "candidate_id": candidate["id"], "video_id": candidate["video_id"],
+                "event_time_ms": candidate["event_time_ms"], "generation": generation,
+                "tracking_scope": result["tracking_scope"], "method": result.get("method"),
+                "source_fingerprint": predictions["video_fingerprint"],
+                "release_time_ms": release_ms, "release_uncertain": result["status"] != "attributed",
+                "reason": result.get("reason"), "recommended_track_id": best["track_id"] if best else None,
+                "frames": frames,
+            })
+            progress((index + 1) / max(1, len(candidates)))
+    finally:
+        capture.release()
+    return evidence
+
+
+def persist_evidence(store, evidence):
+    with store.connect() as connection:
+        for item in evidence:
+            candidate = connection.execute("SELECT event_time_ms, video_id FROM candidates WHERE id=?", (item["candidate_id"],)).fetchone()
+            if not candidate or candidate["video_id"] != item["video_id"] or candidate["event_time_ms"] != item["event_time_ms"]:
+                raise ProtocolError("SHOOTER_CANDIDATES_CHANGED", "候选发生变化，请重新生成出手画面")
+            connection.execute(
+                """INSERT INTO shooter_review_evidence
+                (candidate_id,video_id,generation,source_fingerprint,evidence_json,updated_at)
+                VALUES (?,?,?,?,?,?) ON CONFLICT(candidate_id) DO UPDATE SET
+                generation=excluded.generation,source_fingerprint=excluded.source_fingerprint,
+                evidence_json=excluded.evidence_json,updated_at=excluded.updated_at""",
+                (item["candidate_id"], item["video_id"], item["generation"], json.dumps(item["source_fingerprint"], sort_keys=True), json.dumps(item, ensure_ascii=False, allow_nan=False), now_iso()),
+            )
+
+
+class ShooterReviewMixin:
+    def list_shooter_review(self, payload):
+        store = self._require_store(payload)
+        with store.connect() as connection:
+            saved = {row["candidate_id"]: dict(row) for row in connection.execute("SELECT * FROM shooter_review_evidence")}
+        rows, sources = [], {}
+        for candidate in store.list_candidates():
+            row = saved.get(candidate["id"])
+            evidence = json.loads(row["evidence_json"]) if row else None
+            video = store.video(candidate["video_id"])
+            stale = False
+            if evidence and video:
+                try:
+                    if video["id"] not in sources:
+                        source = self._validated_source(video)
+                        stat = source.stat()
+                        sources[video["id"]] = {"name": source.name, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+                    stale = evidence["source_fingerprint"] != sources[video["id"]]
+                except (ProtocolError, OSError):
+                    stale = True
+            selection = json.loads(row["selection_json"]) if row else {}
+            review_state = row["review_state"] if row else "pending"
+            if review_state == "confirmed" and candidate.get("player_id") != selection.get("player_id"):
+                review_state = "pending"
+            rows.append({**candidate, "shooter_evidence": None if stale else evidence,
+                         "shooter_evidence_stale": stale,
+                         "shooter_selection": selection,
+                         "shooter_review_state": review_state})
+        jobs = store.list_jobs(project_id=store.project()["id"], job_type="shooter_review", descending=True)
+        return {"candidates": rows, "players": store.list_players(), "videos": store.list_videos(), "jobs": jobs[:1]}
+
+    def prepare_shooter_review(self, payload):
+        with self._job_lock:
+            self._job_threads = {k: t for k, t in self._job_threads.items() if t.is_alive()}
+            store = self._require_store(payload)
+            project = store.project()
+            if self._job_threads or self._unfinished_heavy_jobs(store, project["id"]):
+                raise ProtocolError("JOB_ALREADY_RUNNING", "请先完成或取消现有分析、导出或出手画面任务")
+            videos = [v for v in store.list_videos() if not payload.get("video_id") or v["id"] == payload["video_id"]]
+            if not videos:
+                raise ProtocolError("VIDEO_NOT_FOUND", "没有可处理的视频")
+            candidates = store.list_candidates()
+            videos = [v for v in videos if any(c["video_id"] == v["id"] for c in candidates)]
+            if not videos:
+                raise ProtocolError("SHOOTER_NO_CANDIDATES", "请先分析并生成候选片段")
+            if payload.get("predictions_path") and len(videos) != 1:
+                raise ProtocolError("INVALID_REQUEST", "导入射手分析时请选择对应的单个视频")
+            for video in videos:
+                self._validated_source(video)
+            root = Path(__file__).resolve().parents[3]
+            player_model = root / "models/yolo11n.pt"
+            if not payload.get("predictions_path") and not player_model.is_file():
+                raise ProtocolError("SHOOTER_MODEL_MISSING", "缺少人物检测模型，请使用含射手模型的预览安装包，或导入已有射手分析")
+            result = {"job": store.create_job(project["id"], videos[0]["id"] if len(videos) == 1 else None, "shooter_review", {"video_ids": [v["id"] for v in videos]})}
+            job_id = result["job"]["id"]
+            event = threading.Event()
+            self._job_cancel_events[job_id] = event
+            thread = threading.Thread(target=self._run_shooter_review, args=(dict(payload), job_id, videos, candidates), daemon=True, name=f"shooter-{job_id}")
+            self._job_threads[job_id] = thread
+            try:
+                thread.start()
+            except RuntimeError:
+                self._job_threads.pop(job_id, None)
+                self._job_cancel_events.pop(job_id, None)
+                store.update_job(job_id, state="failed", error_code="SHOOTER_PREPARE_FAILED", error_message="无法启动出手画面任务")
+                raise
+            return result
+
+    def _run_shooter_review(self, payload, job_id, videos, candidates):
+        store = self._require_store(payload)
+        cancel = self._job_cancel_events[job_id]
+        root = Path(__file__).resolve().parents[3]
+        directory = store.root / "artifacts/shooter_review" / job_id
+        generated = []
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            for index, video in enumerate(videos):
+                source = self._validated_source(video)
+                rows = [c for c in candidates if c["video_id"] == video["id"]]
+                destination = directory / video["id"]
+                destination.mkdir()
+
+                def progress(value, stage="shooter_frames"):
+                    if cancel.is_set():
+                        raise PipelineCancelled("JOB_CANCELLED")
+                    store.update_job(job_id, state="running", stage=stage, progress=(index + value) / len(videos))
+
+                progress(.01, "shooter_tracking")
+                if payload.get("predictions_path"):
+                    path = Path(payload["predictions_path"]).expanduser()
+                    if not path.is_file() or path.stat().st_size > 128 * 1024 * 1024:
+                        raise ProtocolError("INVALID_REQUEST", "射手分析文件不存在或过大")
+                    predictions = json.loads(path.read_text(encoding="utf-8"))
+                else:
+                    inputs = [{"id": c["id"], "event_time_ms": c["event_time_ms"], "rim": self._candidate_rim(store, c)} for c in rows]
+                    input_path, output_path = destination / "candidates.json", destination / "predictions.json"
+                    input_path.write_text(json.dumps({"candidates": inputs}, ensure_ascii=False))
+                    command = [sys.executable, str(root / "scripts/attribute_shooters.py"), "--video", str(source), "--candidates", str(input_path), "--player-model", str(root / "models/yolo11n.pt"), "--ball-model", str(self._default_model_path(root)), "--algorithm", "joint-v4", "--observations-output", str(destination / "observations.json"), "--output", str(output_path)]
+                    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", env={**os.environ, "YOLO_AUTOINSTALL": "false"}, start_new_session=os.name != "nt")
+                    self._set_job_process(job_id, process)
+                    lines = []
+                    try:
+                        for line in process.stdout:
+                            lines.append(line)
+                            lines = lines[-30:]
+                            if cancel.is_set():
+                                terminate_process(process)
+                                raise PipelineCancelled("JOB_CANCELLED")
+                            for prefix, start, size in (("collect_progress=", .02, .7), ("progress=", .72, .1)):
+                                if line.startswith(prefix):
+                                    progress(start + float(line.split("=", 1)[1]) * size, "shooter_tracking")
+                        if process.wait() != 0:
+                            if cancel.is_set():
+                                raise PipelineCancelled("JOB_CANCELLED")
+                            raise ProtocolError("SHOOTER_PREPARE_FAILED", "射手分析失败：" + "".join(lines)[-1500:])
+                    finally:
+                        if process.poll() is None:
+                            terminate_process(process)
+                        if process.stdout:
+                            process.stdout.close()
+                        self._clear_job_process(job_id, process)
+                    predictions = json.loads(output_path.read_text())
+                generated.extend(render_evidence(predictions, source, rows, destination, job_id, cancel, lambda v: progress(.83 + .16 * v)))
+            if cancel.is_set():
+                raise PipelineCancelled("JOB_CANCELLED")
+            # All videos commit together only after every frame and identity check.
+            persist_evidence(store, generated)
+            store.update_job(job_id, state="completed", stage="completed", progress=1)
+        except PipelineCancelled:
+            store.update_job(job_id, state="cancelled", stage="cancelled", error_code="JOB_CANCELLED", error_message="已取消，保留原出手画面和人工标签")
+        except Exception as exc:
+            store.update_job(job_id, state="failed", stage="shooter_review", error_code=exc.code if isinstance(exc, ProtocolError) else "SHOOTER_PREPARE_FAILED", error_message=str(exc))
+        finally:
+            with self._job_lock:
+                self._job_cancel_events.pop(job_id, None)
+                self._job_threads.pop(job_id, None)
+
+    def set_candidate_shooter(self, payload):
+        store = self._require_store(payload)
+        candidate_id = payload.get("candidate_id")
+        state = payload.get("review_state", "confirmed")
+        player_id, track_id, time_ms = payload.get("player_id"), payload.get("track_id"), payload.get("time_ms")
+        if state not in ("confirmed", "pending", "uncertain") or (state == "confirmed") != (isinstance(player_id, str) and bool(player_id)):
+            raise ProtocolError("INVALID_REQUEST", "请选择球员，或将此片段标为待标注/不确定")
+        with store.connect() as connection:
+            row = connection.execute("SELECT s.*,v.project_id FROM shooter_review_evidence s JOIN videos v ON v.id=s.video_id WHERE s.candidate_id=?", (candidate_id,)).fetchone()
+            if not row or payload.get("generation") != row["generation"]:
+                raise ProtocolError("SHOOTER_EVIDENCE_CHANGED", "出手画面已更新，请刷新后重试")
+            evidence = json.loads(row["evidence_json"])
+            video = store.video(row["video_id"])
+            source = self._validated_source(video)
+            stat = source.stat()
+            if evidence["source_fingerprint"] != {"name": source.name, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}:
+                raise ProtocolError("SHOOTER_EVIDENCE_CHANGED", "原视频已重新关联，请重新生成出手画面")
+            if time_ms is not None and not any(f["time_ms"] == time_ms for f in evidence["frames"]):
+                raise ProtocolError("INVALID_REQUEST", "出手画面时间不匹配")
+            if track_id is not None:
+                if isinstance(track_id, bool) or not isinstance(track_id, int) or not any(f["time_ms"] == time_ms and any(p["track_id"] == track_id for p in f["people"]) for f in evidence["frames"]):
+                    raise ProtocolError("INVALID_REQUEST", "请选择当前出手画面中的人物")
+            if player_id and not connection.execute("SELECT id FROM players WHERE id=? AND project_id=?", (player_id, row["project_id"])).fetchone():
+                raise ProtocolError("INVALID_REQUEST", "球员不属于当前项目")
+            stamp = now_iso()
+            connection.execute("""INSERT INTO candidate_reviews(candidate_id,player_id,status,updated_at)
+                VALUES(?,?,'pending',?) ON CONFLICT(candidate_id) DO UPDATE SET
+                player_id=excluded.player_id,updated_at=excluded.updated_at""", (candidate_id, player_id, stamp))
+            selection = {"generation": row["generation"], "tracking_scope": evidence["tracking_scope"], "time_ms": time_ms, "track_id": track_id, "player_id": player_id}
+            connection.execute("UPDATE shooter_review_evidence SET selection_json=?,review_state=?,updated_at=? WHERE candidate_id=?", (json.dumps(selection), state, stamp, candidate_id))
+        return {"updated": True, "selection": selection, "review_state": state}
