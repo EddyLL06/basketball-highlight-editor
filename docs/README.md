@@ -18,6 +18,11 @@
 | 理解移动端原生 Runtime | [`architecture/MOBILE_RUNTIME_V1.md`](architecture/MOBILE_RUNTIME_V1.md) |
 | 修改 SQLite 结构 | [`architecture/SQLITE_SCHEMA_V1.sql`](architecture/SQLITE_SCHEMA_V1.sql) |
 | 导出审核数据 | [`REVIEW_DATASET_EXPORT.md`](REVIEW_DATASET_EXPORT.md) |
+| 研发：临时球员跟踪与投篮者归因 | [`SHOOTER_ATTRIBUTION_PR1.md`](SHOOTER_ATTRIBUTION_PR1.md)（英文技术契约；独立 CLI、临时验证页面，不接入产品 UI） |
+| 研发：联合出手/轨迹归因、局部外观跟踪与可重放评估 | [`SHOOTER_ATTRIBUTION_V2.md`](SHOOTER_ATTRIBUTION_V2.md)（英文；当前 CLI 默认方法） |
+| 研发：提高归因 coverage、控球竞争与出画球路验证 | [`SHOOTER_ATTRIBUTION_V3.md`](SHOOTER_ATTRIBUTION_V3.md)（英文；通过 `--algorithm joint-v3` 启用） |
+| 研发：出手瞬间的局部身份验证与近筐短出手 | [`SHOOTER_ATTRIBUTION_V4.md`](SHOOTER_ATTRIBUTION_V4.md)（英文；通过 `--algorithm joint-v4` 启用） |
+| 研发：独立标注出手者、进球／未进球与投篮统计口径 | [`SHOT_ATTEMPT_LABELS.md`](SHOT_ATTEMPT_LABELS.md)（英文；未进球也保留射手归因） |
 | 了解 Fast/Standard 分析模式 | [`research/ANALYSIS_MODES_V1.md`](research/ANALYSIS_MODES_V1.md) |
 | 查看已记录的性能样本 | [`benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md`](benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md) |
 | 查看篮筐复核的准确率样本 | [`benchmarks/RIM_CHECK_RECALL_BENCHMARK_20261021.md`](benchmarks/RIM_CHECK_RECALL_BENCHMARK_20261021.md)、[`benchmarks/RIM_CHECK_BENCHMARK_20261020.md`](benchmarks/RIM_CHECK_BENCHMARK_20261020.md) |

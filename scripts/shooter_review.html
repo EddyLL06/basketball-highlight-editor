@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BHE · Shooter evidence review</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#e7edf5;background:#10151e;color-scheme:dark}*{box-sizing:border-box}body{margin:0}header{padding:24px 32px;border-bottom:1px solid #394354;display:flex;justify-content:space-between;align-items:center;gap:20px}h1{font-size:24px;margin:0}h2{font-size:20px}p{line-height:1.5;color:#bdcadb}header p{margin:6px 0 0}.tag{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:#64d8f1}main{display:grid;grid-template-columns:260px minmax(0,1fr);gap:24px;padding:24px 32px;max-width:1600px;margin:auto}aside{max-height:85vh;overflow:auto}.event{display:block;text-align:left;width:100%;margin-bottom:8px;background:#1b2432;border:1px solid #394354}.event[aria-current=true]{border:2px solid #64d8f1;background:#203b4a}.event small{display:block;color:#bdcadb;margin-top:5px}button,select,input{font:inherit;border-radius:7px;border:1px solid #59677b;background:#273448;color:#f3f7fc;padding:11px 14px;min-height:44px}button{cursor:pointer}button:hover{background:#354b65}button:disabled{opacity:.45;cursor:default}button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #ffcf70;outline-offset:3px}.primary{background:#00657b;border-color:#64d8f1}.stage{position:relative;background:#000;border-radius:10px;overflow:hidden}video{display:block;width:100%;max-height:62vh}canvas{position:absolute;top:0;left:0;width:100%;height:calc(100% - 40px);pointer-events:none}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.panel{background:#1b2432;border:1px solid #394354;border-radius:10px;padding:18px;margin-top:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.field{display:flex;flex-direction:column;gap:8px;margin:12px 0}#status{min-height:26px;color:#81e2c3}#evidence{white-space:pre-wrap;font:13px/1.6 ui-monospace,monospace;color:#d1deed}.skip{position:absolute;top:-80px;left:16px}.skip:focus{top:0;background:#273448;padding:12px;z-index:10}@media(max-width:900px){main{grid-template-columns:1fr;padding:16px}aside{max-height:180px}.grid{grid-template-columns:1fr}header{padding:20px}}
+/* Keep the overlay and video at the same aspect ratio in wide and narrow panels. */
+video{max-height:none}
+</style>
+<a class="skip" href="#review">Skip to review</a>
+<header><div><div class="tag">BHE · Local development review</div><h1>Who released the ball?</h1><p>Label the shooter and shot outcome separately. Missed shots also count as attempts. Track numbers apply only to this session.</p></div><div id="progress" aria-live="polite"></div></header>
+<main><aside aria-label="Shot candidates" id="events"></aside><section id="review" tabindex="-1">
+<h2 id="title">Loading predictions…</h2>
+<div class="stage"><video id="video" src="/video" muted playsinline preload="metadata" aria-label="Scoring sequence with player track overlay"></video><canvas id="overlay" aria-hidden="true"></canvas></div>
+<p id="media-status" role="status" aria-live="polite">Loading video frame…</p>
+<div class="toolbar"><button id="previous" disabled>← Previous event</button><button id="toggle-play" disabled>Play</button><button id="replay" disabled>Replay sequence</button><button id="release" disabled>Pause at release</button><button id="back" disabled>− 1 frame</button><button id="forward" disabled>+ 1 frame</button><button id="next" disabled>Next event →</button><label>Speed <select id="speed"><option value="1">1×</option><option value="0.5">0.5×</option><option value="0.25">0.25×</option></select></label></div>
+<div class="grid"><div class="panel"><h2 id="prediction">Prediction</h2><p id="reason"></p><p id="time"></p><div class="field"><label for="outcome">Shot outcome</label><select id="outcome"><option value="unclassified" disabled>Previous review: not made; attempt type unclassified</option><option value="made">Made</option><option value="missed">Missed</option><option value="unknown" selected>Shot attempt · outcome unknown</option><option value="not_shot">Not a shot / false candidate</option></select></div><div class="field"><label for="track">Actual shooter in the video</label><select id="track"></select></div><div class="field"><label for="note">Optional observation</label><input id="note" maxlength="1000" placeholder="e.g. release hidden by the other player"></div><div class="toolbar"><button class="primary" id="confirm" disabled>Save shooter and outcome</button><button id="unclear" disabled>Shooter cannot be determined</button><button id="missed" disabled>Missed · selected shooter</button><button id="not-shot" disabled>Not a shot / false candidate</button></div><div id="status" role="status"></div></div><div class="panel"><h2>Evidence and uncertainty</h2><p>Scores rank heuristic evidence. They are not calibrated probabilities of correctness.</p><div id="evidence"></div></div></div>
+</section></main>
+<script>
+let data, labels=[], index=0;
+const $=id=>document.getElementById(id), video=$('video'), canvas=$('overlay'), ctx=canvas.getContext('2d');
+let pendingSeek=null;
+const current=()=>data.results[index];
+const session=()=>data.sessions.find(s=>s.tracking_scope===current().tracking_scope);
+const seconds=t=>`${(t/1000).toFixed(2)}s`;
+const selectedTrack=()=>$('track').value===''?null:Number($('track').value);
+const reviewedOutcome=label=>label.is_shot===false?'not_shot':label.shot_outcome||(label.is_scoring===true?'made':'unclassified');
+const outcomeText=value=>({made:'Made',missed:'Missed',unknown:'Attempt · outcome unknown',not_shot:'Not a shot',unclassified:'Not made · attempt type unclassified'}[value]);
+const suggestedOutcome=r=>['made','missed'].includes(r.outcome_prediction?.shot_outcome)?r.outcome_prediction.shot_outcome:'unknown';
+function outcomeSuggestion(r){
+  const prediction=r.outcome_prediction;
+  if(!prediction)return 'BHE outcome has not been analyzed for this event.';
+  const check=prediction.rim_check||{}, reason=check.reason?` · ${check.reason.replaceAll('_',' ')}`:'';
+  return `BHE outcome suggestion: ${outcomeText(suggestedOutcome(r))}${reason}. Please verify before saving. A rejected basket can also be a false candidate.`;
+}
+function renderList(){
+  $('events').replaceChildren();
+  data.results.forEach((r,i)=>{
+    const button=document.createElement('button');button.className='event';button.setAttribute('aria-current',i===index?'true':'false');
+    button.textContent=`${i+1}. ${seconds(r.event_time_ms)}`;
+    const small=document.createElement('small');const label=labels.find(l=>l.candidate_id===r.candidate_id&&l.tracking_scope===r.tracking_scope);
+    const shooterText=r.status==='attributed'?`Track ${r.shooter.track_id}`:`Shooter unknown · ${r.reason.replaceAll('_',' ')}`;
+    small.textContent=label?`✓ Reviewed · ${outcomeText(reviewedOutcome(label))} · ${label.shooter_track_id!=null?'Shooter Track '+label.shooter_track_id:'Shooter unresolved'}`:(r.outcome_prediction?`BHE: ${outcomeText(suggestedOutcome(r))} · ${shooterText}`:shooterText);
+    button.append(small);button.onclick=()=>select(i);$('events').append(button);
+  });
+  $('progress').textContent=`${labels.length} event reviews · ${labels.filter(l=>l.shooter_track_id!=null).length} shooter labels · ${data.results.length} candidates`;
+}
+function select(i){
+  index=Math.max(0,Math.min(data.results.length-1,i));video.pause();const r=current(), best=r.shooter||r.rankings[0];
+  $('title').textContent=`Candidate ${index+1} · Event at ${seconds(r.event_time_ms)}`;
+  $('prediction').textContent=r.status==='attributed'?`Predicted shooter: Track ${r.shooter.track_id}`:'Prediction: Unknown';
+  $('reason').textContent=r.reason.replaceAll('_',' ')+(best?` · leading score ${best.score.toFixed(3)}`:'');
+  $('track').replaceChildren();
+  const unresolved=document.createElement('option');unresolved.value='';unresolved.textContent='Shooter cannot be determined';$('track').append(unresolved);
+  session().tracks.forEach(t=>{const option=document.createElement('option');option.value=t.track_id;option.textContent=`Track ${t.track_id}`;$('track').append(option)});
+  const label=labels.find(l=>l.candidate_id===r.candidate_id&&l.tracking_scope===r.tracking_scope);
+  $('outcome').value=label?reviewedOutcome(label):suggestedOutcome(r);
+  if(label)$('reason').textContent=`Human outcome: ${outcomeText(reviewedOutcome(label))}. `+$('reason').textContent;
+  $('track').value=label?(label.shooter_track_id??''):(best?.track_id??'');
+  $('note').value=label?.note||'';$('status').textContent=label?(label.review_kind==='event_only'?'Event status retained from the earlier review; no shooter ID was transferred to this scope.':'Saved human review loaded. You can revise it.'):'';
+  $('outcome-prediction').textContent=outcomeSuggestion(r);
+  $('evidence').textContent=JSON.stringify({outcome_prediction:r.outcome_prediction||null,release_interval_ms:best?.release_interval_ms||null,leading_evidence:best?.evidence||null,missing_ball_samples:r.ball_trajectory.missing_times.length,ball_observations:r.ball_trajectory.observations.length,window_expanded:r.window_expanded,ranked_tracks:r.rankings.map(h=>({track:h.track_id,score:h.score}))},null,2);
+  $('release').disabled=!best;
+  for(const id of ['toggle-play','replay','back','forward'])$(id).disabled=false;
+  $('previous').disabled=index===0;$('next').disabled=index===data.results.length-1;
+  seekTo(best?best.release_interval_ms[0]/1000:Math.max(0,r.event_time_ms/1000-1.2));
+  renderList();draw();
+}
+function seekTo(time){
+  pendingSeek=Math.max(0,time);
+  if(Number.isFinite(video.duration))pendingSeek=Math.min(pendingSeek,video.duration);
+  if(video.readyState>0){video.currentTime=pendingSeek;pendingSeek=null}
+}
+function draw(){
+  if(!data||!data.results.length)return;
+  const r=current(), t=video.currentTime, tracks=session().tracks, w=data.frame_width,h=data.frame_height;
+  // Match the displayed video area exactly, independent of controls height.
+  const rect=video.getBoundingClientRect(), aspect=w/h;
+  const displayHeight=rect.width/aspect;
+  canvas.style.height=`${Math.min(rect.height,displayHeight)}px`;
+  if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h}
+  ctx.clearRect(0,0,w,h);
+  // Composite the decoded frame and tracks together. Some browser compositors
+  // show a black native video surface underneath a separate transparent canvas.
+  let frameVisible=false;
+  if(!video.error&&video.readyState>=2&&!video.seeking&&pendingSeek===null){
+    try{ctx.drawImage(video,0,0,w,h);frameVisible=true}catch(e){/* Retry on the next decoded frame. */}
+  }
+  const outcome=$('outcome').value;
+  $('confirm').disabled=!frameVisible||outcome==='unclassified';
+  $('unclear').disabled=!frameVisible||outcome==='unclassified'||outcome==='not_shot';
+  $('missed').disabled=!frameVisible;$('not-shot').disabled=!frameVisible;
+  $('track').disabled=outcome==='not_shot';
+  $('media-status').textContent=video.error?'Video could not be loaded. Reload the page to retry.':frameVisible?'Video frame ready.':'Loading video frame…';
+  $('toggle-play').textContent=video.paused?'Play':'Pause';
+  $('toggle-play').disabled=!!video.error;
+  if(!frameVisible)return;
+  const selected=selectedTrack();
+  for(const track of tracks){
+    const p=track.observations.reduce((a,b)=>Math.abs(b.timestamp-t)<Math.abs(a.timestamp-t)?b:a,track.observations[0]);
+    if(!p||Math.abs(p.timestamp-t)>.16)continue;
+    const [x1,y1,x2,y2]=p.bbox;ctx.strokeStyle=track.track_id===selected?'#ffcf70':'#64d8f1';ctx.lineWidth=track.track_id===selected?6:3;ctx.strokeRect(x1,y1,x2-x1,y2-y1);
+    ctx.font='bold 24px system-ui';ctx.fillStyle='#10151e';ctx.fillRect(x1,Math.max(0,y1-34),142,32);ctx.fillStyle=ctx.strokeStyle;ctx.fillText(`Track ${track.track_id}`,x1+7,Math.max(26,y1-9));
+  }
+  const points=r.ball_trajectory.observations, p=points.reduce((a,b)=>!a||Math.abs(b.timestamp-t)<Math.abs(a.timestamp-t)?b:a,null);
+  if(p&&Math.abs(p.timestamp-t)<.12){const b=p.bbox;ctx.beginPath();ctx.strokeStyle='#ff80b2';ctx.lineWidth=4;ctx.arc((b[0]+b[2])/2,(b[1]+b[3])/2,Math.max(12,(b[2]-b[0])/2),0,Math.PI*2);ctx.stroke()}
+  $('time').textContent=`Video ${t.toFixed(3)}s · ${r.shooter?'Predicted release '+seconds(r.shooter.release_time_ms):'Release uncertain'}`;
+}
+async function save(outcome, track){
+  if(outcome==='unclassified'){$('status').textContent='Choose whether this was a made shot, missed shot, uncertain outcome or not a shot.';return}
+  const r=current(), isShot=outcome!=='not_shot', label={candidate_id:r.candidate_id,tracking_scope:r.tracking_scope,is_shot:isShot,shot_outcome:isShot?outcome:null,is_scoring:outcome==='made'?true:outcome==='unknown'?null:false,shooter_track_id:isShot?track:null,note:$('note').value};
+  const previous=labels.find(l=>l.candidate_id===r.candidate_id&&l.tracking_scope===r.tracking_scope);
+  for(const key of ['player_id','attempt_id'])if(previous?.[key])label[key]=previous[key];
+  try{const response=await fetch('/labels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(label)});const result=await response.json();if(!response.ok)throw Error(result.error||'Save failed');labels=labels.filter(l=>l.candidate_id!==r.candidate_id||l.tracking_scope!==r.tracking_scope);labels.push(result.label);$('track').value=result.label.shooter_track_id??'';$('outcome').value=reviewedOutcome(result.label);const best=r.shooter||r.rankings[0];$('reason').textContent=`Human outcome: ${outcomeText(reviewedOutcome(result.label))}. `+r.reason.replaceAll('_',' ')+(best?` · leading score ${best.score.toFixed(3)}`:'');$('status').textContent='Shooter and outcome saved locally. Continue with Next event when ready.';renderList();draw()}catch(e){$('status').textContent=`Could not save: ${e.message}. Please retry.`}
+}
+$('confirm').onclick=()=>save($('outcome').value,selectedTrack());
+$('unclear').onclick=()=>save($('outcome').value,null);
+$('missed').onclick=()=>{$('outcome').value='missed';save('missed',selectedTrack())};
+$('not-shot').onclick=()=>{$('outcome').value='not_shot';save('not_shot',null)};
+$('previous').onclick=()=>select(index-1);$('next').onclick=()=>select(index+1);
+$('toggle-play').onclick=()=>{if(video.paused){video.play().catch(()=>{$('media-status').textContent='Playback could not start. Reload the page to retry.'})}else video.pause()};
+$('replay').onclick=()=>{seekTo(current().analysis_window_ms[0]/1000);video.play().catch(()=>{$('media-status').textContent='Playback could not start. Use the video Play control to retry.'})};
+$('release').onclick=()=>{video.pause();const best=current().shooter||current().rankings[0];seekTo(best.release_interval_ms[0]/1000)};
+$('back').onclick=()=>{video.pause();seekTo(video.currentTime-1/(data.video_fps||30))};
+$('forward').onclick=()=>{video.pause();seekTo(video.currentTime+1/(data.video_fps||30))};
+$('speed').onchange=()=>video.playbackRate=Number($('speed').value);$('track').onchange=draw;
+$('outcome').onchange=draw;
+video.addEventListener('timeupdate',()=>{draw();if(!video.paused&&data&&video.currentTime>current().event_time_ms/1000+.7)video.pause()});
+video.addEventListener('loadedmetadata',()=>{if(pendingSeek!==null){video.currentTime=pendingSeek;pendingSeek=null}draw()});
+for(const event of ['loadeddata','seeked','seeking','error','waiting','play','pause','ended'])video.addEventListener(event,draw);
+window.addEventListener('resize',draw);
+if(video.requestVideoFrameCallback){const tick=()=>{draw();video.requestVideoFrameCallback(tick)};video.requestVideoFrameCallback(tick)}
+const outcomeHint=document.createElement('p');outcomeHint.id='outcome-prediction';outcomeHint.setAttribute('aria-live','polite');$('outcome').after(outcomeHint);$('outcome').setAttribute('aria-describedby',outcomeHint.id);
+Promise.all([fetch('/predictions').then(r=>r.json()),fetch('/labels').then(r=>r.json())]).then(([p,l])=>{data=p;labels=l;if(data.results.length)select(0);else $('title').textContent='No scoring candidates to review.'}).catch(e=>$('title').textContent=`Could not load predictions: ${e.message}`);
+</script>
+</html>

@@ -18,6 +18,11 @@ The root [`README.en.md`](../README.en.md) is the project overview and shortest 
 | Understand the mobile native runtime | [`architecture/MOBILE_RUNTIME_V1.md`](architecture/MOBILE_RUNTIME_V1.md) |
 | Change the SQLite schema | [`architecture/SQLITE_SCHEMA_V1.sql`](architecture/SQLITE_SCHEMA_V1.sql) |
 | Export reviewed data | [`REVIEW_DATASET_EXPORT.md`](REVIEW_DATASET_EXPORT.md) |
+| Develop temporary player tracking and shooter attribution | [`SHOOTER_ATTRIBUTION_PR1.md`](SHOOTER_ATTRIBUTION_PR1.md): independent CLI, result contract, temporary review helper and evaluation |
+| Develop joint release/trajectory attribution and replay evaluation | [`SHOOTER_ATTRIBUTION_V2.md`](SHOOTER_ATTRIBUTION_V2.md): current CLI method, local appearance-assisted tracking and spatial reference labels |
+| Improve attribution coverage with contextual evidence | [`SHOOTER_ATTRIBUTION_V3.md`](SHOOTER_ATTRIBUTION_V3.md): opt-in duplicate guards, competitive possession and observed top-boundary gap validation |
+| Attribute compact finishes with local release identity | [`SHOOTER_ATTRIBUTION_V4.md`](SHOOTER_ATTRIBUTION_V4.md): opt-in release-local ambiguity checks and guarded short-flight evidence |
+| Review shooters independently from shot outcome | [`SHOT_ATTEMPT_LABELS.md`](SHOT_ATTEMPT_LABELS.md): made/missed attempts, legacy-safe labels and field-goal sample boundaries |
 | Understand Fast/Standard analysis | [`research/ANALYSIS_MODES_V1.md`](research/ANALYSIS_MODES_V1.md) |
 | Read the recorded performance sample | [`benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md`](benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md) |
 | Read the rim check accuracy sample | [`benchmarks/RIM_CHECK_RECALL_BENCHMARK_20261021.md`](benchmarks/RIM_CHECK_RECALL_BENCHMARK_20261021.md), [`benchmarks/RIM_CHECK_BENCHMARK_20261020.md`](benchmarks/RIM_CHECK_BENCHMARK_20261020.md) |

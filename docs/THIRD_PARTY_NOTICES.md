@@ -9,6 +9,7 @@
 | Flutter / Dart | 桌面和移动 UI | Flutter SDK、`apps/*/pubspec.lock` | 保留 SDK 和包 notices |
 | `ultralytics` / PyTorch | 桌面检测与推理 | `requirements.txt` 和实际安装环境 | 锁定版本并核验许可证 |
 | OpenCV / NumPy / pandas / psutil | 视频采样、数据处理和运行时监控 | `requirements.txt` | 锁定版本并核验许可证 |
+| `dill`（BSD-3-Clause） | 独立投篮者归因 CLI 读取现有 BHE 球模型的序列化元数据 | `requirements-shooter.txt` | 锁定版本并保留 notices |
 | `ort` / ONNX Runtime | 移动端 Rust 推理路径 | `packages/bhe_runtime/Cargo.toml` 和 Android/iOS 原生库 | 核对 crate、动态库和 XCFramework 条款 |
 | `onnxruntime-directml` | Windows 桌面 GPU 推理（DirectML EP，可选；缺省时回落 CPU） | `requirements-dml.txt` | 核对 wheel 内 ONNX Runtime 与 DirectML 条款，确认可随安装包再分发 |
 | 高通 QNN Runtime | Android NPU 推理（`libQnnHtp*.so`、`libQnnSystem.so`） | `.github/workflows/release-packages.yml` 中的 `QNN_RUNTIME_VERSION` | 随 APK 附上 Maven 包内 `LICENSE.pdf` 的条款 |
@@ -33,6 +34,12 @@
 | `NBAction` | [GitHub](https://github.com/lin-simon/NBAction) | commit `14a2acd571de` | 代码和模型/数据需分别核验 |
 
 这些提交标识是历史研究记录，不代表当前网络状态或上游项目仍保持不变。若要再次吸收实现，应重新阅读上游许可证并保留来源、版本和改动边界。
+
+投篮者归因 PR1 另查阅了 Basketball Event Tracking、Basketball Vision Analytics、
+BasketEvent 和 Basketball Game Tracker，未复制代码或引入其依赖。模型选择、
+参考链接和 2026-10-27 的许可证核对结果见
+[`SHOOTER_ATTRIBUTION_PR1.md`](SHOOTER_ATTRIBUTION_PR1.md)。Person 权重须由使用者
+按相应授权自行准备；本 PR 不分发权重，也不把 Ultralytics 模型改许可为 MIT。
 
 ## 发布前要求
 

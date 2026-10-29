@@ -44,3 +44,9 @@ models/*.onnx
 models/*.onnx.names.json
 /bin/
 /.zcode/
+
+# Private shooter-attribution footage and local experiments.
+/test-videos/
+/.codegraph/
+/.ruff_cache/
+/local-review-data/
