@@ -5,15 +5,19 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
-import subprocess
-import sys
 import threading
+from contextlib import nullcontext
 from pathlib import Path
 
-from .adapters.analysis import PipelineCancelled, terminate_process
+from .adapters.analysis import PipelineCancelled
 from .protocol import ProtocolError
 from .storage import now_iso
+from .release_preview import (
+    cached_context,
+    read_json,
+    render_release_previews,
+    source_fingerprint,
+)
 
 
 def validate_predictions(predictions, source, candidates):
@@ -215,8 +219,10 @@ def shooter_candidate_inputs(service, store, candidates):
     return result
 
 
-def persist_evidence(store, evidence):
-    with store.connect() as connection:
+def persist_evidence(store, evidence, connection=None):
+    with (
+        store.connect() if connection is None else nullcontext(connection)
+    ) as connection:
         for item in evidence:
             candidate = connection.execute(
                 "SELECT event_time_ms, video_id FROM candidates WHERE id=?",
@@ -264,7 +270,7 @@ class ShooterReviewMixin:
             if evidence and video:
                 try:
                     if video["id"] not in sources:
-                        source = self._validated_source(video)
+                        source = Path(video["source_path"])
                         stat = source.stat()
                         sources[video["id"]] = {
                             "name": source.name,
@@ -292,11 +298,39 @@ class ShooterReviewMixin:
         jobs = store.list_jobs(
             project_id=store.project()["id"], job_type="shooter_review", descending=True
         )
+        analyses = store.list_jobs(
+            store.project()["id"],
+            job_type="analysis",
+            states=("queued", "running"),
+            descending=True,
+        )
+        for analysis in analyses:
+            from .release_preview import read_json_string
+
+            checkpoint = read_json_string(analysis.get("checkpoint_json"))
+            path = Path(checkpoint.get("shooter_preview_manifest") or "")
+            if not path.is_file() or not path.resolve().is_relative_to(
+                (store.root / "artifacts").resolve()
+            ):
+                continue
+            draft = read_json(path, {})
+            video = store.video(analysis["video_id"])
+            try:
+                valid = video and draft.get("source_fingerprint") == source_fingerprint(
+                    Path(video["source_path"])
+                )
+            except OSError:
+                valid = False
+            if valid and draft.get("generation") == analysis["id"]:
+                rows.extend(
+                    {**row, "draft": True, "shooter_review_state": "pending"}
+                    for row in draft.get("candidates", [])
+                )
         return {
             "candidates": rows,
             "players": store.list_players(),
             "videos": store.list_videos(),
-            "jobs": jobs[:1],
+            "jobs": analyses[:1] or jobs[:1],
         }
 
     def prepare_shooter_review(self, payload):
@@ -329,13 +363,6 @@ class ShooterReviewMixin:
                 )
             for video in videos:
                 self._validated_source(video)
-            root = Path(__file__).resolve().parents[3]
-            player_model = root / "models/yolo11n.pt"
-            if not payload.get("predictions_path") and not player_model.is_file():
-                raise ProtocolError(
-                    "SHOOTER_MODEL_MISSING",
-                    "缺少人物检测模型，请使用含射手模型的预览安装包，或导入已有射手分析",
-                )
             result = {
                 "job": store.create_job(
                     project["id"],
@@ -371,7 +398,6 @@ class ShooterReviewMixin:
     def _run_shooter_review(self, payload, job_id, videos, candidates):
         store = self._require_store(payload)
         cancel = self._job_cancel_events[job_id]
-        root = Path(__file__).resolve().parents[3]
         directory = store.root / "artifacts/shooter_review" / job_id
         generated = []
         try:
@@ -392,7 +418,7 @@ class ShooterReviewMixin:
                         progress=(index + value) / len(videos),
                     )
 
-                progress(0.01, "shooter_tracking")
+                progress(0.01)
                 if payload.get("predictions_path"):
                     path = Path(payload["predictions_path"]).expanduser()
                     if not path.is_file() or path.stat().st_size > 128 * 1024 * 1024:
@@ -400,86 +426,33 @@ class ShooterReviewMixin:
                             "INVALID_REQUEST", "射手分析文件不存在或过大"
                         )
                     predictions = json.loads(path.read_text(encoding="utf-8"))
+                    generated.extend(
+                        render_evidence(
+                            predictions,
+                            source,
+                            rows,
+                            destination,
+                            job_id,
+                            cancel,
+                            progress,
+                        )
+                    )
                 else:
-                    inputs = shooter_candidate_inputs(self, store, rows)
-                    input_path, output_path = (
-                        destination / "candidates.json",
-                        destination / "predictions.json",
+                    context = cached_context(store, video, source)
+                    generated.extend(
+                        render_release_previews(
+                            video,
+                            source,
+                            rows,
+                            destination,
+                            job_id,
+                            proxy=context["proxy"],
+                            offset_ms=context["offset_ms"],
+                            coarse=context["coarse"],
+                            cancel=cancel,
+                            progress=progress,
+                        )
                     )
-                    input_path.write_text(
-                        json.dumps({"candidates": inputs}, ensure_ascii=False)
-                    )
-                    command = [
-                        sys.executable,
-                        str(root / "scripts/attribute_shooters.py"),
-                        "--video",
-                        str(source),
-                        "--candidates",
-                        str(input_path),
-                        "--player-model",
-                        str(root / "models/yolo11n.pt"),
-                        "--ball-model",
-                        str(self._default_model_path(root)),
-                        "--algorithm",
-                        "joint-v4",
-                        "--observations-output",
-                        str(destination / "observations.json"),
-                        "--output",
-                        str(output_path),
-                    ]
-                    process = subprocess.Popen(
-                        command,
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        encoding="utf-8",
-                        env={**os.environ, "YOLO_AUTOINSTALL": "false"},
-                        start_new_session=os.name != "nt",
-                    )
-                    self._set_job_process(job_id, process)
-                    lines = []
-                    try:
-                        for line in process.stdout:
-                            lines.append(line)
-                            lines = lines[-30:]
-                            if cancel.is_set():
-                                terminate_process(process)
-                                raise PipelineCancelled("JOB_CANCELLED")
-                            for prefix, start, size in (
-                                ("collect_progress=", 0.02, 0.7),
-                                ("progress=", 0.72, 0.1),
-                            ):
-                                if line.startswith(prefix):
-                                    progress(
-                                        start + float(line.split("=", 1)[1]) * size,
-                                        "shooter_tracking",
-                                    )
-                        if process.wait() != 0:
-                            if cancel.is_set():
-                                raise PipelineCancelled("JOB_CANCELLED")
-                            raise ProtocolError(
-                                "SHOOTER_PREPARE_FAILED",
-                                "射手分析失败：" + "".join(lines)[-1500:],
-                            )
-                    finally:
-                        if process.poll() is None:
-                            terminate_process(process)
-                        if process.stdout:
-                            process.stdout.close()
-                        self._clear_job_process(job_id, process)
-                    predictions = json.loads(output_path.read_text())
-                generated.extend(
-                    render_evidence(
-                        predictions,
-                        source,
-                        rows,
-                        destination,
-                        job_id,
-                        cancel,
-                        lambda v: progress(0.83 + 0.16 * v),
-                    )
-                )
             if cancel.is_set():
                 raise PipelineCancelled("JOB_CANCELLED")
             # All videos commit together only after every frame and identity check.

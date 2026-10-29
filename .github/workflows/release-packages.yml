@@ -35,7 +35,7 @@ on:
         required: false
         default: ""
       include_shooter:
-        description: "Bundle the shooter quick-label model and validate desktop UI"
+        description: "Validate the lightweight release-area quick-label UI"
         required: false
         type: boolean
         default: false
@@ -249,17 +249,6 @@ jobs:
           fi
           "$PYTHON_ROOT/bin/python3" -c 'import cv2, numpy, pandas, psutil, torch, ultralytics; print("runtime imports: OK")'
 
-      - name: Download verified shooter person model
-        if: inputs.include_shooter == true
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --location --retry 3 \
-            https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt \
-            -o models/yolo11n.pt
-          echo '0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1  models/yolo11n.pt' | shasum -a 256 --check
-          curl --fail --location --retry 3 https://www.gnu.org/licenses/agpl-3.0.txt -o models/AGPL-3.0.txt
-
       - name: Install CoreML acceleration and export static ONNX
         shell: bash
         env:
@@ -310,8 +299,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/bhe-ffmpeg" "$RUNNER_TEMP/bhe-ffprobe"
-          curl --fail --location --retry 3 --retry-delay 2 "$FFMPEG_URL" -o "$RUNNER_TEMP/ffmpeg.zip"
-          curl --fail --location --retry 3 --retry-delay 2 "$FFPROBE_URL" -o "$RUNNER_TEMP/ffprobe.zip"
+          curl --http1.1 --fail --location --retry 3 --retry-all-errors --retry-delay 2 "$FFMPEG_URL" -o "$RUNNER_TEMP/ffmpeg.zip"
+          curl --http1.1 --fail --location --retry 3 --retry-all-errors --retry-delay 2 "$FFPROBE_URL" -o "$RUNNER_TEMP/ffprobe.zip"
           unzip -oq "$RUNNER_TEMP/ffmpeg.zip" -d "$RUNNER_TEMP/bhe-ffmpeg"
           unzip -oq "$RUNNER_TEMP/ffprobe.zip" -d "$RUNNER_TEMP/bhe-ffprobe"
           ffmpeg_path="$(find "$RUNNER_TEMP/bhe-ffmpeg" -type f -name ffmpeg -print -quit)"

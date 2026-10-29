@@ -800,7 +800,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
               alignment: Alignment.centerRight,
               child: TextButton.icon(
                 key: const Key('open-shooter-quick-label'),
-                onPressed: allCandidates.isEmpty || reviewLocked || analyzing
+                onPressed: (allCandidates.isEmpty && !analyzing) || reviewLocked
                     ? null : _openShooterQuickLabel,
                 icon: const Icon(Icons.people_alt_outlined),
                 label: Text(Localizations.localeOf(context).languageCode == 'zh'

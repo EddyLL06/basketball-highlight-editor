@@ -83,7 +83,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
         if (!_videos.any((v) => v['id'] == _videoId)) _videoId = null;
         _job = _maps(result['jobs']).firstOrNull;
         _loading = false;
-        _activeId ??= _visible.firstOrNull?['id']?.toString();
+        if (!_visible.any((row) => _id(row) == _activeId)) {
+          _activeId = _visible.firstOrNull?['id']?.toString();
+        }
       });
       final job = _job;
       if (job != null && _running && _watchingJob != job['id']) {
@@ -101,6 +103,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
 
   Future<void> _watch(String id) async {
     _watchingJob = id;
+    var ticks = 0;
     try {
       while (mounted && _watchingJob == id) {
         await Future<void>.delayed(const Duration(seconds: 1));
@@ -108,6 +111,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
         final result = await widget.request('get_job', {'job_id': id});
         if (!mounted) return;
         setState(() => _job = _map(result['job']));
+        if (_running && _job?['type'] == 'analysis' && ++ticks % 2 == 0) {
+          await _load();
+        }
         if (!_running) {
           _watchingJob = null;
           _frameChoices.clear();
@@ -254,7 +260,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     final id = _id(row),
         frames = _frames(row),
         evidence = _map(row['shooter_evidence']);
-    if (_saving.isNotEmpty || evidence.isEmpty || frames.isEmpty) return;
+    if (_saving.isNotEmpty || evidence.isEmpty || frames.isEmpty || row['draft'] == true) {
+      return;
+    }
     final frame = frames[_frameIndex(row)];
     final previous = _map(row['shooter_selection']);
     final sameGeneration = previous['generation'] == evidence['generation'];
@@ -393,8 +401,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                 children: [
                   Text(
                     t(
-                      '先认人，再点名字。自动保存；数字 1–9 标记当前选中的卡片。',
-                      'Choose a person, then a name. Saves automatically; keys 1–9 label the selected card.',
+                      '出手附近画面由分析自动准备。看图认人，点击名字保存；数字 1–9 标记当前卡片。',
+                      'Release stills are prepared during analysis. Recognize the shooter and choose a name; keys 1–9 label the selected card.',
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -448,8 +456,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                         onPressed: _running || _preparing
                             ? null
                             : () => _prepare(),
-                        icon: const Icon(Icons.person_search),
-                        label: Text(t('生成出手画面', 'Prepare frames')),
+                        icon: const Icon(Icons.photo_library_outlined),
+                        label: Text(t('补齐/刷新画面', 'Refresh stills')),
                       ),
                       TextButton(
                         onPressed: _running || _preparing
@@ -476,7 +484,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                       children: [
                         Expanded(
                           child: Text(
-                            t(
+                            _job?['type'] == 'analysis' ? t(
+                              '分析中：出手画面会陆续出现，完成后可标注射手。',
+                              'Analysis in progress: release stills appear here; label shooters after completion.',
+                            ) : t(
                               '正在准备出手画面，原有标签保留。可关闭此页，稍后回来。',
                               'Preparing frames; existing labels are preserved. You can return later.',
                             ),
@@ -571,10 +582,13 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
         : frames[_frameIndex(row)];
     final track = _track(row, frame), people = _maps(frame['people']);
     final person = people.where((p) => p['track_id'] == track).firstOrNull;
+    final light = evidence['method'] == 'ball_release_preview_v1';
+    final focus = _map(frame['focus_region']);
+    final draft = row['draft'] == true;
     final uncertain = evidence['release_uncertain'] == true;
     final state = row['shooter_review_state'];
     final canSave =
-        evidence.isNotEmpty && !_saving.contains(id) && _saving.isEmpty;
+        evidence.isNotEmpty && !draft && !_saving.contains(id) && _saving.isEmpty;
     final active = _activeId == id;
     return Card(
       key: ValueKey('shooter-card-$id'),
@@ -607,7 +621,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                     ),
                   ),
                   Text(
-                    state == 'confirmed'
+                    draft ? t('分析中预览', 'Analysis preview') : state == 'confirmed'
                         ? t('已保存', 'Saved')
                         : state == 'uncertain'
                         ? t('不确定', 'Uncertain')
@@ -624,9 +638,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: _image(
-                  (_context || person == null
-                          ? frame['context_path']
-                          : person['crop_path'])
+                  (_context ? frame['context_path']
+                      : person?['crop_path'] ?? focus['crop_path'] ?? frame['context_path'])
                       as String?,
                 ),
               ),
@@ -639,6 +652,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                               'Source changed; prepare frames again',
                             )
                           : t('尚未生成出手画面', 'Frames not prepared')
+                    : light
+                    ? t('出手附近 · ${_time(frame['time_ms'])}', 'Near release · ${_time(frame['time_ms'])}')
                     : uncertain
                     ? t(
                         '出手时刻待核实 · ${_time(frame['time_ms'])}',
@@ -652,7 +667,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
               ),
               SizedBox(
                 height: 38,
-                child: Row(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     for (var i = 0; i < frames.length; i++)
@@ -671,9 +688,15 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                         ),
                       ),
                   ],
+                  ),
                 ),
               ),
-              SizedBox(
+              if (light) Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(t('蓝框仅表示大致出手区域，请自行确认射手。', 'The blue region is approximate. Choose the shooter by sight.'),
+                  style: Theme.of(context).textTheme.bodySmall),
+              ),
+              if (!light) SizedBox(
                 height: 58,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
@@ -789,7 +812,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                     child: Text(t('清除', 'Clear')),
                   ),
                   TextButton.icon(
-                    onPressed: _saving.isEmpty
+                    onPressed: _saving.isEmpty && !draft
                         ? () => Navigator.pop(context, id)
                         : null,
                     icon: const Icon(Icons.play_circle_outline, size: 18),

@@ -285,6 +285,19 @@ JOB_CANCELLED
 
 ### 射手快标（桌面预览，向后兼容扩展）
 
+当前默认准备方式是 `ball_release_preview_v1`：复用原 BHE 代理及球轨迹，不做人物
+检测或新一轮球推理。`frames[].focus_region` 包含近似出手区域的源坐标 `bbox`、
+`crop_path` 和 `kind:"approximate_release_area"`；`people:[]`、`recommended_track_id:null`。
+`image_source`、`proxy_fps`、`proxy_frame_size`、`proxy_offset_ms` 记录取帧依据。
+区域只是定位辅助，不代表检测到的球员身份或精确的手球分离时刻。
+
+标准分析粗扫结束后自动准备 `draft:true` 的只读卡片，`list_shooter_review` 会在
+分析进行时返回这些卡片和 `type:analysis` 的活动任务。草稿 ID 以 `draft:` 开头，
+不属于正式候选，不可保存射手标签。分析成功时正式候选与出手图在同一事务提交；
+失败或取消后不再展示草稿，并保留先前正式数据。快速模式在原分析任务内生成卡片。
+旧项目可调用 `prepare_shooter_review` 补齐，优先复用已验证匹配的代理；代理缺失时
+只读取少量原视频静帧，不启动检测模型。显式 `predictions_path` 导入仍兼容旧版。
+
 三个命令均要求显式 `project_root`，且只操作现有项目：
 
 | 命令 | 附加请求字段 | 响应 |

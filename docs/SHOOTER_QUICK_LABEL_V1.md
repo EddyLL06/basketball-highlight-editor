@@ -1,5 +1,12 @@
 # Shooter quick labeling (desktop preview)
 
+**Current semi-automatic path:** see [lightweight release-area previews](SHOOTER_RELEASE_PREVIEW.md).
+Normal analysis now prepares stills from its existing low-resolution proxy and
+ball trajectories, without person detection or an additional inference pass.
+Coarse proposals appear as read-only previews during refinement; final cards
+commit together with the candidates. The person-track/import behavior described
+below is retained for compatibility with earlier developer artifacts.
+
 The review workspace adds a static shooter contact sheet. Each candidate has a
 source-video frame near the estimated release, selectable tracked-person crops,
 three nearby frames and project-player buttons. Human labels are saved through

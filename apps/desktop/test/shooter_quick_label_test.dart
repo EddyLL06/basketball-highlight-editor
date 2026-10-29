@@ -65,6 +65,29 @@ class _ReviewEngine {
   }
 }
 
+class _ReleaseEngine extends _ReviewEngine {
+  bool draft = true;
+
+  @override
+  Future<JsonMap> request(String command, JsonMap payload) async {
+    final result = await super.request(command, payload);
+    if (command == 'list_shooter_review') {
+      for (final row in result['candidates'] as List) {
+        row['draft'] = draft;
+        if (draft) row['id'] = 'draft:${row['id']}';
+        final evidence = row['shooter_evidence'] as JsonMap;
+        evidence['method'] = 'ball_release_preview_v1';
+        evidence['recommended_track_id'] = null;
+        for (final frame in evidence['frames'] as List) {
+          frame['people'] = <dynamic>[];
+          frame['focus_region'] = {'kind': 'approximate_release_area', 'crop_path': null};
+        }
+      }
+    }
+    return result;
+  }
+}
+
 Future<void> _pump(WidgetTester tester, _ReviewEngine engine) async {
   tester.view.physicalSize = const Size(1400, 1100);
   tester.view.devicePixelRatio = 1;
@@ -77,6 +100,24 @@ Future<void> _pump(WidgetTester tester, _ReviewEngine engine) async {
 }
 
 void main() {
+  testWidgets('release areas are read-only during analysis and save names without tracks after completion', (tester) async {
+    final engine = _ReleaseEngine();
+    await _pump(tester, engine);
+    final name = find.byKey(const ValueKey('shooter-name-draft:c0-red'));
+    expect(tester.widget<FilledButton>(name).onPressed, isNull);
+    expect(find.text('Analysis preview'), findsNWidgets(2));
+    expect(find.byKey(const ValueKey('shooter-person-c0-1')), findsNothing);
+    engine.draft = false;
+    await tester.tap(find.byTooltip('Refresh'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
+    await tester.pumpAndSettle();
+    expect(engine.saves.single['player_id'], 'red');
+    expect(engine.saves.single['track_id'], isNull);
+    expect(engine.saves.single['review_state'], 'confirmed');
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'chooses person and adjacent frame, saves shooter without changing outcome',
     (tester) async {

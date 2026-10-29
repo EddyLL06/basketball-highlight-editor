@@ -46,6 +46,7 @@ from basketball_highlight.runtime_errors import is_runtime_failure
 from .protocol import ProtocolError
 from .storage import ProjectStore, new_id
 from .shooter_review import ShooterReviewMixin
+from .release_preview import read_json, render_release_previews, source_fingerprint
 from .media_tools import resolve_media_tool
 from .diagnostics import folder_summary, log_diagnostic, video_summary
 from basketball_highlight.rim_check import RIM_CHECK_VERSION
@@ -1594,7 +1595,57 @@ class EngineService(ShooterReviewMixin):
                 "coarse_candidates": str(coarse_candidates),
                 "refined_output": str(refined_output),
                 "manifest": str(manifest_path),
+                "shooter_preview_manifest": str(run_root / "release-preview-drafts.json"),
             }
+
+            drafts_prepared = False
+
+            def prepare_release_drafts() -> None:
+                nonlocal drafts_prepared
+                if drafts_prepared:
+                    return
+                drafts_prepared = True
+                # Coarse proposals are read-only until final candidates commit.
+                # This runs before refinement, reusing the already-created proxy.
+                started = time.perf_counter()
+                try:
+                    data = read_json(coarse_candidates, {})
+                    proposals = [candidate_to_row(match, video_id, roi["id"],
+                        int(video.get("duration_ms") or 0),
+                        float(payload.get("before_seconds", 3)), float(payload.get("after_seconds", 1)),
+                        f"{ANALYSIS_ALGORITHM_VERSION}:{mode}", analysis_source="coarse")
+                        for match in flatten_coarse_matches(data)]
+                    for proposal in proposals:
+                        proposal["id"] = f"draft:{job_id}:{proposal['id']}"
+                    by_id = {row["id"]: row for row in proposals}
+                    ready = []
+                    manifest = Path(checkpoint["shooter_preview_manifest"])
+
+                    def publish_draft(item):
+                        ready.append({**by_id[item["candidate_id"]], "shooter_evidence": item,
+                                      "shooter_selection": {}, "player_id": None, "player_name": None,
+                                      "draft": True, "shooter_review_state": "pending"})
+                        manifest.parent.mkdir(parents=True, exist_ok=True)
+                        temporary = manifest.with_suffix(".tmp")
+                        temporary.write_text(json.dumps({"generation": job_id,
+                            "source_fingerprint": source_fingerprint(source_video), "candidates": ready},
+                            ensure_ascii=False), encoding="utf-8")
+                        temporary.replace(manifest)
+
+                    if proposals and proxy_video.is_file():
+                        render_release_previews(video, source_video, proposals,
+                            run_root / "release-drafts", job_id, proxy=proxy_video,
+                            offset_ms=int(video.get("analysis_start_ms") or 0),
+                            coarse=read_json(coarse_detections, {}),
+                            cancel=cancel_event, on_candidate=publish_draft)
+                    checkpoint["release_draft_count"] = len(ready)
+                except PipelineCancelled:
+                    raise
+                except Exception as exc:
+                    if isinstance(exc, ProtocolError) and exc.code == "VIDEO_SOURCE_CHANGED":
+                        raise
+                    log_diagnostic(f"{label} optional release drafts unavailable: {exc}")
+                checkpoint["release_draft_ms"] = round((time.perf_counter() - started) * 1000)
 
             def on_stage(stage: str, progress: float) -> None:
                 if stage != last_stage["name"]:
@@ -1607,6 +1658,8 @@ class EngineService(ShooterReviewMixin):
                     progress=progress,
                     checkpoint=checkpoint,
                 )
+                if stage == "refine_candidates":
+                    prepare_release_drafts()
 
             def on_output(stage: str, line: str) -> None:
                 if line.startswith("device="):
@@ -1773,6 +1826,23 @@ class EngineService(ShooterReviewMixin):
                 stage="prepare_review_previews",
                 progress=0.96,
             )
+            release_started = time.perf_counter()
+            release_evidence = []
+            try:
+                release_evidence = render_release_previews(video, source_video, rows,
+                    run_root / "release-stills", job_id,
+                    proxy=proxy_video if proxy_video.is_file() else source_video,
+                    offset_ms=int(video.get("analysis_start_ms") or 0) if proxy_video.is_file() else 0,
+                    coarse=read_json(coarse_detections, {}) if proxy_video.is_file() else {},
+                    cancel=cancel_event)
+            except PipelineCancelled:
+                raise
+            except Exception as exc:
+                if isinstance(exc, ProtocolError) and exc.code == "VIDEO_SOURCE_CHANGED":
+                    raise
+                checkpoint["release_preview_error"] = str(exc)
+                log_diagnostic(f"{label} optional release stills unavailable: {exc}")
+            release_ms = round((time.perf_counter() - release_started) * 1000)
             eager_preview_rows = rows[:12]
             preview_started = time.perf_counter()
             preview_counts = self._prepare_candidate_previews(
@@ -1786,6 +1856,7 @@ class EngineService(ShooterReviewMixin):
             )
             stage_timings_ms = dict(pipeline.get("stage_timings_ms", {}))
             stage_timings_ms["engine_preflight"] = preflight_ms
+            stage_timings_ms["release_preview"] = release_ms
             stage_timings_ms["prepare_review_previews"] = round(
                 (time.perf_counter() - preview_started) * 1000
             )
@@ -1793,7 +1864,7 @@ class EngineService(ShooterReviewMixin):
             if cancel_event and cancel_event.is_set():
                 raise PipelineCancelled("JOB_CANCELLED")
             persist_started = time.perf_counter()
-            store.replace_candidates(video_id, rows)
+            store.replace_candidates(video_id, rows, shooter_evidence=release_evidence)
             stage_timings_ms["persist_candidates"] = round(
                 (time.perf_counter() - persist_started) * 1000
             )
@@ -1803,6 +1874,7 @@ class EngineService(ShooterReviewMixin):
                 "detection_counts": detection_counts,
                 "inference_device": inference_device,
                 "preview_counts": preview_counts,
+                "release_preview_count": len(release_evidence),
                 "logs": pipeline["logs"],
                 "cache_hits": pipeline.get("cache_hits", 0),
                 "stage_timings_ms": stage_timings_ms,
