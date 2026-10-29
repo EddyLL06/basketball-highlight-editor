@@ -1,159 +1,88 @@
 # BHE: Basketball Highlight Editor
 
-**BHE is a free, local-first AI basketball highlight editor: it finds made baskets in your game video, you review them, and export per-player reels.**
+BHE is a basketball highlight tool. Give it a fixed-camera game video; it finds likely baskets for you to review and export.
 
-*BHE（篮球集锦 AI 剪辑）：完全本地、免费，自动找进球，人工审核，按球员导出集锦。*
+Stop cutting highlights until midnight. Finding each basket in an hour or two of footage means scrubbing through the game and cutting each moment by hand.
 
-[简体中文](README.md) · **English** · [Website](https://bhe.jafir.top/en/)
-
-[🏠 Website](https://bhe.jafir.top/en/) · [⬇ Download](https://bhe.jafir.top/en/#download) · [Getting started](#quick-start-desktop) · [Features](#features) · [Documentation](#documentation)
-
-▶ **Demo video:**
-
-https://github.com/user-attachments/assets/43bfed76-bbc6-42c2-bbaa-ea2bf0604292
-
-
-> A local tool for detecting basketball scoring candidates, reviewing them manually, and exporting highlight clips from fixed-camera game videos.
+BHE analyzes on your own computer or Android phone and lines up likely baskets so you can remove false positives. It is free, runs locally, and does not upload your video.
 
 [![Latest tag](https://img.shields.io/github/v/tag/fly7632785/basketball-highlight-editor?include_prereleases&style=flat-square&label=latest%20tag)](https://github.com/fly7632785/basketball-highlight-editor/tags)
 [![License](https://img.shields.io/github/license/fly7632785/basketball-highlight-editor?style=flat-square)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Android%20%7C%20iOS-4c6ef5?style=flat-square)
 ![Local first](https://img.shields.io/badge/operation-local--first-2ea44f?style=flat-square)
+[![Python Tests](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/python-tests.yml?branch=main&style=flat-square&label=Python%20tests)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/python-tests.yml)
+[![Flutter Checks](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/flutter-check.yml?branch=main&style=flat-square&label=Flutter%20checks)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/flutter-check.yml)
+![Free](https://img.shields.io/badge/cost-free-f97316?style=flat-square)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
+[![Linux DO](https://img.shields.io/badge/Linux%20DO-community-00a67d?style=flat-square)](https://linux.do/)
 
-## The problem BHE is meant to solve
+[简体中文](README.md) · **English**
 
-If you have recorded a full basketball game, you probably know the routine: the game takes an hour, the moments worth keeping are scattered across the timeline, and finding them means repeatedly scrubbing, watching, and writing down timestamps. The actual editing is not difficult; doing it for every possession is what makes it exhausting.
+[Website](https://bhe.jafir.top/en/) · [Download](#download) · [Quick start](#quick-start) · [Features](#highlights-professional-and-fast) · [FAQ](#faq) · [Documentation](#documentation)
 
-Cloud editors can make this trade-off even less appealing: large videos take time to upload, the footage leaves your computer, and a subscription or per-minute fee may be required for a single game.
+<img src="docs/screenshots/readme-0.1.13/review.webp" alt="Review workbench, shown in Chinese" width="100%">
 
-**BHE takes a simpler approach: let the computer find likely moments, then let you make the final call.**
+[Watch the demo](https://github.com/user-attachments/assets/43bfed76-bbc6-42c2-bbaa-ea2bf0604292) · [Alternative video](https://shengshengniannian.oss-cn-beijing.aliyuncs.com/shengshengniannian/basketball-highlight-editor/recording-demo.mp4)
 
-## What it saves you
+<a id="features"></a>
 
-| What you save | How |
-|---|---|
-| **Time** | Instead of watching the entire game just to find a handful of scores, BHE scans the video and presents a shortlist of suspected scoring moments. |
-| **Effort** | Candidates are kept by default. In most cases, you remove false positives and adjust a few seconds rather than confirming every item one by one. |
-| **Upload and subscription** | Analysis, preview, review, and export run locally by default. There is no account, online API, video-length billing, or export quota. |
-| **Control** | A draft, not a black box: you can keep or exclude candidates, change their boundaries, add notes, tag players or scenes, and add a missed moment manually. The exported result is always yours to decide. |
+## Highlights: professional and fast
 
-## Features
+- **Shortcuts and speed**: play at 1.5× / 2×, use ↑↓ to change clips, ←→ to seek, X to exclude, 1–9 (Q onward after the ninth) to tag players, and Cmd/Ctrl+Z to undo.
+- **Tag groups**: save player and tag groups and import them into the next project.
+- **Add missed clips and adjust timing**: add moments from the source video; the default is 3 seconds before and 1 second after, adjustable globally or per clip.
+- **Export by tag**: choose players or tags, merge everything, export individual clips, or merge one video per tag.
 
-| Stage | Feature | What it does |
+Use the suggested hoop area and adjust it when needed. Desktop export offers optional slow motion; game statistics are estimates and may be inaccurate.
+
+## Download
+
+Current release: [v0.1.13](https://github.com/fly7632785/basketball-highlight-editor/releases/tag/v0.1.13). Downloads are also available from the [website](https://bhe.jafir.top/en/#download) and [GitHub Releases](https://github.com/fly7632785/basketball-highlight-editor/releases).
+
+| System | v0.1.13 package | Notes |
 |---|---|---|
-| **Find** | Scoring candidates | Scans fixed-camera, single-hoop game video and suggests the moments that look like made baskets |
-| | Hoop area | Suggests the hoop ROI (region of interest) automatically, with manual drawing and adjustment as a fallback |
-| | Standard and Fast modes | Standard favors quality; Fast favors shorter processing time and may miss events |
-| | Several videos per game | Put several videos of the same game into one project: ordered by recording time, analyzed one after another, and reviewed and exported together |
-| | Progress | Shows analysis stages, progress and elapsed time; supports cancellation, retry, and finding interrupted jobs after a restart |
-| **Review** | Review workbench | Review the source video, navigate candidates, keep or exclude them, and add notes |
-| | Included by default | Only excluded candidates are left out of export, so you do not have to confirm every item |
-| | Range editing | Adjust the start and end of each clip, and add a missed moment manually |
-| **Organize** | Tags | Tag players or scenes (three-pointers, dunks, fouls…) and export by tag |
-| **Export** | Two ways | Export clips separately, or merge them in event-time order; one merged video per tag is also possible |
-| | Goal effects | Optional slow motion into the shot, or a slow-motion close-up replay |
-| | Game stats | The export page shows estimated hit rate, goals per player, and goals over time |
-| | History | Export history and statistics are kept with the project |
-| **Under the hood** | Local project data | Desktop keeps project, ROI, candidate, review, job, and export state in SQLite; the source video is referenced rather than copied by default |
+| macOS | [Apple silicon](https://github.com/fly7632785/basketball-highlight-editor/releases/download/v0.1.13/BHE-macos-arm64-v0.1.13-adhoc.dmg) · [Intel](https://github.com/fly7632785/basketball-highlight-editor/releases/download/v0.1.13/BHE-macos-x86_64-v0.1.13-adhoc.dmg) | On first launch, right-click and select Open. |
+| Windows 10 / 11 | [x64 .zip](https://github.com/fly7632785/basketball-highlight-editor/releases/download/v0.1.13/BHE-windows-x64-v0.1.13.zip) | Extract the archive; see [setup notes](docs/GETTING_STARTED.en.md). |
+| Android | [arm64-v8a .apk](https://github.com/fly7632785/basketball-highlight-editor/releases/download/v0.1.13/BHE-android-arm64-v8a-v0.1.13-debug-signed.apk) | Sideloaded test package; allow installation from unknown sources. |
 
-## See it in action
+On a Snapdragon 8 Elite Gen 5 phone, a 10-minute video took about 4.5 minutes to analyze; other devices differ. See the v0.1.9 notes below. iPhone can play, review and export, but cannot analyze yet.
 
-The review workbench keeps the video large and the candidates in time order:
+<a id="quick-start-desktop"></a>
 
-![BHE review workbench](capture/screenshot-20260813-150054.png)
+## Quick start
 
-This recording walks through importing a video, analyzing candidates, reviewing them, and exporting the result:
+1. Download and open BHE.
+2. Create a project and select your game video. Desktop also supports several videos of one game.
+3. Check the analysis range and hoop area, choose Standard or Fast, and start analysis.
+4. Review the candidates, remove false positives, add missed clips, and tag players or scenes.
+5. Choose an export range and output mode.
 
-[![BHE workflow demo](capture/录制视频封面.jpg)](https://shengshengniannian.oss-cn-beijing.aliyuncs.com/shengshengniannian/basketball-highlight-editor/recording-demo.mp4)
+## Screenshots
 
-Click the cover to open the recording. The large video is hosted outside the repository so cloning BHE does not download a large demo file.
+The screenshots show the Chinese-language interface.
 
-Candidate and tag management:
+Desktop:
 
-![BHE candidate and tag management](capture/screenshot-20260813-150302.png)
+<p align="center"><img src="docs/screenshots/readme-0.1.13/duration.webp" alt="Bulk clip duration settings in Chinese" width="49%"> <img src="docs/screenshots/readme-0.1.13/export.webp" alt="Export range and output modes in Chinese; export history is obscured" width="49%"></p>
 
-After review, you can filter by tag and merge the result or export each clip separately:
+Android:
 
-![BHE highlight export](capture/screenshot-20260813-150335.png)
+<p align="center"><img src="docs/screenshots/readme-0.1.13/mobile-analysis.webp" alt="Android analysis settings in Chinese" width="24%"> <img src="docs/screenshots/readme-0.1.13/mobile-export.webp" alt="Android export modes in Chinese" width="24%"></p>
 
-For more screens, controls, shortcuts, and the light theme, see [`docs/USER_FLOW_V1.md`](docs/USER_FLOW_V1.md) and [`docs/README.en.md`](docs/README.en.md).
+## Suitable footage
 
-## A typical session
+Use a steady fixed camera with a clear view of one hoop. A position around 45° near the top of the key or near the court logo can work well. Full-court footage with two hoops, frequent camera movement, or prolonged obstruction is outside the ideal use case.
 
-```text
-Import the game video
-        ↓
-Set the analysis range and hoop area
-        ↓
-Choose Fast or Standard
-        ↓
-Let BHE scan for candidate moments
-        ↓
-Review the candidates in the workbench
-        ↓
-Remove false positives, adjust timing, and fill gaps
-        ↓
-Merge the reel or export clips by tag
-```
+## FAQ
 
-### Export highlights by player or scene
-
-Tags are not limited to player names. Create tags such as `Alex`, `Jordan`, `three-pointer`, `dunk`, `foul`, or `great defense`, then apply them to one or more candidates. You can export a personal highlight reel, a three-point reel, a dunk reel, or the complete game from the same reviewed set.
-
-## What it supports
-
-| Works well | Not yet |
-|---|---|
-| Fixed-camera game video with a steady picture and a clear rim | Large camera moves or a blocked rim: review the results carefully |
-| One hoop per video | Several hoops in the same frame (for example full-court footage of both baskets) |
-| Analysis on macOS, Windows and Android | iPhone / iPad can play, review and export, but cannot analyze on the device yet |
-| Several clips of one game in a single project (desktop) | Cloud processing: everything runs on your own computer or phone |
-
-## Project status
-
-**Current version: V1 desktop preview.** GitHub Actions builds downloadable packages for Intel macOS, Apple Silicon macOS, Windows x64, and Android `arm64-v8a` whenever a `v*` tag is pushed. The Android APK is `debug-signed` for sideloaded testing, not a Google Play production package. Desktop is the primary product path. Mobile is an independent experimental app: Android has a native analysis path, while iOS local AI analysis still requires the final Rust/ONNX Runtime artifacts to be linked.
-
-| Target | Status | Intended use |
-|---|---|---|
-| macOS Desktop | Primary path; complete import → analysis → review → export loop | Local long-video processing |
-| Windows Desktop | Compatibility path with runtime and packaging scripts; release validation is still pending | Development and experiments |
-| Android Mobile | Independent Flutter app; native frame extraction, Rust/ONNX analysis, review, and export are integrated; `arm64-v8a` is the current validation target | Mobile analysis and review experiments |
-| iOS Mobile | Project, playback, review, and export are available; local analysis waits for native runtime linking | Mobile UI and media-flow validation |
-
-> **Important:** model weights, input videos, training data, FFmpeg builds, and third-party dependencies do not automatically inherit this project's MIT License. Verify each item before publishing or redistributing it.
-
-## Android and iOS mobile apps
-
-BHE now also has Android and iOS mobile app versions. On a phone, you can open a project, import or inspect a game video, review candidate clips, and export the selected clips separately or as one merged reel. Android currently includes the native local-analysis path; iOS local analysis depends on the Rust Runtime and ONNX Runtime artifacts being built and linked for the target.
-
-Like desktop, Android standard analysis runs the frame-by-frame rim check and excludes candidates it saw miss by default. Phones with the Snapdragon 8 Elite Gen 5 analyze on the NPU (about 4.5 minutes for a 10-minute video); other phones fall back to the CPU and are noticeably slower.
-
-The mobile app keeps the same core flow as desktop: prepare a project, inspect the video and candidates, then export. Portrait mode is convenient for browsing candidates, while landscape mode gives the video and review controls more room.
-
-<p align="center">
-  <img src="capture/mobile-ios-project.png" alt="BHE iOS project workspace" width="280">
-  <img src="capture/mobile-ios-review.png" alt="BHE iOS candidate review" width="280">
-</p>
-
-Landscape review brings the video, candidate list, and review controls into one workspace:
-
-<p align="center">
-  <img src="capture/mobile-ios-review-landscape.png" alt="BHE iOS landscape review" width="560">
-</p>
-
-After review, export every retained clip separately or merge the retained clips into one reel:
-
-<p align="center">
-  <img src="capture/mobile-ios-export.png" alt="BHE iOS export" width="280">
-</p>
-
-See [`apps/mobile/README.md`](apps/mobile/README.md) for mobile builds, device testing, and native inference dependencies. Cross-platform boundaries are documented in [`docs/MOBILE_PC_FEATURE_MATRIX.md`](docs/MOBILE_PC_FEATURE_MATRIX.md).
+- **Does it need internet?** Analysis, review and export run locally; downloads and online documentation need a connection.
+- **Is it free?** The source is MIT licensed, with no per-minute or per-export charge; models and footage have their own licenses.
+- **What if detection is wrong?** Exclude false positives, adjust timing, and add missed clips manually.
+- **What about iPhone and full-court footage?** iPhone cannot analyze yet; detection currently handles one hoop at a time.
 
 ## Recent updates
 
-BHE is actively maintained, with new releases roughly every week. See [`CHANGELOG.md`](CHANGELOG.md) for the full list of changes.
-
-**Windows one-click updates:** Available from `v0.1.12-windows.1`. Manually download and replace the app once; later stable updates can use **Install and restart** inside BHE.
+See [CHANGELOG](CHANGELOG.md) for all changes. Windows one-click updates start with `v0.1.12-windows.1` and require one initial manual replacement.
 
 | Version | Date | Highlights |
 |---|---|---|
@@ -170,216 +99,13 @@ BHE is actively maintained, with new releases roughly every week. See [`CHANGELO
 | v0.1.1 – v0.1.3 | 2026-09-16 – 09-23 | Full Chinese and English UI on desktop and mobile; fixed Android native library loading and the ONNX Runtime version |
 | v0.1.0 | 2026-09-14 | First preview release: automated macOS, Windows, and Android test builds, downloadable from the website; mobile ported the desktop analysis algorithm |
 
-## Scope
-
-The current pipeline targets **fixed-camera, single-hoop, single-video** workflows. It generates high-recall suspected scoring events for human review. It does not promise referee-grade truth, and is not designed for moving cameras, multiple hoops, live streaming, cloud collaboration, or zero-false-positive unattended editing.
-
-## Architecture
-
-```text
-Desktop Flutter UI ── JSONL ──> Python Engine ──> SQLite
-                                     ├── OpenCV / Ultralytics: sampling and detection
-                                     ├── Python analysis: candidates, trajectories, review rules
-                                     └── FFmpeg / FFprobe: proxy, previews, and export
-
-Mobile Flutter UI ── platform channels ──> Android/iOS media + Rust/ONNX Runtime
-```
-
-The desktop UI does not access SQLite, detection JSON, or FFmpeg directly. The Engine exposes a JSONL (JSON Lines, one JSON message per line) contract. The mobile app does not launch the desktop Python Engine; it shares data models through `packages/bhe_core` and uses native platform capabilities.
-
-- [Desktop architecture](docs/architecture/ARCHITECTURE_V1.md)
-- [Engine protocol](docs/architecture/ENGINE_PROTOCOL_V1.md)
-- [Mobile runtime](docs/architecture/MOBILE_RUNTIME_V1.md)
-- [Project layout and lifecycle](docs/architecture/PROJECT_LAYOUT_V1.md)
-
-## Requirements
-
-### Desktop
-
-- macOS first; Windows remains an experimental compatibility path;
-- Python 3.11;
-- Flutter stable; the current development baseline is 3.44.8;
-- `ffmpeg` and `ffprobe`;
-- a detector compatible with the current pipeline and licensed for your use;
-- additional temporary disk space for analysis and export.
-
-Python runtime requirements are in [`requirements.txt`](requirements.txt); development requirements are in [`requirements-dev.txt`](requirements-dev.txt).
-
-### Mobile
-
-- Flutter stable plus the corresponding Android Studio/Xcode toolchain;
-- Android native analysis currently targets `arm64-v8a` and also needs Rust, the Android NDK, and the Android ONNX Runtime library;
-- iOS local analysis also needs Rust iOS targets and an ONNX Runtime XCFramework;
-- native artifacts should not include developer paths or unverified binaries in a public release.
-
-## Quick start: desktop
-
-The following commands target a macOS/Linux shell. See the PowerShell section in [`docs/GETTING_STARTED.en.md`](docs/GETTING_STARTED.en.md) for Windows.
-
-### 1. Create a Python environment
-
-```bash
-git clone <repository-url>
-cd basketball-highlight-editor
-
-python3.11 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements-dev.txt
-```
-
-### 2. Provide FFmpeg and a model
-
-For macOS development, Homebrew is one option:
-
-```bash
-brew install ffmpeg
-```
-
-Place a model you are authorized to use at:
-
-```text
-models/bball_model.pt
-```
-
-The Engine does not silently download a model from an unknown URL. See [`docs/MODEL_AND_DATA_LICENSES.md`](docs/MODEL_AND_DATA_LICENSES.md) and [`models/README.md`](models/README.md).
-
-### 3. Check the runtime
-
-```bash
-.venv/bin/python scripts/check_runtime.py \
-  --root . \
-  --python .venv/bin/python \
-  --model models/bball_model.pt
-```
-
-Continue when the command reports `runtime: OK`. This validates environment completeness, not algorithmic accuracy.
-
-### 4. Run the desktop app
-
-```bash
-cd apps/desktop
-flutter pub get
-flutter run -d macos
-```
-
-First-use flow: create a project → choose a video → inspect metadata → accept or draw the hoop ROI → choose a mode → analyze → review candidates → export.
-
-For the complete setup, Windows path, and troubleshooting flow, see [`docs/GETTING_STARTED.en.md`](docs/GETTING_STARTED.en.md) and [`docs/FAQ.en.md`](docs/FAQ.en.md).
-
-## Analysis modes
-
-| Mode | Processing | Recommended use |
-|---|---|---|
-| Standard | Proxy coarse scan followed by source-video refinement | First runs, important games, or low tolerance for missed events |
-| Fast | `640×480 / 3 FPS` lower-cost proxy; source-video refinement is skipped | Quick inspection when some missed events are acceptable |
-
-Both modes keep the same review, manual-range, and export semantics. Fast mode has no fixed duration or accuracy guarantee. One roughly 4.6-minute cold-start sample took `75.73s` in Standard and `42.07s` in Fast; this illustrates that sample only and is not a universal promise. See [`docs/research/ANALYSIS_MODES_V1.md`](docs/research/ANALYSIS_MODES_V1.md) and [`docs/benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md`](docs/benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md).
-
-The Fast entry point can be hidden at build time:
-
-```bash
-flutter run -d macos --dart-define=ENABLE_FAST_ANALYSIS=false
-```
-
-## Debug the Python Engine separately
-
-The desktop app starts the Engine automatically. To inspect the protocol manually:
-
-```bash
-PYTHONPATH=engine/python .venv/bin/python -m basketball_engine
-```
-
-The Engine reads JSONL requests from stdin and writes JSONL responses to stdout; stderr is diagnostic only. Commands, events, and error codes are documented in [`docs/architecture/ENGINE_PROTOCOL_V1.md`](docs/architecture/ENGINE_PROTOCOL_V1.md).
-
-## Mobile development
-
-```bash
-cd apps/mobile
-flutter pub get
-flutter analyze
-flutter test
-flutter build apk --debug
-```
-
-Without native runtime artifacts, the Android UI can still build, but analysis returns `NATIVE_RUNTIME_UNAVAILABLE` instead of fabricating candidates. To build the Android native analysis library:
-
-```bash
-export BHE_ANDROID_NDK="$HOME/Library/Android/sdk/ndk/<version>"
-export BHE_ORT_ANDROID_DIR="/path/to/onnxruntime-android"
-rustup target add aarch64-linux-android
-../../scripts/build_mobile_runtime.sh
-flutter build apk --release
-```
-
-See [`apps/mobile/README.md`](apps/mobile/README.md) and [`docs/architecture/MOBILE_RUNTIME_V1.md`](docs/architecture/MOBILE_RUNTIME_V1.md) for the mobile boundary and iOS runtime preparation.
-
-## Tests and checks
-
-```bash
-# Source-publication check: tracked files and sensitive paths
-python3 scripts/check_open_source.py
-
-# Python tests
-.venv/bin/python -m pytest -q
-
-# Desktop Flutter
-cd apps/desktop
-flutter analyze
-flutter test
-
-# Mobile Flutter
-cd ../mobile
-flutter analyze
-flutter test
-```
-
-Mobile native inference, model behavior, and real-video accuracy still require device-level validation; ordinary unit tests do not replace that acceptance step.
-
-## Packaging boundary
-
-A successful `flutter build macos --release` or Windows Release build does not make a user-ready installer. A distributable desktop package still needs portable Python and dependencies, FFmpeg/FFprobe, a model with verified redistribution rights, dependency notices, signing, notarization, and clean-machine validation.
-
-Runtime preparation and packaging commands are consolidated in [`docs/RELEASE.en.md`](docs/RELEASE.en.md). Windows scripts remain experimental. Mobile native-runtime preparation is documented in [`docs/architecture/MOBILE_RUNTIME_V1.md`](docs/architecture/MOBILE_RUNTIME_V1.md).
-
 ## Documentation
 
-- **Getting started:** [`docs/GETTING_STARTED.en.md`](docs/GETTING_STARTED.en.md) · [`docs/FAQ.en.md`](docs/FAQ.en.md)
-- **Development:** [`docs/DEVELOPMENT.en.md`](docs/DEVELOPMENT.en.md) · [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- **Architecture:** [`docs/README.en.md`](docs/README.en.md) · [`docs/architecture/`](docs/architecture/)
-- **Product contracts:** [`docs/DECISIONS_V1.md`](docs/DECISIONS_V1.md) · [`docs/REQUIREMENTS_V1.md`](docs/REQUIREMENTS_V1.md) · [`docs/USER_FLOW_V1.md`](docs/USER_FLOW_V1.md)
-- **Open source and release:** [`docs/RELEASE.en.md`](docs/RELEASE.en.md) · [`docs/OPEN_SOURCE_AUDIT.md`](docs/OPEN_SOURCE_AUDIT.md) · [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md) · [`docs/MODEL_AND_DATA_LICENSES.md`](docs/MODEL_AND_DATA_LICENSES.md)
-- **Community:** [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) · [`SECURITY.md`](SECURITY.md) · [`CHANGELOG.md`](CHANGELOG.md) · [`LICENSE`](LICENSE)
+- [Getting started](docs/GETTING_STARTED.en.md) · [Development](docs/DEVELOPMENT.en.md) · [Architecture](docs/architecture/ARCHITECTURE_V1.md) · [Mobile capabilities](docs/MOBILE_PC_FEATURE_MATRIX.md)
+- [Report an issue](https://github.com/fly7632785/basketball-highlight-editor/issues) · [Website](https://bhe.jafir.top/en/)
+- Privacy and licensing: processing is local; source, models, footage and third-party dependencies have separate terms. See [license notes](docs/MODEL_AND_DATA_LICENSES.md) and the [third-party manifest](docs/THIRD_PARTY_NOTICES.md).
+- Thanks to the [Linux.do](https://linux.do/) community and all contributors.
 
-## Open-source references
+[Website (Chinese)](https://bhe.jafir.top) · [Runtime requirements](requirements.txt) · [Development requirements](requirements-dev.txt)
 
-BHE's model, detection workflow, and product ideas were informed by several open-source projects, including [HoopCut](https://github.com/RuiYang0122/HoopCut), [basketball-highlights](https://github.com/reborncd/basketball-highlights), [ShotMarker](https://github.com/zhangrunhao/ShotMarker), [basketball_clipper](https://github.com/snowroll/basketball_clipper), [ball-yolo](https://github.com/griftt/ball-yolo), [ClarkWang1214/basketball-highlights](https://github.com/ClarkWang1214/basketball-highlights), and [ai-sports-cut-agent](https://github.com/bond0060/ai-sports-cut-agent). Thanks to the authors for sharing their work and ideas.
-
-## Privacy and data safety
-
-- Source videos are referenced by path and metadata and are not copied or uploaded by default.
-- Analysis, preview, review, and export are local by default.
-- Do not commit real game videos, player images, team identifiers, labels, or exported clips.
-- Model weights, training data, FFmpeg, and third-party dependencies require separate license checks.
-
-## Contributing
-
-Issues, test feedback, and focused fixes are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. Do not submit videos, models, screenshots, secrets, personal paths, or build artifacts.
-
-## License
-
-The source code is released under the [MIT License](LICENSE). This does not automatically cover model weights, training data, input videos, FFmpeg builds, or third-party dependencies. Read [`NOTICE`](NOTICE) and [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md) before redistribution.
-
-# Thanks
-Thank [Linux.do](https://linux.do/)
-
----
-
-## Project health
-
-[![Python Tests](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/python-tests.yml?branch=main&style=flat-square&label=Python%20tests)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/python-tests.yml)
-[![Flutter Checks](https://img.shields.io/github/actions/workflow/status/fly7632785/basketball-highlight-editor/flutter-check.yml?branch=main&style=flat-square&label=Flutter%20checks)](https://github.com/fly7632785/basketball-highlight-editor/actions/workflows/flutter-check.yml)
-![Free](https://img.shields.io/badge/cost-free-f97316?style=flat-square)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
-[![Linux DO](https://img.shields.io/badge/Linux%20DO-community-00a67d?style=flat-square)](https://linux.do/)
-
-**The only official sources are the website [bhe.jafir.top](https://bhe.jafir.top) and this repository.**
+More existing references: [`docs/USER_FLOW_V1.md`](docs/USER_FLOW_V1.md) · [`docs/README.en.md`](docs/README.en.md) · [`apps/mobile/README.md`](apps/mobile/README.md) · [`docs/MOBILE_PC_FEATURE_MATRIX.md`](docs/MOBILE_PC_FEATURE_MATRIX.md) · [`CHANGELOG.md`](CHANGELOG.md) · [Desktop architecture](docs/architecture/ARCHITECTURE_V1.md) · [Engine protocol](docs/architecture/ENGINE_PROTOCOL_V1.md) · [Mobile runtime](docs/architecture/MOBILE_RUNTIME_V1.md) · [Project layout and lifecycle](docs/architecture/PROJECT_LAYOUT_V1.md) · [`docs/GETTING_STARTED.en.md`](docs/GETTING_STARTED.en.md) · [`docs/MODEL_AND_DATA_LICENSES.md`](docs/MODEL_AND_DATA_LICENSES.md) · [`models/README.md`](models/README.md) · [`docs/FAQ.en.md`](docs/FAQ.en.md) · [`docs/research/ANALYSIS_MODES_V1.md`](docs/research/ANALYSIS_MODES_V1.md) · [`docs/benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md`](docs/benchmarks/ANALYSIS_MODE_BENCHMARK_20260812.md) · [`docs/architecture/ENGINE_PROTOCOL_V1.md`](docs/architecture/ENGINE_PROTOCOL_V1.md) · [`docs/architecture/MOBILE_RUNTIME_V1.md`](docs/architecture/MOBILE_RUNTIME_V1.md) · [`docs/RELEASE.en.md`](docs/RELEASE.en.md) · [`docs/DEVELOPMENT.en.md`](docs/DEVELOPMENT.en.md) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`docs/architecture/`](docs/architecture/) · [`docs/DECISIONS_V1.md`](docs/DECISIONS_V1.md) · [`docs/REQUIREMENTS_V1.md`](docs/REQUIREMENTS_V1.md) · [`docs/OPEN_SOURCE_AUDIT.md`](docs/OPEN_SOURCE_AUDIT.md) · [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md) · [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) · [`SECURITY.md`](SECURITY.md) · [`LICENSE`](LICENSE) · [HoopCut](https://github.com/RuiYang0122/HoopCut) · [basketball-highlights](https://github.com/reborncd/basketball-highlights) · [ShotMarker](https://github.com/zhangrunhao/ShotMarker) · [basketball_clipper](https://github.com/snowroll/basketball_clipper) · [ball-yolo](https://github.com/griftt/ball-yolo) · [ClarkWang1214/basketball-highlights](https://github.com/ClarkWang1214/basketball-highlights) · [ai-sports-cut-agent](https://github.com/bond0060/ai-sports-cut-agent) · [MIT License](LICENSE) · [`NOTICE`](NOTICE)
