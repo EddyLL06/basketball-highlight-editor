@@ -7,6 +7,28 @@ Coarse proposals appear as read-only previews during refinement; final cards
 commit together with the candidates. The person-track/import behavior described
 below is retained for compatibility with earlier developer artifacts.
 
+The Review module contains two inline subpages: **进球审核 / Basket review**
+(selected by default) and **射手快标 / Shooter quick label**. Both tabs stay at
+the left of the same toolbar and use the existing BHE orange selected state.
+Switching pauses playback, keeps each page's selection/filters, and refreshes
+the ordinary review labels when returning. Watch clip selects that candidate
+in Basket review without closing or navigating away from the Review module.
+
+At desktop widths the contact sheet has exactly three cards per row. Each
+compact card displays its three adjacent frames side by side; selecting a frame
+sets the evidence saved with the player label. Existing observed rising-ball
+crops receive a small display-only enlargement, while extrapolated or missing
+release regions retain their wider context. Full-context viewing remains one
+click away and no image regeneration or extra inference is required.
+
+Every card always offers **Add player** next to its player-name controls,
+including when the roster is empty or already populated. Both review subpages
+reuse the original BHE text-entry dialog and create-player command. Creating a
+player from a final card assigns that player to that shot with its selected
+frame; creating from the toolbar only adds a roster name. Draft cards remain
+read-only. Hidden subpages cannot consume keyboard labeling shortcuts, and
+module switching is disabled while a shooter label is being saved.
+
 The review workspace adds a static shooter contact sheet. Each candidate has a
 proxy still near the estimated release, a generous release-area crop, nearby
 frames and project-player buttons. Human labels are saved through the Engine.

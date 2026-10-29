@@ -19,6 +19,7 @@ import '../../core/video_orientation.dart';
 import '../../providers/player_groups_provider.dart';
 import '../../providers/project_state.dart';
 import '../../providers/playback_coordinator.dart';
+import '../../core/project_session.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
 import 'clip_range_timeline.dart';
@@ -26,6 +27,8 @@ import 'media_readiness.dart';
 import 'player_group_editor.dart';
 import 'review_video_viewport.dart';
 import 'shooter_quick_label.dart';
+import 'review_module_tabs.dart';
+import 'review_text_entry_dialog.dart';
 
 bool _annotationHintSeen = false;
 
@@ -43,6 +46,9 @@ class ReviewScreen extends ConsumerStatefulWidget {
 }
 
 class _ReviewScreenState extends ConsumerState<ReviewScreen> {
+  bool _showShooter = false, _switchingModule = false, _shooterSaving = false;
+  ProjectSessionScope? _shooterScope;
+  int _shooterReloadToken = 0;
   String? _selectedCandidateId;
   bool _showOriginalVideo = false;
   final Set<String> _reviewStartedCandidateIds = <String>{};
@@ -123,30 +129,25 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     setState(() => _replayToken++);
   }
 
-  Future<void> _openShooterQuickLabel() async {
+  Future<void> _switchReviewModule(bool shooter, {String? candidateId}) async {
+    if (_switchingModule || _shooterSaving || (_showShooter == shooter && candidateId == null)) return;
     final session = ref.read(projectSessionProvider);
-    final scope = session.snapshot();
+    setState(() => _switchingModule = true);
     try {
+      final scope = session.snapshot();
       await ref.read(projectProvider.notifier).flushReviewQueue();
-      final candidateId = await ref
-          .read(playbackCoordinatorProvider)
-          .withPausedPlayback(() {
-        if (!mounted) return Future<String?>.value();
-        return showDialog<String>(
-          context: context,
-          builder: (context) => Dialog.fullscreen(
-            child: ShooterQuickLabel(
-              initialVideoId: scope.videoId,
-              request: (command, payload) => scope.engine.client.request(
-                command, {'project_root': scope.projectRoot, ...payload},
-              ),
-            ),
-          ),
-        );
-      });
+      if (shooter) {
+        await ref.read(playbackCoordinatorProvider).withPausedPlayback(() async {});
+      } else {
+        await ref.read(projectProvider.notifier).refreshCandidates(scope: scope);
+      }
       if (!mounted || session.projectRoot != scope.projectRoot) return;
-      await ref.read(projectProvider.notifier).refreshCandidates(scope: scope);
-      if (!mounted || candidateId == null) return;
+      setState(() {
+        _shooterScope ??= scope;
+        _showShooter = shooter;
+        if (shooter) _shooterReloadToken++;
+      });
+      if (candidateId == null) return;
       final candidate = ref.read(projectProvider).candidates
           .where((row) => row['id'] == candidateId).firstOrNull;
       if (candidate != null) _selectCandidate(candidate);
@@ -156,6 +157,8 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
           SnackBar(content: Text(error.toString())),
         );
       }
+    } finally {
+      if (mounted) setState(() => _switchingModule = false);
     }
   }
 
@@ -187,17 +190,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     _keepSelectionVisibleAfterEdit(candidate['id'].toString(), before);
   }
 
-  Future<String?> _promptPlayerName() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => _TextEntryDialog(
-        title: context.bheText('添加球员'),
-        hintText: context.bheText('例如：科比、罗斯'),
-        confirmLabel: context.bheText('添加'),
-      ),
-    );
-    return name?.trim().isEmpty == true ? null : name?.trim();
-  }
+  Future<String?> _promptPlayerName() => promptReviewPlayerName(context);
 
   Future<void> _createPlayerForCandidate(
     Map<String, dynamic> candidate,
@@ -619,7 +612,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   Future<void> _editCandidateNote(Map<String, dynamic> candidate) async {
     final note = await showDialog<String>(
       context: context,
-      builder: (_) => _TextEntryDialog(
+      builder: (_) => ReviewTextEntryDialog(
         title: context.bheText('候选备注'),
         initialText: candidate['note']?.toString() ?? '',
         hintText: context.bheText('例如：补篮、擦框、镜头遮挡'),
@@ -724,6 +717,12 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(projectProvider);
     final notifier = ref.read(projectProvider.notifier);
+    if (_shooterScope != null &&
+        _shooterScope!.projectRoot != ref.read(projectSessionProvider).projectRoot) {
+      _shooterScope = null;
+      _showShooter = false;
+      _shooterSaving = false;
+    }
     _syncPreviewScope(state);
     final allCandidates = _orderedCandidates(state.candidates);
     if (_playerFilter.startsWith('player:') &&
@@ -769,7 +768,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
         ? originalVideoPath
         : reviewVideoPath;
     final reviewLocked = state.busy || state.hydrating;
-    if (!reviewLocked && selectedId != null && selectedId.isNotEmpty) {
+    if (!_showShooter && !reviewLocked && selectedId != null && selectedId.isNotEmpty) {
       _ensureReviewStarted(selectedId);
     }
     final includedCount = allCandidates
@@ -785,7 +784,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       key: const Key('review-shortcut-focus'),
       focusNode: _shortcutFocusNode,
       autofocus: true,
-      onKeyEvent: (_, event) => _handleShortcut(
+      onKeyEvent: (_, event) => _showShooter ? KeyEventResult.ignored : _handleShortcut(
         event,
         candidates: candidates,
         selected: selected,
@@ -796,17 +795,20 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
         padding: EdgeInsets.zero,
         child: Column(
           children: [
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                key: const Key('open-shooter-quick-label'),
-                onPressed: (allCandidates.isEmpty && !analyzing) || reviewLocked
-                    ? null : _openShooterQuickLabel,
-                icon: const Icon(Icons.people_alt_outlined),
-                label: Text(Localizations.localeOf(context).languageCode == 'zh'
-                    ? '射手快标' : 'Shooter quick label'),
-              ),
+            ReviewModuleTabs(
+              shooterSelected: _showShooter,
+              enabled: !reviewLocked && !_switchingModule && !_shooterSaving,
+              onSelected: (shooter) => unawaited(_switchReviewModule(shooter)),
             ),
+            Expanded(
+              child: IndexedStack(
+                index: _showShooter ? 1 : 0,
+                children: [
+                  TickerMode(
+                    enabled: !_showShooter,
+                    child: ExcludeFocus(
+                      excluding: _showShooter,
+                      child: Column(children: [
             if (analyzing ||
                 jobState == 'failed' ||
                 jobState == 'cancelled' ||
@@ -1034,6 +1036,27 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                     ),
                   );
                 },
+              ),
+            ),
+                      ]),
+                    ),
+                  ),
+                  if (_shooterScope case final scope?)
+                    ShooterQuickLabel(
+                      key: ValueKey('shooter-module-${scope.projectRoot}'),
+                      initialVideoId: scope.videoId,
+                      embedded: true,
+                      active: _showShooter,
+                      reloadToken: _shooterReloadToken,
+                      onSavingChanged: (saving) {
+                        if (mounted) setState(() => _shooterSaving = saving);
+                      },
+                      onWatchClip: (id) => unawaited(_switchReviewModule(false, candidateId: id)),
+                      request: (command, payload) => scope.engine.client.request(
+                        command, {'project_root': scope.projectRoot, ...payload},
+                      ),
+                    ),
+                ],
               ),
             ),
           ],
@@ -1436,71 +1459,6 @@ class _SmallAction extends StatelessWidget {
   );
 }
 
-class _TextEntryDialog extends StatefulWidget {
-  const _TextEntryDialog({
-    required this.title,
-    required this.hintText,
-    required this.confirmLabel,
-    this.initialText = '',
-    this.maxLines = 1,
-  });
-
-  final String title;
-  final String hintText;
-  final String confirmLabel;
-  final String initialText;
-  final int maxLines;
-
-  @override
-  State<_TextEntryDialog> createState() => _TextEntryDialogState();
-}
-
-class _TextEntryDialogState extends State<_TextEntryDialog> {
-  late final TextEditingController _controller = TextEditingController(
-    text: widget.initialText,
-  );
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    Navigator.of(context).pop(_controller.text);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = AppColors.of(context);
-    return AlertDialog(
-      backgroundColor: c.surface,
-      surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(CsRadius.md),
-        side: BorderSide(color: c.borderStrong),
-      ),
-      title: Text(widget.title),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        maxLines: widget.maxLines,
-        decoration: InputDecoration(
-          hintText: widget.hintText,
-          border: widget.maxLines > 1 ? const OutlineInputBorder() : null,
-        ),
-        onSubmitted: widget.maxLines == 1 ? (_) => _submit() : null,
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(context.bheText('取消')),
-        ),
-        FilledButton(onPressed: _submit, child: Text(widget.confirmLabel)),
-      ],
-    );
-  }
-}
 
 class _VideoPane extends ConsumerStatefulWidget {
   const _VideoPane({
@@ -6455,7 +6413,7 @@ class _PlayerGroupsDialog extends ConsumerWidget {
     ];
     final name = await showDialog<String>(
       context: context,
-      builder: (_) => _TextEntryDialog(
+      builder: (_) => ReviewTextEntryDialog(
         title: context.bheText('存为分组'),
         hintText: context.bheText('例如：周六球队'),
         confirmLabel: context.bheText('保存'),

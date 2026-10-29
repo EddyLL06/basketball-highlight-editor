@@ -199,7 +199,10 @@ jobs:
       - name: Format shooter quick-label sources
         if: inputs.include_shooter == true
         working-directory: apps/desktop
-        run: dart format lib/features/review/shooter_quick_label.dart test/shooter_quick_label_test.dart
+        run: >-
+          dart format lib/features/review/shooter_quick_label.dart test/shooter_quick_label_test.dart
+          lib/features/review/review_screen.dart lib/features/review/review_module_tabs.dart
+          lib/features/review/review_text_entry_dialog.dart test/review_modules_test.dart
 
       - name: Preserve formatted shooter sources
         if: inputs.include_shooter == true
@@ -209,6 +212,10 @@ jobs:
           path: |
             apps/desktop/lib/features/review/shooter_quick_label.dart
             apps/desktop/test/shooter_quick_label_test.dart
+            apps/desktop/lib/features/review/review_screen.dart
+            apps/desktop/lib/features/review/review_module_tabs.dart
+            apps/desktop/lib/features/review/review_text_entry_dialog.dart
+            apps/desktop/test/review_modules_test.dart
 
       - name: Validate shooter desktop preview
         if: inputs.include_shooter == true

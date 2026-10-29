@@ -7,20 +7,23 @@ import 'package:flutter_test/flutter_test.dart';
 class _ReviewEngine {
   final saves = <JsonMap>[];
   bool rejectSave = false;
+  int rowCount = 2;
+  final players = <JsonMap>[
+    {'id': 'red', 'name': 'Red'},
+    {'id': 'green', 'name': 'Green'},
+  ];
+  final createdNames = <String>[];
 
   Future<JsonMap> request(String command, JsonMap payload) async {
     if (command == 'list_shooter_review') {
       return {
-        'players': [
-          {'id': 'red', 'name': 'Red'},
-          {'id': 'green', 'name': 'Green'},
-        ],
+        'players': players,
         'videos': [
           {'id': 'video'},
         ],
         'jobs': [],
         'candidates': [
-          for (var i = 0; i < 2; i++)
+          for (var i = 0; i < rowCount; i++)
             {
               'id': 'c$i',
               'video_id': 'video',
@@ -60,6 +63,12 @@ class _ReviewEngine {
         'selection': Map.of(payload),
         'review_state': payload['review_state'],
       };
+    }
+    if (command == 'create_player') {
+      createdNames.add(payload['name'] as String);
+      final player = <String, dynamic>{'id': 'new-player', 'name': payload['name']};
+      players.add(player);
+      return {'player': player};
     }
     throw StateError('Unexpected command: $command');
   }
@@ -105,6 +114,66 @@ Future<void> _pump(WidgetTester tester, _ReviewEngine engine) async {
 }
 
 void main() {
+  testWidgets('desktop grid has three compact cards per row and three parallel frames', (tester) async {
+    final engine = _ReleaseEngine()..draft = false..rowCount = 4;
+    await _pump(tester, engine);
+    final cards = [for (var i = 0; i < 4; i++) find.byKey(ValueKey('shooter-card-c$i'))];
+    expect(tester.getTopLeft(cards[0]).dy, tester.getTopLeft(cards[2]).dy);
+    expect(tester.getTopLeft(cards[3]).dy, greaterThan(tester.getTopLeft(cards[0]).dy));
+    expect(tester.getSize(cards[0]).height, lessThan(460));
+    final frames = [for (var i = 0; i < 3; i++) find.byKey(ValueKey('shooter-frame-c0-$i'))];
+    expect(tester.getTopLeft(frames[0]).dy, tester.getTopLeft(frames[2]).dy);
+    expect(tester.getTopLeft(frames[0]).dx, lessThan(tester.getTopLeft(frames[1]).dx));
+    expect(tester.getTopLeft(frames[1]).dx, lessThan(tester.getTopLeft(frames[2]).dx));
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final emptyRoster in [false, true]) {
+    testWidgets('card add-player is always available and assigns only this shot; empty=$emptyRoster', (tester) async {
+      final engine = _ReleaseEngine()..draft = false;
+      if (emptyRoster) engine.players.clear();
+      await _pump(tester, engine);
+      await tester.tap(find.byKey(const ValueKey('shooter-frame-c0-2')));
+      await tester.tap(find.byKey(const ValueKey('shooter-add-player-c0')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '  New player  ');
+      await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.byType(FilledButton)));
+      await tester.pumpAndSettle();
+      expect(engine.createdNames, ['New player']);
+      expect(engine.saves.single['candidate_id'], 'c0');
+      expect(engine.saves.single['player_id'], 'new-player');
+      expect(engine.saves.single['time_ms'], 1200);
+      expect(engine.saves.single.containsKey('status'), isFalse);
+      expect(engine.saves.single.containsKey('outcome'), isFalse);
+      expect(find.byKey(const ValueKey('shooter-add-player-c0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('shooter-name-c1-new-player')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('embedded watch action calls parent instead of closing review', (tester) async {
+    final engine = _ReleaseEngine()..draft = false;
+    String? watched;
+    await tester.pumpWidget(MaterialApp(home: ShooterQuickLabel(
+      embedded: true, request: engine.request, onWatchClip: (id) => watched = id,
+    )));
+    await tester.pumpAndSettle();
+    final card = find.byKey(const ValueKey('shooter-card-c0'));
+    await tester.ensureVisible(find.descendant(of: card, matching: find.text('Watch clip')));
+    await tester.tap(find.descendant(of: card, matching: find.text('Watch clip')));
+    await tester.pumpAndSettle();
+    expect(watched, 'c0');
+    expect(find.byType(ShooterQuickLabel), findsOneWidget);
+    expect(find.byType(AppBar), findsNothing);
+    await tester.pumpWidget(MaterialApp(home: ShooterQuickLabel(
+      embedded: true, active: false, request: engine.request,
+    )));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
+    expect(engine.saves, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'release areas are read-only during analysis and save names without tracks after completion',
     (tester) async {

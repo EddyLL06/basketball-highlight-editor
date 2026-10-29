@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/engine_session.dart';
+import '../../theme/app_colors.dart';
+import '../../theme/tokens.dart';
+import 'review_text_entry_dialog.dart';
 
 /// A project-scoped contact sheet. All persistence goes through the engine.
 class ShooterQuickLabel extends StatefulWidget {
@@ -13,10 +16,19 @@ class ShooterQuickLabel extends StatefulWidget {
     super.key,
     required this.request,
     this.initialVideoId,
+    this.embedded = false,
+    this.active = true,
+    this.reloadToken = 0,
+    this.onWatchClip,
+    this.onSavingChanged,
   });
 
   final Future<JsonMap> Function(String command, JsonMap payload) request;
   final String? initialVideoId;
+  final bool embedded, active;
+  final int reloadToken;
+  final ValueChanged<String>? onWatchClip;
+  final ValueChanged<bool>? onSavingChanged;
 
   @override
   State<ShooterQuickLabel> createState() => _ShooterQuickLabelState();
@@ -33,6 +45,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
   JsonMap? _job;
   String _filter = 'all';
   bool _loading = true, _preparing = false, _context = false;
+  bool _addingPlayer = false;
 
   String t(String zh, String en) =>
       Localizations.localeOf(context).languageCode == 'zh' ? zh : en;
@@ -66,6 +79,21 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     _videoId = widget.initialVideoId;
     unawaited(_load());
   }
+
+  @override
+  void didUpdateWidget(covariant ShooterQuickLabel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && widget.reloadToken != oldWidget.reloadToken) {
+      unawaited(_load());
+    }
+    if (widget.active && !oldWidget.active) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focus.requestFocus();
+      });
+    }
+  }
+
+  void _notifyBusy() => widget.onSavingChanged?.call(_addingPlayer || _saving.isNotEmpty);
 
   @override
   void dispose() {
@@ -176,40 +204,26 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     }
   }
 
-  Future<void> _addPlayer() async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(t('添加球员', 'Add player')),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: InputDecoration(labelText: t('球员名字', 'Player name')),
-          onSubmitted: (value) => Navigator.pop(context, value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(t('取消', 'Cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: Text(t('添加', 'Add')),
-          ),
-        ],
-      ),
-    );
-    // The dialog's route may still animate out; its TextField owns the controller
-    // until the next frame. Let that route release it before disposing.
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    controller.dispose();
+  Future<void> _addPlayer([JsonMap? row]) async {
+    if (_addingPlayer || _saving.isNotEmpty) return;
+    final name = await promptReviewPlayerName(context);
     if (!mounted || name == null || name.trim().isEmpty) return;
+    setState(() => _addingPlayer = true);
+    _notifyBusy();
     try {
-      await widget.request('create_player', {'name': name.trim()});
+      final result = await widget.request('create_player', {'name': name.trim()});
+      final playerId = _map(result['player'])['id']?.toString();
       await _load();
+      if (!mounted || row == null || playerId == null) return;
+      final current = _rows.where((r) => _id(r) == _id(row)).firstOrNull;
+      if (current != null) await _save(current, playerId, 'confirmed');
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) {
+        setState(() => _addingPlayer = false);
+        _notifyBusy();
+      }
     }
   }
 
@@ -286,6 +300,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
       _error = null;
       _activeId = id;
     });
+    _notifyBusy();
     try {
       final result = await widget.request('set_candidate_shooter', {
         'candidate_id': id,
@@ -314,7 +329,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
-      if (mounted) setState(() => _saving.remove(id));
+      if (mounted) {
+        setState(() => _saving.remove(id));
+        _notifyBusy();
+      }
     }
   }
 
@@ -343,7 +361,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
   }
 
   KeyEventResult _key(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent || _saving.isNotEmpty) {
+    if (!widget.active || event is! KeyDownEvent || _saving.isNotEmpty || _addingPlayer) {
       return KeyEventResult.ignored;
     }
     final index = const [
@@ -367,249 +385,264 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
 
   @override
   Widget build(BuildContext context) {
+    final c = AppColors.of(context);
     final visible = _visible;
-    final completed = _rows
-        .where((r) => r['shooter_review_state'] == 'confirmed')
-        .length;
-    return Focus(
-      focusNode: _focus,
-      autofocus: true,
-      onKeyEvent: _key,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(t('射手快标', 'Shooter quick label')),
-          leading: IconButton(
-            tooltip: t('返回审核', 'Back to review'),
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () => Navigator.pop(context),
+    final completed = _rows.where((r) => r['shooter_review_state'] == 'confirmed').length;
+    return ExcludeFocus(
+      excluding: !widget.active,
+      child: Focus(
+        focusNode: _focus,
+        autofocus: widget.active,
+        onKeyEvent: _key,
+        child: Scaffold(
+          backgroundColor: c.background,
+          appBar: widget.embedded ? null : AppBar(
+            title: Text(t('射手快标', 'Shooter quick label')),
+            leading: IconButton(
+              tooltip: t('返回审核', 'Back to review'),
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => Navigator.pop(context),
+            ),
           ),
-          actions: [
-            TextButton.icon(
-              onPressed: _undo.isEmpty || _saving.isNotEmpty ? null : _undoLast,
-              icon: const Icon(Icons.undo),
-              label: Text(t('撤销', 'Undo')),
-            ),
-            IconButton(
-              tooltip: t('刷新', 'Refresh'),
-              onPressed: _load,
-              icon: const Icon(Icons.refresh),
-            ),
-          ],
-        ),
-        body: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    t(
-                      '出手附近画面由分析自动准备。看图认人，点击名字保存；数字 1–9 标记当前卡片。',
-                      'Release stills are prepared during analysis. Recognize the shooter and choose a name; keys 1–9 label the selected card.',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text(
-                        t(
-                          '已标 $completed / ${_rows.length}',
-                          'Labeled $completed / ${_rows.length}',
-                        ),
-                      ),
-                      DropdownButton<String>(
-                        value: _videoId ?? 'all',
-                        items: [
-                          DropdownMenuItem(
-                            value: 'all',
-                            child: Text(t('全部视频', 'All videos')),
-                          ),
-                          for (var i = 0; i < _videos.length; i++)
-                            DropdownMenuItem(
-                              value: _videos[i]['id'].toString(),
-                              child: Text(t('第 ${i + 1} 段', 'Video ${i + 1}')),
-                            ),
-                        ],
-                        onChanged: (value) => setState(() {
-                          _videoId = value == 'all' ? null : value;
-                          _activeId = null;
-                        }),
-                      ),
-                      for (final option in ['all', 'pending', 'uncertain'])
-                        ChoiceChip(
-                          label: Text(
-                            option == 'all'
-                                ? t('全部', 'All')
-                                : option == 'pending'
-                                ? t('待标注', 'Pending')
-                                : t('需核实', 'Uncertain'),
-                          ),
-                          selected: _filter == option,
-                          onSelected: (_) => setState(() => _filter = option),
-                        ),
-                      FilterChip(
-                        label: Text(t('显示全景蓝框', 'Show full frame')),
-                        selected: _context,
-                        onSelected: (v) => setState(() => _context = v),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _running || _preparing
-                            ? null
-                            : () => _prepare(),
-                        icon: const Icon(Icons.photo_library_outlined),
-                        label: Text(t('补齐/刷新画面', 'Refresh stills')),
-                      ),
-                      TextButton(
-                        onPressed: _running || _preparing
-                            ? null
-                            : () => _prepare(import: true),
-                        child: Text(t('导入已有分析', 'Import analysis')),
-                      ),
-                      TextButton.icon(
-                        onPressed: _addPlayer,
-                        icon: const Icon(Icons.person_add_alt_1),
-                        label: Text(t('添加球员', 'Add player')),
-                      ),
-                    ],
-                  ),
-                  if (_running || _preparing) ...[
-                    const SizedBox(height: 8),
-                    LinearProgressIndicator(
-                      value: _preparing
-                          ? null
-                          : ((_job?['progress'] as num?)?.toDouble() ?? 0)
-                                .clamp(0, 1),
-                    ),
-                    Row(
+          body: Column(
+            children: [
+              Container(
+                color: c.surface,
+                padding: const EdgeInsets.symmetric(horizontal: Spacing.md, vertical: Spacing.sm),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: Spacing.sm,
+                      runSpacing: Spacing.xs,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Expanded(
-                          child: Text(
-                            _job?['type'] == 'analysis'
-                                ? t(
-                                    '分析中：出手画面会陆续出现，完成后可标注射手。',
-                                    'Analysis in progress: release stills appear here; label shooters after completion.',
-                                  )
-                                : t(
-                                    '正在准备出手画面，原有标签保留。可关闭此页，稍后回来。',
-                                    'Preparing frames; existing labels are preserved. You can return later.',
-                                  ),
-                          ),
+                        Text(t('已标 $completed / ${_rows.length}', 'Labeled $completed / ${_rows.length}'),
+                          style: TextStyle(color: c.textSecondary)),
+                        DropdownButton<String>(
+                          value: _videoId ?? 'all',
+                          isDense: true,
+                          items: [
+                            DropdownMenuItem(value: 'all', child: Text(t('全部视频', 'All videos'))),
+                            for (var i = 0; i < _videos.length; i++)
+                              DropdownMenuItem(
+                                value: _videos[i]['id'].toString(),
+                                child: Text(t('第 ${i + 1} 段', 'Video ${i + 1}')),
+                              ),
+                          ],
+                          onChanged: (value) => setState(() {
+                            _videoId = value == 'all' ? null : value;
+                            _activeId = null;
+                          }),
                         ),
-                        TextButton(
-                          onPressed: _running ? _cancel : null,
-                          child: Text(t('取消任务', 'Cancel task')),
+                        for (final option in ['all', 'pending', 'uncertain'])
+                          ChoiceChip(
+                            label: Text(option == 'all' ? t('全部', 'All') : option == 'pending' ? t('待标注', 'Pending') : t('需核实', 'Uncertain')),
+                            selected: _filter == option,
+                            selectedColor: c.orange.withValues(alpha: .14),
+                            backgroundColor: c.surface2,
+                            labelStyle: TextStyle(color: _filter == option ? c.orange : c.textSecondary),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(CsRadius.sm)),
+                            onSelected: (_) => setState(() => _filter = option),
+                          ),
+                        FilterChip(
+                          label: Text(t('显示全景蓝框', 'Show full frame')),
+                          selected: _context,
+                          selectedColor: c.orange.withValues(alpha: .14),
+                          labelStyle: TextStyle(color: _context ? c.orange : c.textSecondary),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(CsRadius.sm)),
+                          onSelected: (v) => setState(() => _context = v),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _running || _preparing ? null : () => _prepare(),
+                          icon: const Icon(Icons.photo_library_outlined, size: 18),
+                          label: Text(t('补齐/刷新画面', 'Refresh stills')),
+                        ),
+                        TextButton.icon(
+                          onPressed: _addingPlayer || _saving.isNotEmpty ? null : () => _addPlayer(),
+                          icon: const Icon(Icons.person_add_alt_1, size: 18),
+                          label: Text(t('添加球员', 'Add player')),
+                        ),
+                        TextButton.icon(
+                          onPressed: _undo.isEmpty || _saving.isNotEmpty ? null : _undoLast,
+                          icon: const Icon(Icons.undo, size: 18),
+                          label: Text(t('撤销', 'Undo')),
+                        ),
+                        IconButton(
+                          tooltip: t('刷新', 'Refresh'),
+                          onPressed: _load,
+                          icon: const Icon(Icons.refresh, size: 20),
+                        ),
+                        PopupMenuButton<String>(
+                          tooltip: t('更多', 'More'),
+                          onSelected: (_) => _prepare(import: true),
+                          itemBuilder: (_) => [
+                            PopupMenuItem(
+                              value: 'import',
+                              enabled: !_running && !_preparing,
+                              child: Text(t('导入已有分析', 'Import analysis')),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
-                  if (_error != null || _job?['state'] == 'failed')
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: SelectableText(
-                        _error ?? _job?['error_message']?.toString() ?? '',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ),
-                  if (_players.isEmpty)
                     Text(
-                      t(
-                        '先添加球员名字，之后即可一键标注。',
-                        'Add player names to start labeling.',
+                      t('并排比较三帧，选中画面后点击球员姓名保存；数字 1–9 标记当前卡片。',
+                        'Compare three frames, then choose a player to save. Keys 1–9 label the selected card.'),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: c.textSecondary),
+                    ),
+                    if (_running || _preparing) ...[
+                      const SizedBox(height: Spacing.sm),
+                      LinearProgressIndicator(
+                        value: _preparing ? null : ((_job?['progress'] as num?)?.toDouble() ?? 0).clamp(0, 1),
+                        color: c.orange,
+                        backgroundColor: c.surface3,
                       ),
-                    ),
-                ],
+                      Row(children: [
+                        Expanded(child: Text(
+                          _job?['type'] == 'analysis'
+                            ? t('分析中：出手画面会陆续出现，完成后可标注射手。', 'Analysis in progress: release stills appear here; label shooters after completion.')
+                            : t('正在准备出手画面，原有标签保留。', 'Preparing frames; existing labels are preserved.'),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        )),
+                        TextButton(onPressed: _running ? _cancel : null, child: Text(t('取消任务', 'Cancel task'))),
+                      ]),
+                    ],
+                    if (_error != null || _job?['state'] == 'failed')
+                      Padding(
+                        padding: const EdgeInsets.only(top: Spacing.xs),
+                        child: SelectableText(_error ?? _job?['error_message']?.toString() ?? '', style: TextStyle(color: c.error)),
+                      ),
+                  ],
+                ),
               ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : visible.isEmpty
-                  ? Center(
-                      child: Text(t('当前筛选下没有片段', 'No clips match this filter')),
-                    )
-                  : LayoutBuilder(
-                      builder: (context, size) {
-                        final columns = (size.maxWidth / 370)
-                            .floor()
-                            .clamp(1, 6)
-                            .toInt();
-                        return GridView.builder(
-                          padding: const EdgeInsets.all(16),
-                          gridDelegate:
-                              SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: columns,
-                                mainAxisExtent: 660,
-                                mainAxisSpacing: 16,
-                                crossAxisSpacing: 16,
-                              ),
-                          itemCount: visible.length,
-                          itemBuilder: (context, index) => _card(
-                            visible[index],
-                            _rows.indexOf(visible[index]) + 1,
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
+              Divider(height: 1, color: c.border),
+              Expanded(
+                child: _loading ? const Center(child: CircularProgressIndicator())
+                  : visible.isEmpty ? Center(child: Text(t('当前筛选下没有片段', 'No clips match this filter')))
+                  : LayoutBuilder(builder: (context, size) {
+                      final columns = size.maxWidth >= Breakpoints.md ? 3 : size.maxWidth >= 600 ? 2 : 1;
+                      final cardWidth = (size.maxWidth - Spacing.md * 2 - 12 * (columns - 1)) / columns;
+                      final imageHeight = ((cardWidth - 32) / 3 / .8).clamp(144.0, 200.0).toDouble();
+                      final legacy = visible.any((r) => _map(r['shooter_evidence'])['method'] != 'ball_release_preview_v1');
+                      final scale = (MediaQuery.textScalerOf(context).scale(13) / 13).clamp(1.0, 2.0);
+                      return GridView.builder(
+                        key: const Key('shooter-card-grid'),
+                        padding: const EdgeInsets.all(Spacing.md),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: columns,
+                          mainAxisExtent: imageHeight + 246 * scale + (legacy ? 62 : 0),
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
+                        ),
+                        itemCount: visible.length,
+                        itemBuilder: (context, index) => _card(visible[index], _rows.indexOf(visible[index]) + 1, imageHeight),
+                      );
+                    }),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _image(String? path, {BoxFit fit = BoxFit.contain}) => path == null
-      ? Center(
-          child: Text(t('暂无出手画面，请先生成', 'Prepare frames to see the shooter')),
-        )
+      ? Center(child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Text(t('暂无出手画面', 'No release frame'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 11)),
+        ))
       : Image.file(
           File(path),
           fit: fit,
           gaplessPlayback: true,
-          errorBuilder: (_, error, stack) => Center(
-            child: Text(
-              t('图片不可用，请重新生成', 'Image unavailable; prepare frames again'),
-            ),
-          ),
+          errorBuilder: (_, error, stack) => Center(child: Text(t('图片不可用，请刷新画面', 'Image unavailable; refresh stills'), textAlign: TextAlign.center)),
         );
 
-  Widget _card(JsonMap row, int number) {
-    final id = _id(row),
-        evidence = _map(row['shooter_evidence']),
-        frames = _frames(row);
-    final frame = frames.isEmpty
-        ? <String, dynamic>{}
-        : frames[_frameIndex(row)];
-    final track = _track(row, frame), people = _maps(frame['people']);
-    final person = people.where((p) => p['track_id'] == track).firstOrNull;
-    final light = evidence['method'] == 'ball_release_preview_v1';
+  void _selectFrame(JsonMap row, int index) {
+    setState(() {
+      _activeId = _id(row);
+      _frameChoices[_id(row)] = index;
+    });
+    _focus.requestFocus();
+  }
+
+  Widget _frameTile(JsonMap row, JsonMap frame, int index, double imageHeight) {
+    final c = AppColors.of(context);
+    final id = _id(row), evidence = _map(row['shooter_evidence']);
     final focus = _map(frame['focus_region']);
+    final track = _track(row, frame);
+    final person = _maps(frame['people']).where((p) => p['track_id'] == track).firstOrNull;
+    final cropPath = person?['crop_path'] ?? focus['crop_path'];
+    final path = (_context ? frame['context_path'] : cropPath ?? frame['context_path']) as String?;
+    // Keep extrapolated and wide views generous. Observed rising-ball regions
+    // already include ample margin and can be enlarged slightly without new work.
+    final zoom = !_context && cropPath != null && evidence['reason'] == 'upward_ball_motion_estimate' ? 1.12 : 1.0;
+    final selected = index == _frameIndex(row);
+    final delta = ((frame['time_ms'] as num) - ((evidence['release_time_ms'] as num?) ?? 0)).round();
+    return Expanded(
+      child: Semantics(
+        selected: selected,
+        label: t('第 ${index + 1} 帧，${_time(frame['time_ms'])}', 'Frame ${index + 1}, ${_time(frame['time_ms'])}'),
+        child: OutlinedButton(
+          key: ValueKey('shooter-frame-$id-$index'),
+          onPressed: () => _selectFrame(row, index),
+          style: OutlinedButton.styleFrom(
+            padding: EdgeInsets.zero,
+            foregroundColor: selected ? c.orange : c.textSecondary,
+            backgroundColor: c.surface2,
+            side: BorderSide(color: selected ? c.orange : c.borderStrong, width: selected ? 2 : 1),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(CsRadius.sm)),
+          ),
+          child: Column(
+            children: [
+              SizedBox(
+                height: imageHeight,
+                width: double.infinity,
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                  child: ColoredBox(
+                    color: Colors.black,
+                    child: ClipRect(
+                      child: Transform.scale(
+                        key: ValueKey('shooter-frame-zoom-$id-$index'),
+                        scale: zoom,
+                        child: SizedBox.expand(child: _image(path)),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(
+                height: 26,
+                child: Center(child: Text('$delta ms', maxLines: 1, style: const TextStyle(fontSize: 11))),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _card(JsonMap row, int number, double imageHeight) {
+    final c = AppColors.of(context);
+    final id = _id(row), evidence = _map(row['shooter_evidence']), frames = _frames(row);
+    final frame = frames.isEmpty ? <String, dynamic>{} : frames[_frameIndex(row)];
+    final track = _track(row, frame), people = _maps(frame['people']);
+    final light = evidence['method'] == 'ball_release_preview_v1';
     final draft = row['draft'] == true;
-    final uncertain = evidence['release_uncertain'] == true;
     final state = row['shooter_review_state'];
-    final canSave =
-        evidence.isNotEmpty &&
-        !draft &&
-        !_saving.contains(id) &&
-        _saving.isEmpty;
+    final canSave = evidence.isNotEmpty && frames.isNotEmpty && !draft && _saving.isEmpty && !_addingPlayer;
     final active = _activeId == id;
     return Card(
       key: ValueKey('shooter-card-$id'),
+      margin: EdgeInsets.zero,
+      color: c.surface,
+      surfaceTintColor: Colors.transparent,
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(
-          color: active
-              ? Theme.of(context).colorScheme.primary
-              : Theme.of(context).dividerColor,
-          width: active ? 2 : 1,
-        ),
+        borderRadius: BorderRadius.circular(CsRadius.md),
+        side: BorderSide(color: active ? c.orange : c.border, width: active ? 1.5 : 1),
       ),
       child: InkWell(
         onTap: () {
@@ -617,108 +650,38 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
           _focus.requestFocus();
         },
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '#$number  ${_time(row['event_time_ms'])}',
-                      style: Theme.of(context).textTheme.titleMedium,
+              Row(children: [
+                Expanded(child: Text('#$number  ${_time(row['event_time_ms'])}',
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(color: c.textPrimary))),
+                Text(
+                  draft ? t('分析中预览', 'Analysis preview')
+                    : state == 'confirmed' ? t('已保存', 'Saved')
+                    : state == 'uncertain' ? t('不确定', 'Uncertain') : t('待标注', 'Pending'),
+                  style: TextStyle(fontSize: 11, color: state == 'confirmed' ? c.success : c.textSecondary),
+                ),
+              ]),
+              const SizedBox(height: 6),
+              SizedBox(
+                height: imageHeight + 28,
+                child: frames.isEmpty
+                  ? _image(null)
+                  : Row(
+                      key: ValueKey('shooter-frames-$id'),
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var i = 0; i < frames.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 4),
+                          _frameTile(row, frames[i], i, imageHeight),
+                        ],
+                      ],
                     ),
-                  ),
-                  Text(
-                    draft
-                        ? t('分析中预览', 'Analysis preview')
-                        : state == 'confirmed'
-                        ? t('已保存', 'Saved')
-                        : state == 'uncertain'
-                        ? t('不确定', 'Uncertain')
-                        : t('待标注', 'Pending'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Container(
-                height: 238,
-                decoration: BoxDecoration(
-                  color: Colors.black87,
-                  border: Border.all(color: Colors.lightBlueAccent, width: 2),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: _image(
-                  (_context
-                          ? frame['context_path']
-                          : person?['crop_path'] ??
-                                focus['crop_path'] ??
-                                frame['context_path'])
-                      as String?,
-                ),
               ),
               const SizedBox(height: 6),
-              Text(
-                evidence.isEmpty
-                    ? row['shooter_evidence_stale'] == true
-                          ? t(
-                              '源视频已变化，请重新生成',
-                              'Source changed; prepare frames again',
-                            )
-                          : t('尚未生成出手画面', 'Frames not prepared')
-                    : light
-                    ? t(
-                        '出手附近 · ${_time(frame['time_ms'])}',
-                        'Near release · ${_time(frame['time_ms'])}',
-                      )
-                    : uncertain
-                    ? t(
-                        '出手时刻待核实 · ${_time(frame['time_ms'])}',
-                        'Release uncertain · ${_time(frame['time_ms'])}',
-                      )
-                    : t(
-                        '估计出手 · ${_time(frame['time_ms'])}',
-                        'Estimated release · ${_time(frame['time_ms'])}',
-                      ),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              SizedBox(
-                height: 38,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      for (var i = 0; i < frames.length; i++)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 3),
-                          child: ChoiceChip(
-                            label: Text(
-                              '${((frames[i]['time_ms'] as num) - (evidence['release_time_ms'] as num)).round()} ms',
-                            ),
-                            selected: i == _frameIndex(row),
-                            onSelected: (_) => setState(() {
-                              _activeId = id;
-                              _frameChoices[id] = i;
-                            }),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              if (light)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text(
-                    t(
-                      '蓝框仅表示大致出手区域，请自行确认射手。',
-                      'The blue region is approximate. Choose the shooter by sight.',
-                    ),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
               if (!light)
                 SizedBox(
                   height: 58,
@@ -729,132 +692,101 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                         Padding(
                           padding: const EdgeInsets.only(right: 6),
                           child: Semantics(
-                            button: true,
-                            selected: track == p['track_id'],
-                            label: 'Track ${p['track_id']}',
+                            button: true, selected: track == p['track_id'], label: 'Track ${p['track_id']}',
                             child: InkWell(
-                              key: ValueKey(
-                                'shooter-person-$id-${p['track_id']}',
-                              ),
+                              key: ValueKey('shooter-person-$id-${p['track_id']}'),
                               onTap: () {
-                                setState(() {
-                                  _activeId = id;
-                                  _trackChoices[id] = p['track_id'] as int;
-                                });
+                                setState(() { _activeId = id; _trackChoices[id] = p['track_id'] as int; });
                                 _focus.requestFocus();
                               },
                               child: Container(
-                                width: 72,
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: track == p['track_id']
-                                        ? Colors.lightBlueAccent
-                                        : Theme.of(context).dividerColor,
-                                    width: 2,
-                                  ),
-                                ),
-                                child: Column(
-                                  children: [
-                                    Expanded(
-                                      child: _image(p['crop_path'] as String?),
-                                    ),
-                                    Text(
-                                      'Track ${p['track_id']}',
-                                      style: const TextStyle(fontSize: 11),
-                                    ),
-                                  ],
-                                ),
+                                width: 64,
+                                decoration: BoxDecoration(border: Border.all(color: track == p['track_id'] ? c.orange : c.borderStrong)),
+                                child: Column(children: [
+                                  Expanded(child: _image(p['crop_path'] as String?)),
+                                  Text('Track ${p['track_id']}', style: const TextStyle(fontSize: 10)),
+                                ]),
                               ),
                             ),
                           ),
                         ),
-                      if (people.isEmpty)
-                        Center(
-                          child: Text(
-                            t(
-                              '无人框；可按名字标注或看视频',
-                              'No person box; label by name or watch video',
-                            ),
-                          ),
-                        ),
                     ],
                   ),
                 ),
-              const SizedBox(height: 6),
-              Text(
-                row['player_name'] == null
-                    ? t('点击名字保存射手', 'Choose a name to save')
-                    : t(
-                        '射手：${row['player_name']}',
-                        'Shooter: ${row['player_name']}',
-                      ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+              Row(children: [
+                Expanded(child: Text(
+                  row['player_name'] == null ? t('点击名字保存射手', 'Choose a name to save') : t('射手：${row['player_name']}', 'Shooter: ${row['player_name']}'),
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: c.textPrimary),
+                )),
+                TextButton.icon(
+                  key: ValueKey('shooter-add-player-$id'),
+                  onPressed: _addingPlayer || _saving.isNotEmpty ? null : () => _addPlayer(row),
+                  icon: const Icon(Icons.person_add_alt_1, size: 15),
+                  label: Text(t('添加球员', 'Add player')),
+                  style: TextButton.styleFrom(
+                    foregroundColor: c.orange,
+                    minimumSize: const Size(44, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    textStyle: const TextStyle(fontSize: 11),
+                  ),
+                ),
+              ]),
               Expanded(
                 child: SingleChildScrollView(
                   child: Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
+                    spacing: 4, runSpacing: 4,
                     children: [
                       for (var i = 0; i < _players.length; i++)
                         FilledButton.tonal(
-                          key: ValueKey(
-                            'shooter-name-$id-${_players[i]['id']}',
-                          ),
-                          onPressed: canSave
-                              ? () => _save(
-                                  row,
-                                  _players[i]['id'].toString(),
-                                  'confirmed',
-                                )
-                              : null,
+                          key: ValueKey('shooter-name-$id-${_players[i]['id']}'),
+                          onPressed: canSave ? () => _save(row, _players[i]['id'].toString(), 'confirmed') : null,
                           style: FilledButton.styleFrom(
+                            backgroundColor: row['player_id'] == _players[i]['id'] ? c.orange.withValues(alpha: .16) : c.surface2,
+                            foregroundColor: row['player_id'] == _players[i]['id'] ? c.orange : c.textPrimary,
+                            minimumSize: const Size(44, 32),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(CsRadius.sm)),
                             visualDensity: VisualDensity.compact,
+                            textStyle: const TextStyle(fontSize: 12),
                           ),
-                          child: Text(
-                            '${i < 9 ? '${i + 1} · ' : ''}${_players[i]['name']}',
-                          ),
+                          child: Text('${i < 9 ? '${i + 1} · ' : ''}${_players[i]['name']}'),
                         ),
+                      if (_players.isEmpty)
+                        Text(t('添加球员后即可标注', 'Add players to start labeling'),
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: c.textSecondary)),
                     ],
                   ),
                 ),
               ),
-              Wrap(
-                spacing: 4,
-                children: [
-                  TextButton(
-                    onPressed: canSave
-                        ? () => _save(row, null, 'uncertain')
-                        : null,
-                    child: Text(t('不确定', 'Uncertain')),
-                  ),
-                  TextButton(
-                    onPressed: canSave
-                        ? () => _save(row, null, 'pending')
-                        : null,
-                    child: Text(t('清除', 'Clear')),
-                  ),
-                  TextButton.icon(
-                    onPressed: _saving.isEmpty && !draft
-                        ? () => Navigator.pop(context, id)
-                        : null,
-                    icon: const Icon(Icons.play_circle_outline, size: 18),
-                    label: Text(t('看视频', 'Watch clip')),
-                  ),
-                ],
-              ),
+              Row(children: [
+                TextButton(
+                  onPressed: canSave ? () => _save(row, null, 'uncertain') : null,
+                  style: TextButton.styleFrom(minimumSize: const Size(44, 32), padding: const EdgeInsets.symmetric(horizontal: 6)),
+                  child: Text(t('不确定', 'Uncertain')),
+                ),
+                TextButton(
+                  onPressed: canSave ? () => _save(row, null, 'pending') : null,
+                  style: TextButton.styleFrom(minimumSize: const Size(44, 32), padding: const EdgeInsets.symmetric(horizontal: 6)),
+                  child: Text(t('清除', 'Clear')),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: _saving.isEmpty && !_addingPlayer && !draft ? () {
+                    if (widget.onWatchClip case final watch?) { watch(id); }
+                    else { Navigator.pop(context, id); }
+                  } : null,
+                  icon: const Icon(Icons.play_circle_outline, size: 16),
+                  label: Text(t('看视频', 'Watch clip')),
+                  style: TextButton.styleFrom(minimumSize: const Size(44, 32), padding: const EdgeInsets.symmetric(horizontal: 6)),
+                ),
+              ]),
               Text(
-                row['selection_status'] == 'excluded'
-                    ? t(
-                        '片段已排除 · 射手仍可标注',
-                        'Excluded clip · shooter can still be labeled',
-                      )
-                    : t(
-                        '片段已保留 · 射手独立保存',
-                        'Included clip · shooter saved separately',
-                      ),
-                style: Theme.of(context).textTheme.bodySmall,
+                row['shooter_evidence_stale'] == true ? t('源视频已变化，请刷新画面', 'Source changed; refresh stills')
+                  : row['selection_status'] == 'excluded' ? t('片段已排除 · 射手仍可标注', 'Excluded clip · shooter can still be labeled')
+                  : t('出手区域为估计 · 射手独立保存', 'Approximate release area · shooter saved separately'),
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 10, color: c.textTertiary),
               ),
             ],
           ),
