@@ -414,3 +414,78 @@ def test_real_oss_publish_still_requires_config(tmp_path, monkeypatch):
     monkeypatch.setenv('GITHUB_ACTIONS', 'true')
     assert publisher.main(args) == 1
     assert json.loads((work / 'publish-summary.json').read_text())['status'] == 'failed'
+
+
+def seed_rewrite(release, store):
+    previous = copy.deepcopy(release.previous)
+    for platform, entry in previous['packages'].items():
+        prefix = publisher.ANDROID_OSS_PREFIX if platform.startswith('android-') else publisher.OSS_PREFIX
+        entry['url'] = prefix + Path(entry['url']).name
+    seed(release, store, previous)
+    return previous
+
+
+def test_url_rewrite_only_changes_four_url_bytes_and_can_roll_back(offline):
+    release, store = offline
+    before_manifest = seed_rewrite(release, store)
+    before = snapshot(store)
+    original = store.path('releases/latest.json').read_bytes()
+    args, work = command(release, store, 'v0.1.13', suffix='-rewrite')
+    assert publisher.main([*args, '--rewrite-urls', 'dl', '--dry-run']) == 0
+    assert snapshot(store) == before
+    candidate_bytes = (work / 'candidate.json').read_bytes()
+    candidate = manifest.read_signed_manifest(work / 'candidate.json', work / 'candidate.json.sig', release.public)
+    for platform, entry in candidate['packages'].items():
+        assert entry['url'] == publisher.DL_PREFIX + Path(before_manifest['packages'][platform]['url']).name
+    assert publisher.rewrite_url_bytes(candidate_bytes, 'v0.1.13', 'oss') == original
+    assert json.loads((work / 'publish-summary.json').read_text())['would_upload'] == ['releases/latest.json.sig', 'releases/latest.json']
+    args2, _ = command(release, store, 'v0.1.13', suffix='-publish')
+    assert publisher.main([*args2, '--rewrite-urls', 'dl']) == 0
+    after = snapshot(store)
+    assert {k for k in before if before[k] != after[k]} == {'releases/latest.json', 'releases/latest.json.sig'}
+    assert read(store, release) == candidate
+    args3, _ = command(release, store, 'v0.1.13', suffix='-rollback')
+    assert publisher.main([*args3, '--rewrite-urls', 'oss']) == 0
+    assert store.path('releases/latest.json').read_bytes() == original
+    assert read(store, release) == before_manifest
+
+
+@pytest.mark.parametrize('field', ['version', 'published_at', 'notes', 'sha256', 'size', 'package_version', 'package_notes', 'extension', 'whitespace'])
+def test_url_rewrite_rejects_all_other_changes(offline, field):
+    release, store = offline
+    seed_rewrite(release, store)
+    original = store.path('releases/latest.json').read_bytes()
+    candidate = publisher.rewrite_url_bytes(original, 'v0.1.13', 'dl')
+    edited = json.loads(candidate)
+    entry = edited['packages']['macos-arm64']
+    if field == 'version': edited['version'] = '0.1.14'
+    elif field == 'published_at': edited['published_at'] = 'different'
+    elif field == 'notes': edited['notes']['zh'] = 'different'
+    elif field == 'sha256': entry['sha256'] = 'a' * 64
+    elif field == 'size': entry['size'] += 1
+    elif field == 'package_version': entry['version'] = '0.1.13+macos.1'
+    elif field == 'package_notes': entry['notes']['zh'] = 'different'
+    elif field == 'extension': edited['unknown']['keep'].append('different')
+    altered = candidate + b' ' if field == 'whitespace' else (json.dumps(edited, ensure_ascii=False, indent=2) + '\n').encode()
+    with pytest.raises(ValueError, match='非 URL'):
+        publisher.validate_url_rewrite(original, altered, 'v0.1.13', 'dl')
+
+
+@pytest.mark.parametrize('failure', ['bad-signature', 'missing-package', 'wrong-version', 'patch', 'wrong-platform', 'bad-origin'])
+def test_url_rewrite_rejects_bad_inputs_without_writes(offline, failure):
+    release, store = offline
+    previous = seed_rewrite(release, store)
+    tag = 'v0.1.14' if failure == 'wrong-version' else 'v0.1.13-macos.1' if failure == 'patch' else 'v0.1.13'
+    if failure == 'bad-signature': store.path('releases/latest.json.sig').write_bytes(b'bad')
+    elif failure == 'missing-package':
+        del previous['packages']['windows-x64']
+        seed(release, store, previous)
+    elif failure == 'bad-origin':
+        previous['packages']['windows-x64']['url'] = 'https://untrusted.invalid/BHE-windows-x64-v0.1.13.zip'
+        seed(release, store, previous)
+    args, work = command(release, store, tag, suffix='-bad-' + failure)
+    if failure == 'wrong-platform': args[args.index('--platform') + 1] = 'macos'
+    before = snapshot(store)
+    assert publisher.main([*args, '--rewrite-urls', 'dl', '--dry-run']) == 1
+    assert snapshot(store) == before
+    assert json.loads((work / 'publish-summary.json').read_text())['status'] == 'failed'

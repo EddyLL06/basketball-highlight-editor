@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -19,8 +21,47 @@ import urllib.request
 from pathlib import Path, PurePosixPath
 
 from build_update_manifest import (FAMILIES, PLATFORMS, PUBLIC_KEY, dump_manifest, merge_manifest,
-                                   read_signed_manifest, release_parts,
+                                   read_signed_manifest, release_parts, strict_json, validate_manifest,
                                    verify_signature)
+
+
+DL_PREFIX = 'https://dl.envsystem.top/'
+OSS_PREFIX = 'https://shengshengniannian.oss-cn-beijing.aliyuncs.com/shengshengniannian/basketball-highlight-editor/releases/'
+ANDROID_OSS_PREFIX = 'https://oss.shengshengniannian.com/shengshengniannian/basketball-highlight-editor/releases/'
+
+
+def rewrite_url_bytes(body: bytes, tag: str, target: str) -> bytes:
+    """Replace only four URL string tokens; all remaining bytes stay identical."""
+    previous = strict_json(body)
+    validate_manifest(previous)
+    base, family, _ = release_parts(tag)
+    if family or previous['version'] != base or target not in ('dl', 'oss'):
+        raise ValueError('地址改写只允许当前完整版本及已知目标')
+    result = body
+    expected = copy.deepcopy(previous)
+    for platform, suffix in PLATFORMS.items():
+        url = previous['packages'][platform]['url']
+        allowed = (DL_PREFIX, ANDROID_OSS_PREFIX if platform.startswith('android-') else OSS_PREFIX)
+        prefix = next((item for item in allowed if url.startswith(item)), None)
+        name = url[len(prefix):] if prefix else ''
+        if not re.fullmatch(r'BHE-' + re.escape(platform) + r'-[A-Za-z0-9.+_-]+' + re.escape(suffix), name):
+            raise ValueError(f'{platform} 的源地址或文件名不允许改写')
+        target_prefix = DL_PREFIX if target == 'dl' else allowed[1]
+        new_url = target_prefix + name
+        old_token = json.dumps(url, ensure_ascii=False).encode('utf-8')
+        new_token = json.dumps(new_url, ensure_ascii=False).encode('utf-8')
+        if result.count(old_token) != 1:
+            raise ValueError(f'{platform} URL 字节表达不唯一或不受支持')
+        result = result.replace(old_token, new_token, 1)
+        expected['packages'][platform]['url'] = new_url
+    if strict_json(result) != expected:
+        raise ValueError('地址改写修改了其他字段')
+    return result
+
+
+def validate_url_rewrite(original: bytes, candidate: bytes, tag: str, target: str) -> None:
+    if candidate != rewrite_url_bytes(original, tag, target):
+        raise ValueError('候选清单包含非 URL 改动')
 
 
 class PublishCancelled(Exception):
@@ -144,16 +185,51 @@ def publish(args, store, summary):
     if previous['version'] != release_parts(previous['version'])[0]:
         raise ValueError('生产清单顶层版本必须为不带 v 前缀的标准完整版本')
     summary.stage('prepare-candidate')
-    candidate = merge_manifest(previous, args.tag, args.assets_dir, args.base_url,
-                               args.readme_zh, args.readme_en, args.android_base_url)
     candidate_path = work / 'candidate.json'
     candidate_signature = work / 'candidate.json.sig'
-    dump_manifest(candidate, candidate_path)
+    if args.rewrite_urls:
+        if args.platform != 'all':
+            raise ValueError('地址改写要求 all 平台')
+        original_bytes = previous_path.read_bytes()
+        rewritten = rewrite_url_bytes(original_bytes, args.tag, args.rewrite_urls)
+        validate_url_rewrite(original_bytes, rewritten, args.tag, args.rewrite_urls)
+        candidate_path.write_bytes(rewritten)
+        candidate = strict_json(rewritten)
+    else:
+        candidate = merge_manifest(previous, args.tag, args.assets_dir, args.base_url,
+                                   args.readme_zh, args.readme_en, args.android_base_url)
+        dump_manifest(candidate, candidate_path)
     subprocess.run(['openssl', 'pkeyutl', '-sign', '-rawin', '-inkey', str(args.signing_key),
                     '-in', str(candidate_path), '-out', str(candidate_signature)], check=True, capture_output=True)
     verify_signature(candidate_path, candidate_signature, args.public_key)
     summary.data['candidate_verified'] = True
     summary.save()
+    # URL-only publication never touches immutable packages or their aliases.
+    if args.rewrite_urls:
+        targets = list(PLATFORMS)
+        if args.dry_run:
+            summary.data.update(status='dry-run-ok', version=candidate['version'],
+                                packages={p: candidate['packages'][p] for p in targets},
+                                manifest_sha256=digest(candidate_path), unchanged=candidate == previous,
+                                would_upload=[manifest_key + '.sig', manifest_key])
+            summary.stage('dry-run-complete')
+            return
+        summary.stage('upload-manifest-signature', manifest_key + '.sig')
+        store.upload(candidate_signature, manifest_key + '.sig', mutable=True)
+        summary.stage('upload-manifest', manifest_key)
+        store.upload(candidate_path, manifest_key, mutable=True)
+        summary.stage('verify-published', manifest_key)
+        published = work / 'published.json'
+        published_signature = work / 'published.json.sig'
+        store.download(manifest_key, published)
+        store.download(manifest_key + '.sig', published_signature)
+        read_signed_manifest(published, published_signature, args.public_key)
+        validate_url_rewrite(original_bytes, published.read_bytes(), args.tag, args.rewrite_urls)
+        summary.data.update(status='success', version=candidate['version'],
+                            packages={p: candidate['packages'][p] for p in targets},
+                            manifest_sha256=digest(published), unchanged=candidate == previous)
+        summary.stage('complete')
+        return
     # Unknown platform extensions remain in the manifest but are never republished.
     targets = list(FAMILIES[family] if family else PLATFORMS)
     files = []
@@ -233,6 +309,7 @@ def main(argv=None):
     parser.add_argument('--public-key', type=Path, default=PUBLIC_KEY)
     parser.add_argument('--signing-key', type=Path, required=True)
     parser.add_argument('--work-dir', type=Path, required=True)
+    parser.add_argument('--rewrite-urls', choices=['dl', 'oss'], help='仅改写已签名的当前完整版本包地址')
     parser.add_argument('--dry-run', action='store_true', help='验证发布并列出将上传的对象，不写入存储')
     args = parser.parse_args(argv)
     args.prefix = safe_key(args.prefix)
