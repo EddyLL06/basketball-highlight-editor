@@ -773,7 +773,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                   ),
                 ),
               ),
-              Row(
+              Wrap(
+                spacing: 4,
                 children: [
                   TextButton(
                     onPressed: canSave
@@ -787,7 +788,6 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                         : null,
                     child: Text(t('清除', 'Clear')),
                   ),
-                  const Spacer(),
                   TextButton.icon(
                     onPressed: _saving.isEmpty
                         ? () => Navigator.pop(context, id)

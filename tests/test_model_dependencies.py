@@ -54,7 +54,11 @@ def undeclared_modules(modules, requirements):
     # Ultralytics declares torch itself; the checkpoint additionally needs dill.
     if 'ultralytics' in declared:
         declared.add('torch')
-    return modules - sys.stdlib_module_names - declared
+    # Protocol-2 checkpoints can refer to Python 2 names. Python's unpickler
+    # maps these to the corresponding Python 3 standard-library modules.
+    aliases = {'__builtin__': 'builtins', 'copy_reg': 'copyreg'}
+    normalized = {aliases.get(module, module) for module in modules}
+    return normalized - sys.stdlib_module_names - declared
 
 
 @pytest.mark.parametrize('protocol', range(pickle.HIGHEST_PROTOCOL + 1))
@@ -66,6 +70,13 @@ def test_scanner_handles_global_stack_global_and_memo_reuse(protocol):
 def test_developer_installed_dependency_does_not_hide_missing_declaration():
     assert undeclared_modules({'dill', 'torch', 'ultralytics', 'collections'},
                               'ultralytics>=8.4,<9') == {'dill'}
+
+
+def test_python2_builtin_globals_do_not_require_external_packages():
+    legacy = b'c__builtin__\nset\n.'
+    assert pickle.loads(legacy) is set
+    assert undeclared_modules(checkpoint_modules(legacy), '') == set()
+    assert undeclared_modules({'copy_reg', 'unknown_external'}, '') == {'unknown_external'}
 
 
 def test_packaged_checkpoint_dependencies_are_declared():
