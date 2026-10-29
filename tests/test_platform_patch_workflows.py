@@ -338,6 +338,19 @@ def test_macos_release_tests_bundled_numpy_preprocessing():
     script = build['run']
     subprocess.run(['bash', '-n'], input=script, text=True, check=True)
     assert 'BHE.app/Contents/Resources/runtime/python/bin/python3' in script
-    assert 'torch.from_numpy(np.zeros(1))' in script
-    assert 'predictor.preprocess([np.zeros((32, 32, 3), dtype=np.uint8)])' in script
-    assert script.index('scripts/build_macos_release.sh') < script.index('torch.from_numpy')
+    assert 'scripts/check_numpy_preprocess.py --python' in script
+    assert script.index('scripts/build_macos_release.sh') < script.index('scripts/check_numpy_preprocess.py')
+
+
+def test_native_intel_smoke_uses_release_constraints():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/python-tests.yml').read_text())
+    assert workflow['permissions'] == {'contents': 'read'}
+    job = workflow['jobs']['macos-intel-runtime']
+    assert job['runs-on'] == 'macos-15-intel'
+    install = next(step['run'] for step in job['steps'] if step.get('name') == 'Install Intel runtime dependencies')
+    subprocess.run(['bash', '-n'], input=install, text=True, check=True)
+    assert '-c requirements-macos-intel-constraints.txt -r requirements.txt' in install
+    assert 'python -m pip check' in install
+    assert 'pytest' not in install
+    smoke = next(step for step in job['steps'] if step.get('name') == 'Check NumPy and preprocessing')
+    assert smoke['run'] == 'python scripts/check_numpy_preprocess.py'
