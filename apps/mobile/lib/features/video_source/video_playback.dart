@@ -1,35 +1,62 @@
 import 'dart:io';
-import 'dart:developer' as developer;
 
 import 'package:video_player/video_player.dart';
 
+import '../diagnostics/mobile_diagnostics.dart';
 import 'video_source_failure.dart';
 
 /// Async even for missing files: never notify app state during widget initState.
 Future<VideoPlayerController?> openSourceVideo(
   String path, {
   required bool Function() isCurrent,
-  required void Function(VideoSourceFailure) onFailure,
+  required void Function(
+    VideoSourceFailure, {
+    DiagnosticErrorRecord? diagnostic,
+  })
+  onFailure,
 }) async {
-  if (!await File(path).exists()) {
-    if (isCurrent()) onFailure(VideoSourceFailure.missing);
-    return null;
-  }
-  final player = VideoPlayerController.file(File(path));
+  VideoPlayerController? player;
   try {
+    if (!await File(path).exists()) {
+      if (isCurrent()) {
+        final diagnostic = MobileDiagnostics.instance.error(
+          FileSystemException(
+            'Video source missing',
+            path,
+            const OSError('ENOENT', 2),
+          ),
+          null,
+          operation: 'playback',
+        );
+        onFailure(VideoSourceFailure.missing, diagnostic: diagnostic);
+      }
+      return null;
+    }
+    player = VideoPlayerController.file(File(path));
     await player.initialize();
     if (isCurrent()) return player;
-  } catch (_) {
-    if (isCurrent()) onFailure(VideoSourceFailure.unplayable);
-  }
-  try {
-    await player.dispose();
   } catch (error, stack) {
-    developer.log(
-      'Video player disposal failed',
-      error: error,
-      stackTrace: stack,
+    final diagnostic = MobileDiagnostics.instance.error(
+      error,
+      stack,
+      operation: 'playback',
+    );
+    if (isCurrent()) {
+      onFailure(VideoSourceFailure.unplayable, diagnostic: diagnostic);
+    }
+  }
+  await disposeSourceVideo(player);
+  return null;
+}
+
+Future<void> disposeSourceVideo(VideoPlayerController? player) async {
+  try {
+    await player?.dispose();
+  } catch (error, stack) {
+    MobileDiagnostics.instance.error(
+      error,
+      stack,
+      operation: 'playback.dispose',
     );
   }
-  return null;
 }

@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:bhe_l10n/bhe_l10n.dart';
 
+import '../../core/app_log.dart';
 import '../../core/contact_actions.dart';
-import '../../core/engine_client.dart';
 import '../../core/diagnostics.dart';
 import '../feedback/feedback_dialog.dart';
 import '../update/update_dialog.dart';

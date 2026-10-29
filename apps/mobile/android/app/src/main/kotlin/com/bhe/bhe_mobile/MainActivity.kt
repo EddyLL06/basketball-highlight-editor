@@ -1,5 +1,7 @@
 package com.bhe.bhe_mobile
 
+import com.bhe.bhe_mobile.diagnostics.AppDiagnostics
+import com.bhe.bhe_mobile.diagnostics.NativeFailureDetails
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.media.MediaExtractor
@@ -60,6 +62,7 @@ class MainActivity : FlutterActivity() {
     private val updateChannelName = "com.bhe.bhe/mobile_update"
     private val mainHandler = Handler(Looper.getMainLooper())
     private val exportCancelled = ConcurrentHashMap<String, AtomicBoolean>()
+    private val mergeTransactions = ConcurrentHashMap<String, MergeOutputTransaction>()
     private var progressSink: EventChannel.EventSink? = null
     private var analysisTaskListener: AnalysisTaskManager.Listener? = null
 
@@ -67,19 +70,23 @@ class MainActivity : FlutterActivity() {
         setAnalysisScreenOn(false)
         analysisTaskListener?.let(AnalysisTaskManager::detach)
         analysisTaskListener = null
-        exportCancelled.values.forEach { it.set(true) }
+        exportCancelled.forEach { (id, flag) -> flag.set(true); ExportPathRegistry.releaseIdle(id) }
         super.onDestroy()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        com.bhe.bhe_mobile.diagnostics.DiagnosticsChannel.register(flutterEngine, applicationContext)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, mediaChannelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "isAvailable" -> result.success(true)
                     "exportClip" -> exportClip(call, result)
                     "mergeClips" -> mergeClips(call, result)
+                    "registerMergeExport" -> registerMergeExport(call, result)
+                    "releaseMergeExport" -> releaseMergeExport(call, result)
                     "cancelExport" -> cancelExport(call, result)
+                    "isExportActive" -> result.success(call.argument<String>("exportId")?.let(ExportPathRegistry::contains))
                     "saveToLibrary" -> saveToLibrary(call, result)
                     else -> result.notImplemented()
                 }
@@ -91,6 +98,7 @@ class MainActivity : FlutterActivity() {
                     "suggestRoi" -> suggestRoi(call, result)
                     "extractCover" -> extractCover(call, result)
                     "getAnalysisState" -> getAnalysisState(result)
+                    "isAnalysisActive" -> result.success(AnalysisTaskManager.isRunning())
                     "cancelAnalysis" -> {
                         AnalysisTaskManager.cancel()
                         result.success(null)
@@ -119,25 +127,31 @@ class MainActivity : FlutterActivity() {
 
     /// 交给系统安装器；没有「安装未知应用」权限时先打开设置页让用户允许。
     private fun installApk(call: MethodCall, result: MethodChannel.Result) {
-        val path = call.argument<String>("path")
-        if (path.isNullOrEmpty() || !File(path).isFile) {
-            result.error("UPDATE_FILE_MISSING", "安装包不存在", null)
-            return
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+        try {
+            AppDiagnostics.event("update.install")
+            val path = call.argument<String>("path")
+            if (path.isNullOrEmpty() || !File(path).isFile) {
+                result.error("UPDATE_FILE_MISSING", "安装包不存在", null)
+                return
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+                )
+                result.success("permission_required")
+                return
+            }
+            val uri = FileProvider.getUriForFile(this, "$packageName.update_provider", File(path))
             startActivity(
-                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+                Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             )
-            result.success("permission_required")
-            return
+            result.success("started")
+        } catch (error: Exception) {
+            AppDiagnostics.event("update.install.failed", error = error)
+            result.error("UPDATE_INSTALL_FAILED", error.message, NativeFailureDetails.from(error))
         }
-        val uri = FileProvider.getUriForFile(this, "$packageName.update_provider", File(path))
-        startActivity(
-            Intent(Intent.ACTION_VIEW)
-                .setDataAndType(uri, "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-        result.success("started")
     }
 
     private fun getAnalysisState(result: MethodChannel.Result) {
@@ -312,6 +326,7 @@ class MainActivity : FlutterActivity() {
                     )
                 }
             } catch (error: Exception) {
+                AppDiagnostics.event("roi.failed", error = error)
                 Log.w(tag, "automatic ROI suggestion failed", error)
                 mainHandler.post { result.error("AUTO_ROI_FAILED", error.message ?: "自动识别篮筐失败", null) }
             } finally {
@@ -486,6 +501,7 @@ class MainActivity : FlutterActivity() {
                     partial.renameTo(File(outputPath))
                 }
             } catch (error: Exception) {
+                AppDiagnostics.event("cover.failed", error = error)
                 Log.w("BHE-Cover", "cover extraction failed", error)
                 false
             } finally {
@@ -628,7 +644,10 @@ class MainActivity : FlutterActivity() {
                 extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.let { ExportSourceTrack(index, it) }
             },
             addTrack = { index -> muxer.addTrack(extractor.getTrackFormat(index)) },
-            onSkipped = { track, error -> Log.w("BHE-Export", "skipping audio track ${track.index}: ${track.mime}", error) },
+            onSkipped = { track, error ->
+                Log.w("BHE-Export", "skipping audio track ${track.index}: ${track.mime}", error)
+                AppDiagnostics.event("export.audio.skipped", mapOf("track" to track.index, "mime" to track.mime), error)
+            },
         )
 
     private fun applySourceOrientation(extractor: MediaExtractor, muxer: MediaMuxer) {
@@ -647,6 +666,7 @@ class MainActivity : FlutterActivity() {
     )
 
     private fun exportClip(call: MethodCall, result: MethodChannel.Result) {
+        AppDiagnostics.event("export.start", mapOf("operation" to "exportClip"))
         val exportId = call.argument<String>("exportId") ?: outputPathId(call)
         val inputPath = call.argument<String>("inputPath")
         val outputPath = call.argument<String>("outputPath")
@@ -656,9 +676,25 @@ class MainActivity : FlutterActivity() {
             result.error("INVALID_ARGUMENT", "视频片段参数无效", null)
             return
         }
-        val cancelled = AtomicBoolean(false)
-        exportCancelled[exportId] = cancelled
-        Thread {
+        val reserved = try {
+            ExportStart.acquire(
+                { ExportPathRegistry.reserve(exportId, outputPath) },
+                { ExportPathRegistry.start(exportId, outputPath) },
+                { ExportPathRegistry.releaseIdle(exportId) },
+            )
+        } catch (error: Exception) { false }
+        if (!reserved) {
+            result.error("EXPORT_BUSY", "这个输出文件正在导出，请稍后重试。", null)
+            return
+        }
+        val cancelled = ExportStart.claimFlag(exportCancelled, exportId)
+        if (cancelled == null) {
+            ExportPathRegistry.finish(exportId)
+            result.error("EXPORT_BUSY", "这个输出文件正在导出，请稍后重试。", null)
+            return
+        }
+        val worker = Thread {
+            var completion: (() -> Unit)? = null
             var extractor: MediaExtractor? = null
             var muxer: MediaMuxer? = null
             var muxerStarted = false
@@ -707,13 +743,16 @@ class MainActivity : FlutterActivity() {
                     currentMuxer.stop()
                     muxerStarted = false
                 }
-                mainHandler.post { result.success(exportResult(outputPath, selection)) }
+                AppDiagnostics.event("export.completed")
+                completion = { result.success(exportResult(outputPath, selection)) }
             } catch (_: InterruptedException) {
                 File(outputPath).delete()
-                mainHandler.post { result.error("EXPORT_CANCELLED", "导出已取消", null) }
+                AppDiagnostics.event("export.cancelled")
+                completion = { result.error("EXPORT_CANCELLED", "导出已取消", null) }
             } catch (error: Exception) {
                 File(outputPath).delete()
-                mainHandler.post { result.error("EXPORT_FAILED", error.message, null) }
+                AppDiagnostics.event("export.failed", error = error)
+                completion = { result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error)) }
             } finally {
                 if (muxerStarted) {
                     try {
@@ -721,52 +760,126 @@ class MainActivity : FlutterActivity() {
                     } catch (_: Exception) {
                     }
                 }
-                muxer?.release()
-                extractor?.release()
-                exportCancelled.remove(exportId)
+                try { muxer?.release() } catch (error: Exception) { AppDiagnostics.event("export.cleanup.failed", error = error) }
+                try { extractor?.release() } catch (error: Exception) { AppDiagnostics.event("export.cleanup.failed", error = error) }
+                exportCancelled.remove(exportId, cancelled)
+                ExportPathRegistry.finish(exportId)
+                mainHandler.post { completion?.invoke() }
             }
-        }.start()
+        }
+        try {
+            ExportStart.launch({ worker.start() }, {
+                exportCancelled.remove(exportId, cancelled)
+                ExportPathRegistry.finish(exportId)
+            })
+        } catch (error: Throwable) {
+            AppDiagnostics.event("export.failed", error = error)
+            result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error))
+        }
+    }
+
+    private fun registerMergeExport(call: MethodCall, result: MethodChannel.Result) {
+        val id = call.argument<String>("exportId")
+        val outputPath = call.argument<String>("outputPath")
+        if (id.isNullOrBlank() || outputPath.isNullOrBlank()) {
+            result.error("INVALID_ARGUMENT", "合并导出任务无效", null)
+            return
+        }
+        val reserved = try { ExportPathRegistry.reserve(id, outputPath) } catch (error: Exception) { false }
+        if (!reserved) {
+            result.error("EXPORT_BUSY", "这个输出文件正在导出，请稍后重试。", null)
+            return
+        }
+        if (exportCancelled.putIfAbsent(id, AtomicBoolean(false)) != null) {
+            ExportPathRegistry.releaseIdle(id)
+            result.error("INVALID_ARGUMENT", "合并导出任务无效", null)
+            return
+        }
+        result.success(true)
+    }
+
+    private fun releaseMergeExport(call: MethodCall, result: MethodChannel.Result) {
+        val id = call.argument<String>("exportId")
+        if (id != null) {
+            if (ExportPathRegistry.releaseIdle(id)) exportCancelled.remove(id)
+        }
+        result.success(null)
     }
 
     private fun mergeClips(call: MethodCall, result: MethodChannel.Result) {
+        AppDiagnostics.event("export.start", mapOf("operation" to "mergeClips"))
         val exportId = call.argument<String>("exportId") ?: "merge-${System.nanoTime()}"
         val inputPath = call.argument<String>("inputPath")
         val outputPath = call.argument<String>("outputPath")
         val rawClips = call.argument<List<*>>("clips")
-        val sortedClips = rawClips?.mapNotNull { item ->
-            val values = item as? Map<*, *> ?: return@mapNotNull null
-            val start = (values["startMs"] as? Number)?.toLong()
-            val end = (values["endMs"] as? Number)?.toLong()
-            if (start == null || end == null || end <= start) null else start to end
-        }?.sortedBy { it.first } ?: emptyList()
-        val clips = mutableListOf<Pair<Long, Long>>()
-        for (clip in sortedClips) {
-            val previous = clips.lastOrNull()
-            if (previous != null && clip.first <= previous.second) {
-                clips[clips.lastIndex] = previous.first to maxOf(previous.second, clip.second)
-            } else {
-                clips += clip
+        val plan = try {
+            require(inputPath != null && outputPath != null && rawClips != null)
+            val intervals = rawClips.map { item ->
+                val values = item as? Map<*, *> ?: throw IllegalArgumentException("Invalid interval")
+                val start = (values["startMs"] as? Number)?.toLong() ?: throw IllegalArgumentException("Invalid start")
+                val end = (values["endMs"] as? Number)?.toLong() ?: throw IllegalArgumentException("Invalid end")
+                ExportInterval(start, end)
             }
-        }
-        if (inputPath == null || outputPath == null || clips.isEmpty()) {
+            ExportOverlapPlanner.plan(intervals)
+        } catch (error: IllegalArgumentException) {
             result.error("INVALID_ARGUMENT", "合并导出参数无效", null)
             return
         }
-        val cancelled = AtomicBoolean(false)
-        exportCancelled[exportId] = cancelled
-        Thread {
+        val clips = plan.intervals
+        val reserved = call.argument<Boolean>("reservationRequired") == true
+        val cancelled = if (reserved) {
+            exportCancelled[exportId] ?: run {
+                result.error("EXPORT_CANCELLED", "合并导出已取消", null)
+                return
+            }
+        } else {
+            ExportStart.claimFlag(exportCancelled, exportId) ?: run {
+                result.error("EXPORT_BUSY", "这个输出文件正在导出，请稍后重试。", null)
+                return
+            }
+        }
+        val started = try {
+            ExportStart.acquire(
+                { reserved || ExportPathRegistry.reserve(exportId, outputPath) },
+                { ExportPathRegistry.start(exportId, outputPath) },
+                { if (ExportPathRegistry.releaseIdle(exportId)) exportCancelled.remove(exportId, cancelled) },
+            )
+        } catch (error: Exception) { false }
+        if (!started) {
+            if (!reserved) exportCancelled.remove(exportId, cancelled)
+            result.error("EXPORT_BUSY", "这个输出文件正在导出，请稍后重试。", null)
+            return
+        }
+        val worker = Thread {
+            var completion: (() -> Unit)? = null
             var muxer: MediaMuxer? = null
             var muxerStarted = false
+            var transaction: MergeOutputTransaction? = null
             try {
-                File(outputPath).parentFile?.mkdirs()
-                File(outputPath).delete()
+                val destination = File(outputPath).absoluteFile
+                val temporary = MergeOutputFiles.create(destination)
+                val currentTransaction = MergeOutputTransaction(temporary, destination, cancelled) { from, to ->
+                    android.system.Os.rename(from.absolutePath, to.absolutePath)
+                }
+                transaction = currentTransaction
+                mergeTransactions[exportId] = currentTransaction
+                if (cancelled.get()) throw InterruptedException("合并导出已取消")
                 val firstExtractor = MediaExtractor()
-                firstExtractor.setDataSource(inputPath)
-                val currentMuxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+                val currentMuxer = try {
+                    firstExtractor.setDataSource(inputPath)
+                    MediaMuxer(temporary.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+                } catch (error: Exception) {
+                    firstExtractor.release()
+                    throw error
+                }
                 muxer = currentMuxer
                 val selection: ExportTrackSelection
+                val videoTracks: Set<Int>
                 try {
                     selection = addExportableTracks(firstExtractor, currentMuxer)
+                    videoTracks = selection.trackMap.keys.filter { index ->
+                        firstExtractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true
+                    }.toSet()
                     applySourceOrientation(firstExtractor, currentMuxer)
                 } finally {
                     firstExtractor.release()
@@ -778,6 +891,7 @@ class MainActivity : FlutterActivity() {
                 var buffer = ByteBuffer.allocate(16 * 1024 * 1024)
                 val info = android.media.MediaCodec.BufferInfo()
                 var outputBaseUs = 0L
+                var writtenVideoSamples = 0L
                 for ((startMs, endMs) in clips) {
                     if (cancelled.get()) throw InterruptedException("合并导出已取消")
                     val extractor = MediaExtractor()
@@ -787,7 +901,8 @@ class MainActivity : FlutterActivity() {
                         val endUs = endMs * 1000L
                         extractor.seekTo(startMs * 1000L, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                         val clipStartUs = extractor.sampleTime
-                        if (clipStartUs < 0L) continue
+                        MergeMediaFinalizer.requireLocation(clipStartUs)
+                        var intervalVideoSamples = 0L
                         while (true) {
                             if (cancelled.get()) throw InterruptedException("合并导出已取消")
                             val sourceTrack = extractor.sampleTrackIndex
@@ -807,23 +922,37 @@ class MainActivity : FlutterActivity() {
                                     (sampleTime - clipStartUs).coerceAtLeast(0L)
                                 info.flags = extractor.sampleFlags
                                 currentMuxer.writeSampleData(muxTrack, buffer, info)
+                                if (sourceTrack in videoTracks) {
+                                    intervalVideoSamples++
+                                    writtenVideoSamples++
+                                }
                             }
                             extractor.advance()
                         }
+                        MergeMediaFinalizer.requireVideoSamples(intervalVideoSamples)
                         outputBaseUs += (endUs - clipStartUs).coerceAtLeast(1L)
                     } finally {
                         extractor.release()
                     }
                 }
-                currentMuxer.stop()
-                muxerStarted = false
-                mainHandler.post { result.success(exportResult(outputPath, selection)) }
+                MergeMediaFinalizer.finish(
+                    transaction = currentTransaction,
+                    writtenVideoSamples = writtenVideoSamples,
+                    stop = { currentMuxer.stop(); muxerStarted = false },
+                    release = { currentMuxer.release(); muxer = null },
+                    inspect = { file -> AndroidMergeMediaInspector.inspect(file, cancelled) },
+                )
+                AppDiagnostics.event("export.completed")
+                completion = { result.success(exportResult(outputPath, selection) + mapOf("mergedOverlapCount" to plan.mergedOverlapCount, "committed" to true)) }
             } catch (_: InterruptedException) {
-                File(outputPath).delete()
-                mainHandler.post { result.error("EXPORT_CANCELLED", "合并导出已取消", null) }
+                AppDiagnostics.event("export.cancelled")
+                completion = { result.error("EXPORT_CANCELLED", "合并导出已取消", null) }
+            } catch (error: MergeRangeUnavailable) {
+                AppDiagnostics.event("export.failed", error = error)
+                completion = { result.error("EXPORT_RANGE_UNREADABLE", error.message, NativeFailureDetails.from(error)) }
             } catch (error: Exception) {
-                File(outputPath).delete()
-                mainHandler.post { result.error("EXPORT_FAILED", error.message, null) }
+                AppDiagnostics.event("export.failed", error = error)
+                completion = { result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error)) }
             } finally {
                 if (muxerStarted) {
                     try {
@@ -831,10 +960,31 @@ class MainActivity : FlutterActivity() {
                     } catch (_: Exception) {
                     }
                 }
-                muxer?.release()
-                exportCancelled.remove(exportId)
+                try {
+                    muxer?.release()
+                } catch (error: Exception) {
+                    AppDiagnostics.event("export.cleanup.failed", error = error)
+                }
+                try {
+                    transaction?.cleanup()
+                } catch (error: Exception) {
+                    AppDiagnostics.event("export.cleanup.failed", error = error)
+                }
+                transaction?.let { mergeTransactions.remove(exportId, it) }
+                exportCancelled.remove(exportId, cancelled)
+                ExportPathRegistry.finish(exportId)
+                mainHandler.post { completion?.invoke() }
             }
-        }.start()
+        }
+        try {
+            ExportStart.launch({ worker.start() }, {
+                exportCancelled.remove(exportId, cancelled)
+                ExportPathRegistry.finish(exportId)
+            })
+        } catch (error: Throwable) {
+            AppDiagnostics.event("export.failed", error = error)
+            result.error("EXPORT_FAILED", error.message, NativeFailureDetails.from(error))
+        }
     }
 
     private fun outputPathId(call: MethodCall): String =
@@ -842,10 +992,14 @@ class MainActivity : FlutterActivity() {
 
     private fun cancelExport(call: MethodCall, result: MethodChannel.Result) {
         val exportId = call.argument<String>("exportId")
+        fun cancelOne(id: String, flag: AtomicBoolean) {
+            val transaction = mergeTransactions[id]
+            if (transaction != null) transaction.cancel() else flag.set(true)
+        }
         if (exportId != null) {
-            exportCancelled[exportId]?.set(true)
+            exportCancelled[exportId]?.let { cancelOne(exportId, it) }
         } else {
-            exportCancelled.values.forEach { it.set(true) }
+            exportCancelled.forEach { (id, flag) -> cancelOne(id, flag) }
         }
         result.success(null)
     }
@@ -884,7 +1038,8 @@ class MainActivity : FlutterActivity() {
                 }
                 mainHandler.post { result.success(null) }
             } catch (error: Exception) {
-                mainHandler.post { result.error("PHOTO_SAVE_FAILED", error.message, null) }
+                AppDiagnostics.event("export.save.failed", error = error)
+                mainHandler.post { result.error("PHOTO_SAVE_FAILED", error.message, NativeFailureDetails.from(error)) }
             }
         }.start()
     }

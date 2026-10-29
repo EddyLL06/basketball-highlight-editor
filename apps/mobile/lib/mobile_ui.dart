@@ -19,16 +19,35 @@ import 'features/video_source/video_source_failure.dart';
 import 'features/video_source/video_unavailable.dart';
 import 'features/roi_editor/roi_video_preview.dart';
 import 'mobile_app_state.dart';
+import 'features/project_list/project_catalog.dart';
+import 'features/export/export_modes.dart';
+import 'features/diagnostics/mobile_diagnostics.dart';
+import 'features/diagnostics/diagnostic_report.dart';
 import 'mobile_theme.dart';
+import 'features/game_stats/game_stats.dart';
 
 export 'mobile_theme.dart' show BhePalette, bheTheme;
 
 part 'features/video_source/video_source_notice.dart';
+part 'features/diagnostics/diagnostic_sheet.dart';
 part 'features/video_source/review_video_source.dart';
 part 'features/video_source/video_preview.dart';
 part 'features/video_source/review_controls.dart';
 part 'features/export/export_audio_notice.dart';
+part 'features/game_stats/game_stats_section.dart';
+part 'features/export/untagged_reminder.dart';
 part 'features/roi_editor/roi_editor_sheet.dart';
+part 'features/review_undo/review_notice.dart';
+part 'features/player_tags/player_tag_sheet.dart';
+part 'features/project_rename/project_rename_dialog.dart';
+part 'features/player_roster/roster_confirmation.dart';
+part 'features/player_groups/player_groups_sheet.dart';
+part 'features/player_groups/player_group_editor.dart';
+part 'features/operation_status/uncertain_task_notice.dart';
+part 'features/export/export_overlap_notice.dart';
+part 'features/project_list/project_list_page.dart';
+part 'features/export/export_modes_ui.dart';
+part 'features/export_history/export_history_ui.dart';
 
 // (Theme extracted to mobile_theme.dart for maintainability.)
 
@@ -58,6 +77,7 @@ class _BheMobileAppState extends State<BheMobileApp> {
   DateTime? _lastBackPress;
   bool _wasExporting = false;
   bool _starPromptHandled = false;
+  String? _lastHistoryWarning;
 
   @override
   void initState() {
@@ -72,7 +92,7 @@ class _BheMobileAppState extends State<BheMobileApp> {
   Future<void> _autoCheckUpdate() async {
     if (!await updater.autoCheck() || !mounted) return;
     final context = _navigatorKey.currentContext;
-    final version = updater.manifest?.version;
+    final version = updater.targetVersion;
     if (context == null || version == null || !context.mounted) return;
     _messengerKey.currentState?.showSnackBar(
       SnackBar(
@@ -99,6 +119,10 @@ class _BheMobileAppState extends State<BheMobileApp> {
       if (saved != null && mounted) {
         setState(() => _locale = BheLocale.fromName(saved));
       }
+      unawaited(MobileDiagnostics.instance.initialize(
+        version: mobileAppVersion,
+        language: _locale.toLanguageTag(),
+      ));
     } catch (_) {
       // 读取失败时保留系统语言，不影响应用启动。
     }
@@ -107,6 +131,10 @@ class _BheMobileAppState extends State<BheMobileApp> {
   Future<void> _setLocale(Locale locale) async {
     final normalized = BheLocale.fromName(locale.toLanguageTag());
     setState(() => _locale = normalized);
+    unawaited(MobileDiagnostics.instance.initialize(
+      version: mobileAppVersion,
+      language: normalized.toLanguageTag(),
+    ));
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('bhe.locale', normalized.toLanguageTag());
@@ -116,6 +144,23 @@ class _BheMobileAppState extends State<BheMobileApp> {
   }
 
   void _handleStateChange() {
+    final warning = state.exportHistoryWarning;
+    if (warning != _lastHistoryWarning) {
+      _lastHistoryWarning = warning;
+      if (warning != null) {
+        final diagnostic = state.diagnosticError;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || state.exportHistoryWarning != warning) return;
+          final context = _navigatorKey.currentContext;
+          if (context == null || !context.mounted) return;
+          _messengerKey.currentState?.showSnackBar(SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text(context.bheText(warning)),
+            action: SnackBarAction(label: context.bheText('反馈'), onPressed: () => showMobileDiagnostics(context, error: diagnostic)),
+          ));
+        });
+      }
+    }
     final exportCompleted =
         _wasExporting &&
         !state.exporting &&
@@ -156,14 +201,16 @@ class _BheMobileAppState extends State<BheMobileApp> {
   }
 
   Future<void> _showStarPrompt() async {
-    final l10n = Localizations.of<BheLocalizations>(context, BheLocalizations);
+    final dialogRoot = _navigatorKey.currentContext;
+    if (dialogRoot == null || !dialogRoot.mounted) return;
+    final l10n = Localizations.of<BheLocalizations>(dialogRoot, BheLocalizations);
     await showDialog<void>(
-      context: context,
+      context: dialogRoot,
       builder: (dialogContext) => AlertDialog(
         icon: const Icon(LucideIcons.heart, color: BhePalette.orange),
-        title: Text(context.bheText('如果 BHE 对你有帮助')),
+        title: Text(dialogRoot.bheText('如果 BHE 对你有帮助')),
         content: Text(
-          context.bheText(
+          dialogRoot.bheText(
             '如果 BHE 帮你省下了一些剪辑时间，欢迎在 GitHub 点个 Star，也可以分享给球友，让更多人知道这个项目。谢谢支持！',
           ),
         ),
@@ -177,7 +224,7 @@ class _BheMobileAppState extends State<BheMobileApp> {
               Navigator.pop(dialogContext);
               await SharePlus.instance.share(
                 ShareParams(
-                  text: context.bheText('我在用 BHE 整理篮球比赛集锦，推荐你看看：'),
+                  text: dialogRoot.bheText('我在用 BHE 整理篮球比赛集锦，推荐你看看：'),
                   uri: Uri.parse(
                     'https://github.com/fly7632785/basketball-highlight-editor',
                   ),
@@ -215,6 +262,7 @@ class _BheMobileAppState extends State<BheMobileApp> {
   }
 
   void _handleSystemBack(BuildContext context) {
+    if (state.projectTransitioning) return;
     if (state.analysing) return;
     if (section != _WorkspaceSection.project) {
       setState(() => section = _WorkspaceSection.project);
@@ -257,6 +305,27 @@ class _BheMobileAppState extends State<BheMobileApp> {
     theme: bheTheme(Brightness.light),
     darkTheme: bheTheme(Brightness.dark),
     themeMode: dark ? ThemeMode.dark : ThemeMode.light,
+    builder: (context, child) => AnimatedBuilder(
+      animation: state,
+      child: child,
+      builder: (context, child) => Stack(children: [
+        AbsorbPointer(
+          absorbing: state.projectTransitioning,
+          child: Opacity(opacity: state.projectTransitioning ? .55 : 1, child: child),
+        ),
+        if (state.projectTransitioning)
+          Positioned(top: 0, left: 0, right: 0, child: SafeArea(
+            child: Material(
+              key: const ValueKey('project-transition-notice'),
+              color: Theme.of(context).colorScheme.surface,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(context.bheText('正在切换项目，请稍候'), textAlign: TextAlign.center),
+              ),
+            ),
+          )),
+      ]),
+    ),
     home: Builder(
       builder: (context) => PopScope<void>(
         canPop: false,
@@ -272,8 +341,9 @@ class _BheMobileAppState extends State<BheMobileApp> {
             onLocaleChanged: _setLocale,
             section: state.analysing ? _WorkspaceSection.project : section,
             onSectionChanged: (value) => setState(() => section = value),
-            onCreateProject: () =>
-                unawaited(state.createNewProjectAndPickVideo()),
+            onCreateProject: () {
+              unawaited(_createManagedProject(context, state));
+            },
             onCheckUpdate: () =>
                 unawaited(_showUpdateSheet(context, updater, state)),
           ),
@@ -327,7 +397,10 @@ class _AppShell extends StatelessWidget {
           onOpenExport: () => onSectionChanged(_WorkspaceSection.export),
         ),
       ),
-      _WorkspaceSection.export => _ExportView(state: state),
+      _WorkspaceSection.export => _ExportView(
+        state: state,
+        onBackToReview: () => onSectionChanged(_WorkspaceSection.review),
+      ),
     };
     return Scaffold(
       body: SafeArea(
@@ -429,15 +502,22 @@ class _TopBar extends StatelessWidget {
               ),
             ),
           ),
-          if (state.project.video != null)
+          if (state.project.video != null || state.recentProjects.any((p) => p.id == state.project.id))
             Flexible(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: Text(
-                  state.project.name,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: Theme.of(context).textTheme.bodySmall,
+                child: InkWell(
+                  key: const ValueKey('project-name-rename'),
+                  onTap: section == _WorkspaceSection.project ? () => _showProjectRename(context, state) : null,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                    child: Align(alignment: Alignment.centerRight, child: Text(
+                      state.project.name,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    )),
+                  ),
                 ),
               ),
             ),
@@ -478,21 +558,49 @@ class _TopBar extends StatelessWidget {
                 case 'new':
                   onCreateProject();
                   break;
+                case 'projects':
+                  await _showProjectList(context, state);
+                  break;
+                case 'closeProject':
+                  if (_canManageProjects(context, state) && !await state.closeManagedProject() && context.mounted) _projectActionFailed(context, state);
+                  break;
                 case 'import':
-                  await state.importProject();
+                  if (_canManageProjects(context, state)) {
+                    await state.importProject(requireIdle: true);
+                    if (context.mounted && state.projectManagementBlockReason != null) _canManageProjects(context, state);
+                  }
                   break;
                 case 'delete':
-                  await _confirmDelete(context, state);
+                  if (_canManageProjects(context, state)) await _confirmManagedDelete(context, state, state.project);
+                  break;
+                case 'renameProject':
+                  await _showProjectRename(context, state);
+                  break;
+                case 'undo':
+                  await state.undoReview();
                   break;
                 case 'update':
                   onCheckUpdate();
                   break;
+                case 'diagnostics':
+                  await showMobileDiagnostics(
+                    context, error: state.diagnosticError,
+                  );
+                  break;
               }
             },
             itemBuilder: (context) => [
+              if (section == _WorkspaceSection.review) ...[
+                PopupMenuItem(
+                  value: 'undo',
+                  enabled: state.canUndoReview,
+                  child: Text(context.bheText('撤销上一步')),
+                ),
+                const PopupMenuDivider(),
+              ],
               PopupMenuItem(
-                value: 'theme',
-                child: Text(context.bheText(dark ? '切换浅色主题' : '切换深色主题')),
+                value: 'projects',
+                child: Text(context.bheText('项目列表')),
               ),
               PopupMenuItem(
                 value: 'new',
@@ -503,12 +611,34 @@ class _TopBar extends StatelessWidget {
                 child: Text(l10n?.openPackage ?? '打开项目包'),
               ),
               PopupMenuItem(
+                value: 'renameProject',
+                enabled: state.project.video != null || state.recentProjects.any((p) => p.id == state.project.id),
+                child: Text(context.bheText('重命名项目')),
+              ),
+              PopupMenuItem(
+                value: 'closeProject',
+                enabled: state.project.video != null || state.recentProjects.any((p) => p.id == state.project.id),
+                child: Text(context.bheText('关闭项目')),
+              ),
+              PopupMenuItem(
                 value: 'delete',
-                child: Text(l10n?.deleteProject ?? '删除当前项目'),
+                child: Text(
+                  l10n?.deleteProject ?? '删除项目',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'theme',
+                child: Text(context.bheText(dark ? '切换浅色主题' : '切换深色主题')),
               ),
               PopupMenuItem(
                 value: 'update',
                 child: Text(context.bheText('检查更新')),
+              ),
+              PopupMenuItem(
+                value: 'diagnostics',
+                child: Text(context.bheText('反馈与诊断')),
               ),
             ],
           ),
@@ -516,28 +646,6 @@ class _TopBar extends StatelessWidget {
       ),
     );
   }
-}
-
-Future<void> _confirmDelete(BuildContext context, MobileAppState state) async {
-  if (state.project.video == null && state.recentProjects.isEmpty) return;
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(context.bheText('删除当前项目？')),
-      content: Text(context.bheText('“${state.project.name}”及其审核记录会从本机移除。')),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: Text(context.bheText('取消')),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: Text(context.bheText('删除')),
-        ),
-      ],
-    ),
-  );
-  if (confirmed == true) await state.clearProject();
 }
 
 class _ProjectView extends StatelessWidget {
@@ -566,15 +674,18 @@ class _ProjectView extends StatelessWidget {
                   ? (l10n?.startVideoProject ?? '开始一个视频项目')
                   : state.project.name,
               subtitle: state.project.video == null
-                  ? (l10n?.localCompleteDescription ?? '本地完成分析、审核和导出。')
+                  ? context.bheText('新建项目，或从最近项目中打开一个')
                   : (l10n?.configureAnalysisDescription ?? '配置好分析区域后即可开始识别。'),
             ),
             VideoSourceNotice(state: state),
+            if (state.hasUncertainExport) _UncertainExportNotice(state: state),
+            if (state.hasUncertainAnalysis && state.project.video == null)
+              _UncertainAnalysisNotice(state: state),
             if (state.preparingVideo)
               _VideoPreparationCard(message: state.preparingVideoMessage, onCancel: state.cancelVideoPreparation)
             else if (state.project.video == null)
               _EmptyProject(
-                onPick: () => unawaited(state.createNewProjectAndPickVideo()),
+                onPick: () { unawaited(_createManagedProject(context, state)); },
               )
             else
               _ProjectSetup(state: state, onOpenReview: onOpenReview),
@@ -593,7 +704,7 @@ class _ProjectView extends StatelessWidget {
                 _RecentProjectRow(
                   project: project,
                   coverPath: state.coverPaths[project.id],
-                  onTap: () => state.openProject(project.id),
+                  onTap: () { if (_canManageProjects(context, state)) state.openProject(project.id, requireIdle: true); },
                 ),
             ],
           ],
@@ -772,6 +883,10 @@ class _ProjectSetup extends StatelessWidget {
             message: l10n?.analysisInterrupted ?? '上次分析未完成，可以重新开始。',
           ),
         ],
+        if (state.hasUncertainAnalysis) _UncertainAnalysisNotice(state: state),
+        if (!state.hasUncertainAnalysis &&
+            state.analysisStartBlockReason != null)
+          _InlineNotice(message: state.analysisStartBlockReason!),
         const SizedBox(height: 18),
         Row(
           children: [
@@ -821,50 +936,35 @@ Future<void> _confirmAndStartAnalysis(
   BuildContext context,
   MobileAppState state,
 ) async {
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(
-        Localizations.of<BheLocalizations>(
-              context,
-              BheLocalizations,
-            )?.startAnalysisTitle ??
-            '开始分析',
-      ),
-      content: Text(
-        Localizations.of<BheLocalizations>(
-              context,
-              BheLocalizations,
-            )?.foregroundAnalysisWarning ??
-            '分析期间请保持 BHE 在前台并保持屏幕亮起。锁屏或切到后台可能导致分析变慢或暂停。',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: Text(
-            Localizations.of<BheLocalizations>(
-                  context,
-                  BheLocalizations,
-                )?.cancel ??
-                '取消',
-          ),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: Text(
-            Localizations.of<BheLocalizations>(
-                  context,
-                  BheLocalizations,
-                )?.start ??
-                '开始',
-          ),
-        ),
-      ],
-    ),
-  );
-  if (confirmed == true && context.mounted) {
-    await state.startAnalysis();
+  final projectId = state.project.id;
+  final session = state.projectSession;
+  final videoGeneration = state.videoPreparationGeneration;
+  if (!state.groupsLoaded) await state.groupsReady;
+  if (!context.mounted || state.project.id != projectId || state.projectSession != session ||
+      state.videoPreparationGeneration != videoGeneration) {
+    return;
   }
+  final confirmed = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    enableDrag: false,
+    isDismissible: false,
+    builder: (_) => _RosterConfirmation(state: state),
+  );
+  if (confirmed != true || !context.mounted || state.project.id != projectId ||
+      state.projectSession != session || state.videoPreparationGeneration != videoGeneration) {
+    return;
+  }
+  final selection = state.rosterSelection;
+  if (selection.groupChanged) return;
+  await state.startAnalysis(
+    rosterPlayers: selection.orderedPlayers,
+    expectedRosterGroup: selection.groupName,
+    expectedProjectId: projectId,
+    expectedSession: session,
+    expectedVideoGeneration: videoGeneration,
+  );
 }
 
 class _RangeEditorSlider extends StatelessWidget {
@@ -1195,6 +1295,8 @@ class _AnalysisViewState extends State<_AnalysisView> {
                     ],
                   ),
                 ),
+                if (state.exportStartBlockReason case final message?)
+                  _InlineNotice(message: message),
                 VideoSourceNotice(state: state),
               ],
             ),
@@ -1227,6 +1329,7 @@ class _ReviewViewState extends State<_ReviewView> {
   Future<void> _playerQueue = Future<void>.value();
   bool _disposed = false;
   int selectedIndex = 0;
+  String? _selectedId;
   bool annotations = false;
   bool autoReplay = true;
   bool clipOnly = true;
@@ -1234,6 +1337,12 @@ class _ReviewViewState extends State<_ReviewView> {
   bool _stoppingAtCandidateEnd = false;
   bool _seeking = false;
   bool _completionPromptShown = false;
+  Timer? _completionTimer;
+  int _completionGeneration = 0;
+  bool _fullscreen = false;
+  int _undoRevision = 0;
+  int _reviewNoticeRevision = 0;
+  int _playerMutationRevision = 0;
   DateTime _lastVideoPaint = DateTime.fromMillisecondsSinceEpoch(0);
   String statusFilter = 'all';
   String rimFilter = 'all';
@@ -1261,20 +1370,25 @@ class _ReviewViewState extends State<_ReviewView> {
     String? rim,
     String? player,
   }) async {
+    _cancelCompletionPrompt();
     setState(() {
       statusFilter = status ?? statusFilter;
       rimFilter = rim ?? rimFilter;
       playerFilter = player ?? playerFilter;
       selectedIndex = 0;
+      _selectedId = null;
       _completionPromptShown = false;
     });
     final first = selected;
     if (first != null) await _replay(first);
   }
 
-  Candidate? get selected => candidates.isEmpty
-      ? null
-      : candidates[selectedIndex.clamp(0, candidates.length - 1)];
+  Candidate? get selected {
+    final items = candidates;
+    if (items.isEmpty) return null;
+    final index = items.indexWhere((candidate) => candidate.id == _selectedId);
+    return items[index >= 0 ? index : selectedIndex.clamp(0, items.length - 1)];
+  }
 
   @override
   void initState() {
@@ -1285,7 +1399,46 @@ class _ReviewViewState extends State<_ReviewView> {
         DeviceOrientation.portraitDown,
       ]),
     );
+    _undoRevision = state.undoRevision;
+    _reviewNoticeRevision = state.reviewRevision;
+    _playerMutationRevision = state.playerMutationRevision;
+    state.addListener(_onUndo);
     _openVideo();
+  }
+
+  void _onUndo() {
+    if (!mounted) return;
+    if (_reviewNoticeRevision != state.reviewRevision) {
+      _reviewNoticeRevision = state.reviewRevision;
+      if (state.reviewNotice == '保存失败，请重试') {
+        final failure = state.reviewDiagnosticError;
+        final session = state.projectSession;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && state.projectSession == session) {
+            _showReviewSaveFailure(context, failure);
+          }
+        });
+      }
+    }
+    if (_playerMutationRevision != state.playerMutationRevision) {
+      _playerMutationRevision = state.playerMutationRevision;
+      if (playerFilter == 'player:${state.lastPlayerOldName}') {
+        setState(() => playerFilter = state.lastPlayerNewName == null ? 'all' : 'player:${state.lastPlayerNewName}');
+      }
+    }
+    final visibleIndex = candidates.indexWhere((item) => item.id == _selectedId);
+    if (visibleIndex >= 0 && visibleIndex != selectedIndex) {
+      setState(() => selectedIndex = visibleIndex);
+    }
+    if (_undoRevision == state.undoRevision) return;
+    _undoRevision = state.undoRevision;
+    final id = state.undoFocusId;
+    if (!candidates.any((item) => item.id == id)) {
+      setState(() { statusFilter = 'all'; rimFilter = 'all'; playerFilter = 'all'; });
+    }
+    _cancelCompletionPrompt();
+    final index = candidates.indexWhere((item) => item.id == id);
+    if (index >= 0) unawaited(_select(index));
   }
 
   String? _openedVideoPath;
@@ -1302,7 +1455,6 @@ class _ReviewViewState extends State<_ReviewView> {
   Future<void> _openVideo() => _loadReviewVideo(this);
   void _installSourcePlayer(VideoPlayerController? next) => setState(() {
     controller = next;
-    selectedIndex = 0;
   });
 
   void _videoChanged() {
@@ -1341,6 +1493,7 @@ class _ReviewViewState extends State<_ReviewView> {
   @override
   void dispose() {
     _disposed = true;
+    _cancelCompletionPrompt();
     unawaited(
       SystemChrome.setPreferredOrientations(const [
         DeviceOrientation.portraitUp,
@@ -1356,6 +1509,7 @@ class _ReviewViewState extends State<_ReviewView> {
       await queue;
       await player?.dispose();
     }());
+    state.removeListener(_onUndo);
     _railController.dispose();
     super.dispose();
   }
@@ -1363,9 +1517,10 @@ class _ReviewViewState extends State<_ReviewView> {
   Future<void> _select(int index) async {
     if (index < 0 || index >= candidates.length) return;
     _stoppingAtCandidateEnd = false;
-    setState(() => selectedIndex = index);
+    final candidate = candidates[index];
+    setState(() { selectedIndex = index; _selectedId = candidate.id; });
     unawaited(_scrollToSelected());
-    await _replay(candidates[index]);
+    await _replay(candidate);
   }
 
   Future<void> _replay(Candidate candidate) async {
@@ -1441,12 +1596,14 @@ class _ReviewViewState extends State<_ReviewView> {
     ]);
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     if (!mounted) return;
+    setState(() => _fullscreen = true);
     try {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           fullscreenDialog: true,
           builder: (pageContext) => _FullscreenReviewPage(
             controller: player,
+            state: state,
             candidates: candidates,
             index: selectedIndex + 1,
             selectedIndex: selectedIndex,
@@ -1462,7 +1619,7 @@ class _ReviewViewState extends State<_ReviewView> {
             onSeekTo: _seekTo,
             onSeek: _seek,
             onSelect: (index) => _select(index),
-            onReview: (index, selection) => _reviewAt(index, selection),
+            onReview: (id, selection) => _reviewAt(id, selection),
             currentCandidates: () => candidates,
             onExit: () => Navigator.of(pageContext).pop(),
             onToggleAnnotations: () =>
@@ -1476,6 +1633,7 @@ class _ReviewViewState extends State<_ReviewView> {
         ),
       );
     } finally {
+      if (mounted) setState(() => _fullscreen = false);
       await SystemChrome.setPreferredOrientations(const [
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
@@ -1517,7 +1675,19 @@ class _ReviewViewState extends State<_ReviewView> {
       if (_disposed) return;
       final player = controller;
       if (player == null || !player.value.isInitialized) return;
-      await action(player);
+      final projectId = state.project.id;
+      try {
+        await action(player);
+      } catch (error, stack) {
+        final record = MobileDiagnostics.instance.error(
+          error, stack, operation: 'playback',
+        );
+        if (mounted && !_disposed && controller == player && state.project.id == projectId) {
+          state.markVideoFailure(
+            VideoSourceFailure.unplayable, diagnostic: record,
+          );
+        }
+      }
     });
     _playerQueue = task.then<void>((_) {}, onError: (_, _) {});
     return task;
@@ -1609,13 +1779,14 @@ class _ReviewViewState extends State<_ReviewView> {
       ),
     );
     if (result == true && mounted) {
-      final updated = state.applyBatchClipRange(
+      final updated = await state.applyBatchClipRange(
         beforeSeconds: before.round(),
         afterSeconds: after.round(),
         candidateIds: filtering
             ? candidates.map((candidate) => candidate.id)
             : null,
         overwriteManual: overwriteManual,
+        focusId: selected?.id,
       );
       if (updated > 0) setState(() {});
     }
@@ -1623,6 +1794,7 @@ class _ReviewViewState extends State<_ReviewView> {
 
   @override
   Widget build(BuildContext context) {
+    if (_fullscreen) return const SizedBox.shrink();
     final candidate = selected;
     if (candidate == null && allCandidates.isEmpty) {
       return _ReviewEmpty(
@@ -1653,13 +1825,16 @@ class _ReviewViewState extends State<_ReviewView> {
       onAdd: () => _addManualCandidate(context),
       onBatchRange: () => _showBatchRangeSheet(context),
     );
-    if (candidate == null) return rail;
+    if (candidate == null) {
+      return rail;
+    }
     final video = state.project.video!;
     return LayoutBuilder(
       builder: (context, constraints) => Column(
         children: [
           Expanded(
-            child: _ReviewSourceBody(
+            child: Stack(children: [
+              Positioned.fill(child: _ReviewSourceBody(
               rail: rail,
               video: _ReviewVideoStage(
                 controller: controller,
@@ -1678,7 +1853,8 @@ class _ReviewViewState extends State<_ReviewView> {
                   velocity < 0 ? selectedIndex + 1 : selectedIndex - 1,
                 ),
               ),
-            ),
+              )),
+            ]),
           ),
           _ReviewActionBar(
             candidate: candidate,
@@ -1776,6 +1952,11 @@ class _ReviewViewState extends State<_ReviewView> {
     final range = await showClipRangeEditor(
       context,
       videoPath: video.path,
+      onFeedback: (error) {
+        if (context.mounted) {
+          unawaited(showMobileDiagnostics(context, error: error));
+        }
+      },
       aspectRatio: video.width / video.height,
       durationMs: video.durationMs,
       startMs: start.round(),
@@ -1787,7 +1968,7 @@ class _ReviewViewState extends State<_ReviewView> {
     );
     if (range == null) return;
     final id = 'manual_${DateTime.now().microsecondsSinceEpoch}';
-    state.addCandidate(
+    await state.addCandidate(
       Candidate(
         id: id,
         startMs: range.start,
@@ -1812,31 +1993,57 @@ class _ReviewViewState extends State<_ReviewView> {
 
   void _review(CandidateSelection selection) {
     final candidate = selected;
-    if (candidate == null) return;
-    unawaited(_reviewAt(selectedIndex, selection));
+    if (candidate != null) _reviewAt(candidate.id, selection);
   }
 
-  Future<int?> _reviewAt(int index, CandidateSelection selection) async {
-    final items = candidates;
-    if (index < 0 || index >= items.length) return null;
-    final candidate = items[index];
-    state.toggleCandidate(candidate.id, selection);
-    if (selection == CandidateSelection.included ||
-        selection == CandidateSelection.excluded) {
-      // A status filter can hide the candidate just reviewed; the next one
-      // then moves into its place.
-      final remaining = candidates;
-      final shown = remaining.indexWhere((item) => item.id == candidate.id);
-      final next = shown >= 0 ? shown + 1 : index;
-      if (next < remaining.length) {
-        await _select(next);
-        return next;
-      } else if (!_completionPromptShown) {
-        _completionPromptShown = true;
-        unawaited(_showReviewCompletePrompt(context));
-      }
+  void _cancelCompletionPrompt() {
+    _completionGeneration++;
+    _completionTimer?.cancel();
+    _completionTimer = null;
+    _completionPromptShown = false;
+  }
+
+  ({String id, bool last, Future<ReviewActionResult> saved})? _reviewAt(String id, CandidateSelection selection) {
+    if (state.projectTransitioning) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.bheText('正在切换项目，请稍候'))));
+      return null;
     }
-    return index;
+    final items = candidates;
+    final index = items.indexWhere((item) => item.id == id);
+    if (index < 0) return null;
+    _cancelCompletionPrompt();
+    final generation = _completionGeneration;
+    final projectId = state.project.id;
+    // Choose the next stable ID before the queued edit can change visibility.
+    final nextId = index + 1 < items.length ? items[index + 1].id : null;
+    final saved = state.toggleCandidate(id, selection);
+    unawaited(saved.then((result) {
+      if (!mounted || generation != _completionGeneration || projectId != state.project.id) return;
+      if (result == ReviewActionResult.rejected) {
+        final current = selected;
+        if (nextId == null || current?.id == nextId) {
+          final restored = candidates.indexWhere((item) => item.id == id);
+          if (restored >= 0) unawaited(_select(restored));
+        }
+        if (state.reviewNotice != '保存失败，请重试') {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.bheText('本次审核未保存'))));
+        }
+        return;
+      }
+      if (nextId != null) return;
+      final revision = state.reviewRevision;
+      _completionTimer = Timer(const Duration(seconds: 5), () {
+        if (mounted && generation == _completionGeneration && revision == state.reviewRevision && !_completionPromptShown) {
+          _completionPromptShown = true;
+          unawaited(_showReviewCompletePrompt(context));
+        }
+      });
+    }));
+    if (nextId != null) {
+      unawaited(_select(index + 1));
+      return (id: nextId, last: false, saved: saved);
+    }
+    return (id: id, last: true, saved: saved);
   }
 
   Future<void> _showReviewCompletePrompt(BuildContext context) async {
@@ -1873,6 +2080,11 @@ class _ReviewViewState extends State<_ReviewView> {
     final result = await showClipRangeEditor(
       context,
       videoPath: video.path,
+      onFeedback: (error) {
+        if (context.mounted) {
+          unawaited(showMobileDiagnostics(context, error: error));
+        }
+      },
       aspectRatio: video.width / video.height,
       durationMs: video.durationMs,
       startMs: candidate.startMs,
@@ -1884,7 +2096,7 @@ class _ReviewViewState extends State<_ReviewView> {
       confirmLabel: context.bheText('应用'),
     );
     if (result != null) {
-      state.updateCandidate(
+      await state.updateCandidate(
         candidate.copyWith(startMs: result.start, endMs: result.end),
       );
     }
@@ -2185,6 +2397,7 @@ double videoAspectRatio(VideoInfo? video) {
 
 class _FullscreenReviewPage extends StatefulWidget {
   const _FullscreenReviewPage({
+    required this.state,
     required this.controller,
     required this.candidates,
     required this.selectedIndex,
@@ -2209,6 +2422,7 @@ class _FullscreenReviewPage extends StatefulWidget {
     required this.onSpeed,
   });
 
+  final MobileAppState state;
   final VideoPlayerController controller;
   final List<Candidate> candidates;
   final int selectedIndex;
@@ -2225,7 +2439,7 @@ class _FullscreenReviewPage extends StatefulWidget {
   final ValueChanged<int> onSeek;
   final ValueChanged<int> onSeekTo;
   final Future<void> Function(int index) onSelect;
-  final Future<int?> Function(int index, CandidateSelection selection) onReview;
+  final ({String id, bool last, Future<ReviewActionResult> saved})? Function(String id, CandidateSelection selection) onReview;
   final List<Candidate> Function() currentCandidates;
   final VoidCallback onExit;
   final VoidCallback onToggleAnnotations;
@@ -2239,10 +2453,12 @@ class _FullscreenReviewPage extends StatefulWidget {
 class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
   late List<Candidate> _candidates;
   late int _selectedIndex;
+  String? _selectedId;
   late bool _annotations;
   late bool _autoReplay;
   late double _speed;
   bool _railVisible = true;
+  int _undoRevision = 0;
 
   Candidate get _candidate =>
       _candidates[_selectedIndex.clamp(0, math.max(0, _candidates.length - 1))];
@@ -2255,16 +2471,42 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
       0,
       math.max(0, _candidates.length - 1),
     );
+    _selectedId = _candidates.isEmpty ? null : _candidates[_selectedIndex].id;
     _annotations = widget.annotations;
     _autoReplay = widget.autoReplay;
     _speed = widget.speed;
     widget.controller.addListener(_refresh);
+    _undoRevision = widget.state.undoRevision;
+    widget.state.addListener(_onState);
   }
 
   @override
   void dispose() {
+    widget.state.removeListener(_onState);
     widget.controller.removeListener(_refresh);
     super.dispose();
+  }
+
+  void _onState() {
+    if (!mounted) return;
+    final next = widget.currentCandidates();
+    if (next.isEmpty) {
+      setState(() => _selectedId = null);
+      return;
+    }
+    final undoChanged = _undoRevision != widget.state.undoRevision;
+    _undoRevision = widget.state.undoRevision;
+    final focus = undoChanged ? widget.state.undoFocusId : _selectedId;
+    setState(() {
+      _candidates = next;
+      final index = next.indexWhere((item) => item.id == focus);
+      if (index >= 0) {
+        _selectedIndex = index;
+      } else {
+        _selectedIndex = _selectedIndex.clamp(0, next.length - 1);
+      }
+      _selectedId = next[_selectedIndex].id;
+    });
   }
 
   void _refresh() {
@@ -2273,19 +2515,26 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
 
   Future<void> _selectCandidate(int index) async {
     if (index < 0 || index >= _candidates.length) return;
-    setState(() => _selectedIndex = index);
+    setState(() { _selectedIndex = index; _selectedId = _candidates[index].id; });
     await widget.onSelect(index);
   }
 
-  Future<void> _reviewCandidate(CandidateSelection selection) async {
-    final next = await widget.onReview(_selectedIndex, selection);
-    if (!mounted) return;
+  void _reviewCandidate(CandidateSelection selection) {
+    final id = _selectedId;
+    if (id == null) return;
+    final next = widget.onReview(id, selection);
+    if (!mounted || next == null) return;
     setState(() {
       _candidates = widget.currentCandidates();
-      if (next != null) {
-        _selectedIndex = next.clamp(0, math.max(0, _candidates.length - 1));
-      }
+      final index = _candidates.indexWhere((item) => item.id == next.id);
+      if (index >= 0) _selectedIndex = index;
+      _selectedId = next.id;
     });
+    if (next.last) {
+      unawaited(next.saved.then((result) {
+        if (mounted && result != ReviewActionResult.rejected && widget.currentCandidates().isEmpty) widget.onExit();
+      }));
+    }
   }
 
   @override
@@ -2312,13 +2561,15 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Expanded(
-                    child: _buildVideoPanel(
-                      context,
-                      position: position.round(),
-                      lower: lower,
-                      upper: upper,
-                      maxValue: maxValue,
-                    ),
+                    child: Stack(children: [
+                      Positioned.fill(child: _buildVideoPanel(
+                        context,
+                        position: position.round(),
+                        lower: lower,
+                        upper: upper,
+                        maxValue: maxValue,
+                      )),
+                    ]),
                   ),
                   if (_railVisible) ...[
                     const SizedBox(width: 1),
@@ -2420,6 +2671,19 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
                   },
                 ),
                 const SizedBox(width: 6),
+                PopupMenuButton<String>(
+                  key: const ValueKey('review-fullscreen-menu'),
+                  tooltip: context.bheText('更多操作'),
+                  icon: const Icon(LucideIcons.ellipsis, color: Colors.white70, size: 18),
+                  onSelected: (_) => unawaited(widget.state.undoReview()),
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'undo',
+                      enabled: widget.state.canUndoReview,
+                      child: Text(context.bheText('撤销上一步')),
+                    ),
+                  ],
+                ),
                 _LandscapeIconButton(
                   icon: LucideIcons.minimize,
                   tooltip: context.bheText('退出横屏审核'),
@@ -2470,15 +2734,16 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
             child: Row(
               children: [
-                Text(
+                Expanded(child: Text(
                   context.bheText('候选片段'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                   ),
-                ),
-                const Spacer(),
+                )),
                 Text(
                   '$included/${_candidates.length}',
                   style: TextStyle(
@@ -2590,109 +2855,128 @@ class _FullscreenReviewPageState extends State<_FullscreenReviewPage> {
     required int maxValue,
   }) {
     final value = widget.controller.value;
-    return ColoredBox(
-      color: const Color(0xFF111318),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 7, 10, 8),
-        child: Row(
-          children: [
-            _LandscapeIconButton(
-              icon: LucideIcons.rotateCcw,
-              tooltip: context.bheText('重播当前片段'),
-              onPressed: () => widget.onReplay(_candidate),
-            ),
-            _LandscapeIconButton(
-              icon: LucideIcons.chevronLeft,
-              tooltip: '${context.bheText('后退')} 1.5 ${context.bheText('秒')}',
-              onPressed: () => widget.onSeek(-1500),
-            ),
-            _LandscapeIconButton(
-              icon: value.isPlaying ? LucideIcons.pause : LucideIcons.play,
-              tooltip: context.bheText(value.isPlaying ? '暂停' : '播放'),
-              selected: value.isPlaying,
-              onPressed: widget.onToggle,
-            ),
-            _LandscapeIconButton(
-              icon: LucideIcons.chevronRight,
-              tooltip: '${context.bheText('前进')} 1.5 ${context.bheText('秒')}',
-              onPressed: () => widget.onSeek(1500),
-            ),
-            const SizedBox(width: 6),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 700;
+        final controls = <Widget>[
+          _LandscapeIconButton(
+            icon: LucideIcons.rotateCcw,
+            tooltip: context.bheText('重播当前片段'),
+            onPressed: () => widget.onReplay(_candidate),
+          ),
+          _LandscapeIconButton(
+            icon: LucideIcons.chevronLeft,
+            tooltip: '${context.bheText('后退')} 1.5 ${context.bheText('秒')}',
+            onPressed: () => widget.onSeek(-1500),
+          ),
+          _LandscapeIconButton(
+            icon: value.isPlaying ? LucideIcons.pause : LucideIcons.play,
+            tooltip: context.bheText(value.isPlaying ? '暂停' : '播放'),
+            selected: value.isPlaying,
+            onPressed: widget.onToggle,
+          ),
+          _LandscapeIconButton(
+            icon: LucideIcons.chevronRight,
+            tooltip: '${context.bheText('前进')} 1.5 ${context.bheText('秒')}',
+            onPressed: () => widget.onSeek(1500),
+          ),
+          const SizedBox(width: 6),
+          if (!compact)
             Text(
               _formatMs(position),
               style: const TextStyle(color: Colors.white70, fontSize: 11),
             ),
-            Expanded(
-              child: Slider(
-                min: lower.toDouble(),
-                max: maxValue.toDouble(),
-                value: position
-                    .clamp(lower.toDouble(), maxValue.toDouble())
-                    .toDouble(),
-                onChanged: (next) => widget.onSeekTo(next.round()),
-              ),
+          Expanded(
+            child: Slider(
+              min: lower.toDouble(),
+              max: maxValue.toDouble(),
+              value: position
+                  .clamp(lower.toDouble(), maxValue.toDouble())
+                  .toDouble(),
+              onChanged: (next) => widget.onSeekTo(next.round()),
             ),
+          ),
+          if (!compact)
             Text(
               _formatMs(upper - lower),
               style: const TextStyle(color: Colors.white54, fontSize: 11),
             ),
-            const SizedBox(width: 5),
-            _LandscapeIconButton(
-              icon: _autoReplay ? LucideIcons.repeat1 : LucideIcons.repeat,
-              tooltip: context.bheText(_autoReplay ? '关闭循环播放' : '开启循环播放'),
-              selected: _autoReplay,
-              onPressed: () {
-                setState(() => _autoReplay = !_autoReplay);
-                widget.onToggleAutoReplay();
-              },
-            ),
-            PopupMenuButton<double>(
-              tooltip: context.bheText('播放速度'),
-              initialValue: _speed,
-              onSelected: (value) {
-                setState(() => _speed = value);
-                widget.onSpeed(value);
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: .75, child: Text('0.75×')),
-                PopupMenuItem(value: 1, child: Text('1.0×')),
-                PopupMenuItem(value: 1.25, child: Text('1.25×')),
-                PopupMenuItem(value: 1.5, child: Text('1.5×')),
-                PopupMenuItem(value: 2, child: Text('2.0×')),
-              ],
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(
-                  '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 1 : 2)}×',
-                  style: const TextStyle(color: Colors.white70, fontSize: 11),
-                ),
+          const SizedBox(width: 5),
+          _LandscapeIconButton(
+            icon: _autoReplay ? LucideIcons.repeat1 : LucideIcons.repeat,
+            tooltip: context.bheText(_autoReplay ? '关闭循环播放' : '开启循环播放'),
+            selected: _autoReplay,
+            onPressed: () {
+              setState(() => _autoReplay = !_autoReplay);
+              widget.onToggleAutoReplay();
+            },
+          ),
+          PopupMenuButton<double>(
+            tooltip: context.bheText('播放速度'),
+            initialValue: _speed,
+            onSelected: (value) {
+              setState(() => _speed = value);
+              widget.onSpeed(value);
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: .75, child: Text('0.75×')),
+              PopupMenuItem(value: 1, child: Text('1.0×')),
+              PopupMenuItem(value: 1.25, child: Text('1.25×')),
+              PopupMenuItem(value: 1.5, child: Text('1.5×')),
+              PopupMenuItem(value: 2, child: Text('2.0×')),
+            ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                '${_speed.toStringAsFixed(_speed == _speed.roundToDouble() ? 1 : 2)}×',
+                style: const TextStyle(color: Colors.white70, fontSize: 11),
               ),
             ),
-            const SizedBox(width: 7),
-            OutlinedButton.icon(
-              onPressed: () => _reviewCandidate(CandidateSelection.excluded),
-              icon: const Icon(LucideIcons.x, size: 17),
-              label: Text(context.bheText('不选')),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                minimumSize: const Size(78, 38),
-                side: BorderSide(color: Colors.white.withValues(alpha: .28)),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-              ),
+          ),
+        ];
+        final decisions = <Widget>[
+          const SizedBox(width: 7),
+          OutlinedButton.icon(
+            onPressed: () => _reviewCandidate(CandidateSelection.excluded),
+            icon: const Icon(LucideIcons.x, size: 17),
+            label: Text(context.bheText('不选')),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              minimumSize: const Size(78, 38),
+              side: BorderSide(color: Colors.white.withValues(alpha: .28)),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
             ),
-            const SizedBox(width: 6),
-            FilledButton.icon(
-              onPressed: () => _reviewCandidate(CandidateSelection.included),
-              icon: const Icon(LucideIcons.check, size: 17),
-              label: Text(context.bheText('选中')),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(82, 38),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-              ),
+          ),
+          const SizedBox(width: 6),
+          FilledButton.icon(
+            onPressed: () => _reviewCandidate(CandidateSelection.included),
+            icon: const Icon(LucideIcons.check, size: 17),
+            label: Text(context.bheText('选中')),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(82, 38),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
             ),
-          ],
-        ),
-      ),
+          ),
+        ];
+        return ColoredBox(
+          color: const Color(0xFF111318),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 7, 10, 8),
+            child: compact
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(children: controls),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: decisions,
+                      ),
+                    ],
+                  )
+                : Row(children: [...controls, ...decisions]),
+          ),
+        );
+      },
     );
   }
 }
@@ -3013,7 +3297,8 @@ class _CandidateRail extends StatelessWidget {
       child: Column(
         children: [
           _ReviewProgressHeader(candidates: candidates, total: total, reviewed: reviewed,
-            filtering: filtering, onBatchRange: onBatchRange, onAdd: onAdd),
+            filtering: filtering, onBatchRange: onBatchRange, onAdd: onAdd,
+            onClearFilters: () => onFiltersChanged(status: 'all', rim: 'all', player: 'all')),
           _ReviewFilterBar(
             candidates: allCandidates,
             players: players,
@@ -3207,7 +3492,7 @@ class _ReviewFilterBar extends StatelessWidget {
           const {'made', 'unsure', 'rejected'}.contains(item.rimCheckStatus),
     );
     final hasPlayers =
-        players.isNotEmpty || candidates.any((item) => item.player != null);
+        playerFilter != 'all' || players.isNotEmpty || candidates.any((item) => item.player != null);
     final playerLabel = switch (playerFilter) {
       'all' => context.bheText('球员'),
       'tagged' => context.bheText('已标注'),
@@ -3624,7 +3909,7 @@ class _EvidenceSheet extends StatelessWidget {
       builder: (_) => _NoteSheet(initialNote: candidate.note),
     );
     if (value != null && context.mounted) {
-      state.updateCandidateNote(candidate.id, value);
+      await state.updateCandidateNote(candidate.id, value);
     }
   }
 
@@ -3716,29 +4001,50 @@ Color _playerTagColor(String player) {
   return colors[(player.hashCode & 0x7fffffff) % colors.length];
 }
 
+class _ScopeChoiceChip extends StatelessWidget {
+  const _ScopeChoiceChip({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onSelected,
+  });
+  final String label;
+  final int count;
+  final bool selected;
+  final ValueChanged<bool>? onSelected;
+
+  @override
+  Widget build(BuildContext context) => FilterChip(
+    label: Text('$label  $count'),
+    selected: selected,
+    onSelected: onSelected,
+    showCheckmark: false,
+    selectedColor: BhePalette.orange.withValues(alpha: .28),
+    side: BorderSide(
+      color: selected ? BhePalette.orange : BhePalette.borderStrong,
+    ),
+  );
+}
+
 class _PlayerChoiceChip extends StatelessWidget {
   const _PlayerChoiceChip({
     required this.player,
+    required this.count,
     required this.selected,
     required this.onSelected,
-    this.onDeleted,
   });
   final String player;
+  final int count;
   final bool selected;
   final ValueChanged<bool> onSelected;
-  final VoidCallback? onDeleted;
 
   @override
   Widget build(BuildContext context) {
     final color = _playerTagColor(player);
     return InputChip(
-      label: Text(player),
+      label: Text('$player  $count'),
       selected: selected,
       onSelected: onSelected,
-      onDeleted: onDeleted,
-      deleteIcon: onDeleted == null
-          ? null
-          : const Icon(LucideIcons.x, size: 15),
       side: BorderSide(color: color.withValues(alpha: .65)),
       backgroundColor: color.withValues(alpha: .10),
       selectedColor: color.withValues(alpha: .28),
@@ -3776,289 +4082,28 @@ Future<void> _showPlayerPicker(
   MobileAppState state,
   Candidate candidate,
 ) async {
+  final session = state.projectSession;
   final value = await showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
+    enableDrag: false,
     builder: (_) => _PlayerTagSheet(
       state: state,
       players: state.project.players,
       initialPlayer: candidate.player,
-      onRemovePlayer: state.removePlayer,
     ),
   );
-  if (value == null || !context.mounted) return;
+  if (value == null || !context.mounted || session != state.projectSession) return;
   final normalized = value.trim();
   if (normalized.isEmpty) {
-    state.setCandidatePlayer(candidate.id, null);
+    await state.setCandidatePlayer(candidate.id, null);
   } else {
-    state.addPlayer(normalized);
-    state.setCandidatePlayer(candidate.id, normalized);
+    if (!await state.addPlayer(normalized) || session != state.projectSession) return;
+    await state.setCandidatePlayer(candidate.id, normalized);
   }
 }
 
-class _PlayerTagSheet extends StatefulWidget {
-  const _PlayerTagSheet({
-    required this.state,
-    required this.players,
-    required this.onRemovePlayer,
-    this.initialPlayer,
-  });
-  final MobileAppState state;
-  final List<String> players;
-  final String? initialPlayer;
-  final ValueChanged<String> onRemovePlayer;
-
-  @override
-  State<_PlayerTagSheet> createState() => _PlayerTagSheetState();
-}
-
-class _PlayerTagSheetState extends State<_PlayerTagSheet> {
-  late final TextEditingController _input;
-  late List<String> _players;
-  String? _selected;
-  bool _creating = false;
-  bool _managing = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _selected = widget.initialPlayer;
-    _players = [...widget.players];
-    _input = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _input.dispose();
-    super.dispose();
-  }
-
-  void _close(String value) {
-    if (mounted) Navigator.of(context).pop(value);
-  }
-
-  void _removePlayer(String player) {
-    setState(() {
-      _players = _players.where((item) => item != player).toList();
-      if (_selected == player) _selected = null;
-    });
-    widget.onRemovePlayer(player);
-  }
-
-  Future<void> _openGroups() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => _PlayerGroupsSheet(state: widget.state),
-    );
-    if (mounted) setState(() => _players = [...widget.state.project.players]);
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedPadding(
-    duration: const Duration(milliseconds: 180),
-    curve: Curves.easeOut,
-    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-    child: _SheetFrame(
-      title: context.bheText('球员标签'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_players.isEmpty)
-            Text(
-              context.bheText('还没有球员标签。'),
-              style: Theme.of(context).textTheme.bodySmall,
-            )
-          else ...[
-            Row(
-              children: [
-                Text(
-                  context.bheText('选择球员'),
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: () => setState(() => _managing = !_managing),
-                  icon: Icon(
-                    _managing ? LucideIcons.check : LucideIcons.settings2,
-                    size: 15,
-                  ),
-                  label: Text(context.bheText(_managing ? '完成管理' : '管理')),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final player in _players)
-                  _PlayerChoiceChip(
-                    player: player,
-                    selected: _selected == player,
-                    onDeleted: _managing ? () => _removePlayer(player) : null,
-                    onSelected: (value) {
-                      if (!mounted) return;
-                      setState(() {
-                        _selected = value ? player : null;
-                        _input.clear();
-                      });
-                    },
-                  ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 14),
-          if (_creating)
-            TextField(
-              controller: _input,
-              autofocus: true,
-              textInputAction: TextInputAction.done,
-              decoration: InputDecoration(
-                labelText: context.bheText('新建球员标签'),
-                hintText: context.bheText('例如 #10 Kobe'),
-                prefixIcon: Icon(LucideIcons.tag, size: 18),
-              ),
-              onChanged: (value) {
-                final next = value.trim().isEmpty ? null : value.trim();
-                if (_selected != next) setState(() => _selected = next);
-              },
-              onSubmitted: (value) => _close(value.trim()),
-            )
-          else
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => setState(() => _creating = true),
-                    icon: const Icon(LucideIcons.plus, size: 17),
-                    label: Text(context.bheText('新建球员标签')),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                OutlinedButton.icon(
-                  onPressed: _openGroups,
-                  icon: const Icon(LucideIcons.users, size: 17),
-                  label: Text(context.bheText('球员分组')),
-                ),
-              ],
-            ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _close(''),
-                  child: Text(context.bheText('清除标签')),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton(
-                  onPressed: () => _close(_selected ?? _input.text.trim()),
-                  child: Text(context.bheText('应用标签')),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-class _PlayerGroupsSheet extends StatelessWidget {
-  const _PlayerGroupsSheet({required this.state});
-  final MobileAppState state;
-
-  Future<void> _saveCurrent(BuildContext context) async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(context.bheText('存为分组')),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: InputDecoration(
-            hintText: context.bheText('例如：周六球队'),
-          ),
-          onSubmitted: (value) => Navigator.pop(dialogContext, value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text(context.bheText('取消')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, controller.text),
-            child: Text(context.bheText('保存')),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (name == null || name.trim().isEmpty) return;
-    await state.savePlayerGroup(name.trim());
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: state,
-    builder: (context, _) => _SheetFrame(
-      title: context.bheText('球员分组'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (state.playerGroups.isEmpty)
-            Text(
-              context.bheText('还没有分组。把当前项目的球员存为分组后，其他项目可以一键导入。'),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          for (final group in state.playerGroups)
-            ListTile(
-              key: ValueKey('player-group-${group.name}'),
-              contentPadding: EdgeInsets.zero,
-              title: Text(group.name),
-              subtitle: Text(
-                group.players.join('、'),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextButton(
-                    onPressed: () {
-                      state.importPlayers(group.players);
-                      Navigator.pop(context);
-                    },
-                    child: Text(context.bheText('导入')),
-                  ),
-                  IconButton(
-                    tooltip: '${context.bheText('删除')}${group.name}',
-                    onPressed: () =>
-                        unawaited(state.deletePlayerGroup(group.name)),
-                    icon: const Icon(LucideIcons.trash2, size: 17),
-                  ),
-                ],
-              ),
-            ),
-          const SizedBox(height: 14),
-          OutlinedButton.icon(
-            onPressed: state.project.players.isEmpty
-                ? null
-                : () => _saveCurrent(context),
-            icon: const Icon(LucideIcons.save, size: 17),
-            label: Text(context.bheText('把当前球员存为分组')),
-          ),
-        ],
-      ),
-    ),
-  );
-}
 
 String _verdictLabel(String value) => switch (value) {
   'made' => '疑似进球',
@@ -4117,17 +4162,45 @@ class _LegendDot extends StatelessWidget {
 }
 
 class _ExportView extends StatefulWidget {
-  const _ExportView({required this.state});
+  const _ExportView({required this.state, required this.onBackToReview});
   final MobileAppState state;
+  final VoidCallback onBackToReview;
 
   @override
   State<_ExportView> createState() => _ExportViewState();
 }
 
 class _ExportViewState extends State<_ExportView> {
-  String? selectedPlayer;
+  ExportScope scope = ExportScope.all;
+  MobileOutputMode outputMode = MobileOutputMode.clips;
 
   MobileAppState get state => widget.state;
+
+  bool _reminding = false;
+
+  Future<void> _startExport(BuildContext context) async {
+    if (_reminding) return;
+    final untagged = _untaggedReminderCount(state, scope, outputMode);
+    if (untagged > 0) {
+      _reminding = true;
+      final choice = await _showUntaggedReminder(context, untagged);
+      _reminding = false;
+      if (!mounted) return;
+      if (choice == _UntaggedChoice.backToReview) {
+        widget.onBackToReview();
+        return;
+      }
+      if (choice != _UntaggedChoice.exportAnyway) return;
+    }
+    switch (outputMode) {
+      case MobileOutputMode.clips:
+        unawaited(state.exportClipsInScope(scope));
+      case MobileOutputMode.merged:
+        unawaited(state.mergeClipsInScope(scope));
+      case MobileOutputMode.labels:
+        unawaited(state.exportByLabels(scope: scope));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4139,6 +4212,29 @@ class _ExportViewState extends State<_ExportView> {
       0,
       (sum, item) => sum + item.duration.inMilliseconds,
     );
+    final labelCounts = <String, int>{
+      for (final player in state.project.players) player: 0,
+    };
+    var untaggedCount = 0;
+    for (final candidate in included) {
+      final name = candidate.player;
+      if (name == null || name.trim().isEmpty) {
+        untaggedCount++;
+      } else {
+        labelCounts[name] = (labelCounts[name] ?? 0) + 1;
+      }
+    }
+    if (labelCounts.isEmpty) untaggedCount = 0;
+    // 切换项目或标签被改名/删除后，丢掉已不存在的选择。
+    if (scope.active &&
+        (scope.players.any((name) => !labelCounts.containsKey(name)) ||
+            (scope.includeUntagged && untaggedCount == 0))) {
+      scope = ExportScope.only(
+        scope.players.where(labelCounts.containsKey).toSet(),
+        includeUntagged: scope.includeUntagged && untaggedCount > 0,
+      ).normalized;
+    }
+    final blocked = state.exportStartBlockReason != null;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 700),
@@ -4151,6 +4247,14 @@ class _ExportViewState extends State<_ExportView> {
               subtitle:
                   l10n?.exportPageSubtitle ?? '按审核结果导出保留片段，可分别导出或合并为一条视频。',
             ),
+            if (state.hasUncertainExport) _UncertainExportNotice(state: state),
+            if (state.hasUncertainAnalysis) ...[
+              _UncertainAnalysisNotice(state: state),
+              const _InlineNotice(message: '上次分析尚未确认停止，暂时不能导出。'),
+            ],
+            if (!state.hasUncertainExport && !state.hasUncertainAnalysis &&
+                state.exportStartBlockReason != null)
+              _InlineNotice(message: state.exportStartBlockReason!),
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -4176,96 +4280,65 @@ class _ExportViewState extends State<_ExportView> {
               ),
             ),
             const SizedBox(height: 14),
-            if (state.project.players.isNotEmpty) ...[
+            _GameStatsSection(state: state),
+            if (labelCounts.isNotEmpty) ...[
               _SectionHeader(
-                title: l10n?.playerExport ?? '按球员导出',
-                action: l10n?.optional ?? '可选',
+                title: l10n?.exportScope ?? '导出范围',
+                action: context.bheText('可多选'),
               ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  for (final player in state.project.players)
+                  _ScopeChoiceChip(
+                    label: context.bheText('全部球员'),
+                    count: included.length,
+                    selected: !scope.active,
+                    onSelected: blocked
+                        ? null
+                        : (_) => setState(() => scope = ExportScope.all),
+                  ),
+                  for (final entry in labelCounts.entries)
                     _PlayerChoiceChip(
-                      player: player,
-                      selected: selectedPlayer == player,
-                      onSelected: state.exporting
+                      player: entry.key,
+                      count: entry.value,
+                      selected: scope.active && scope.players.contains(entry.key),
+                      onSelected: blocked
                           ? (_) {}
-                          : (selected) => setState(
-                              () => selectedPlayer = selected ? player : null,
-                            ),
+                          : (on) => setState(() {
+                              final players = {...scope.players};
+                              on ? players.add(entry.key) : players.remove(entry.key);
+                              scope = ExportScope.only(
+                                players,
+                                includeUntagged: scope.active && scope.includeUntagged,
+                              ).normalized;
+                            }),
+                    ),
+                  if (untaggedCount > 0)
+                    _ScopeChoiceChip(
+                      label: context.bheText('未标记'),
+                      count: untaggedCount,
+                      selected: scope.active && scope.includeUntagged,
+                      onSelected: blocked
+                          ? null
+                          : (on) => setState(() {
+                              scope = ExportScope.only(
+                                scope.active ? {...scope.players} : <String>{},
+                                includeUntagged: on,
+                              ).normalized;
+                            }),
                     ),
                 ],
               ),
-              if (selectedPlayer != null) ...[
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: state.exporting
-                        ? null
-                        : () => unawaited(
-                            state.exportClipsForPlayer(selectedPlayer),
-                          ),
-                    icon: Icon(
-                      LucideIcons.download,
-                      size: 18,
-                      color: Colors.white,
-                    ),
-                    label: Text(context.bheText('导出 $selectedPlayer 的片段')),
-                  ),
-                ),
-              ],
               const SizedBox(height: 16),
             ],
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      l10n?.outputMode ?? '输出方式',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      l10n?.mobileExportDescription ?? '当前移动端使用原视频分别导出，保留原始音频。',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: state.exporting
-                            ? null
-                            : () => unawaited(state.exportClips()),
-                        icon: const Icon(LucideIcons.files, size: 18),
-                        label: Text(l10n?.exportAllSeparately ?? '分别导出全部'),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: state.exporting
-                            ? null
-                            : () => unawaited(
-                                state.mergeClipsForPlayer(selectedPlayer),
-                              ),
-                        icon: const Icon(LucideIcons.merge, size: 18),
-                        label: Text(
-                          selectedPlayer == null
-                              ? (l10n?.mergeAllIncluded ?? '合并导出全部保留片段')
-                              : (l10n?.mergePlayerClips(selectedPlayer!) ??
-                                    '合并导出 $selectedPlayer 的片段'),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            _ExportModeSelector(
+              state: state,
+              mode: outputMode,
+              scope: scope,
+              onChanged: (mode) => setState(() => outputMode = mode),
+              onStart: () => unawaited(_startExport(context)),
             ),
             if (state.exporting) ...[
               const SizedBox(height: 12),
@@ -4312,25 +4385,32 @@ class _ExportViewState extends State<_ExportView> {
                             '已导出 ${state.exportedPaths.length} 个片段',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
+                      if (state.exportBatchTotal > 0) ...[
+                        const SizedBox(height: 8),
+                        Text(context.bheText(state.exportBatchFiles.length < state.exportBatchTotal ? '部分完成' : '全部完成')),
+                        Text(context.bheText('已完成 ${state.exportBatchFiles.length}/${state.exportBatchTotal} 个标签')),
+                        for (final item in state.exportBatchFiles)
+                          _LabelExportResultRow(state: state, item: item),
+                      ] else ...[
+                        for (final path in state.exportedPaths)
+                          _LabelExportResultRow(state: state, item: LabelExportFile(File(path).uri.pathSegments.last, path)),
+                      ],
                       const SizedBox(height: 12),
-                      Row(
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
                         children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () =>
-                                  unawaited(state.shareExportedFiles()),
-                              icon: const Icon(LucideIcons.share2, size: 17),
-                              label: Text(context.bheText('分享')),
-                            ),
+                          OutlinedButton.icon(
+                            onPressed: () => unawaited(state.shareExportedFiles()),
+                            icon: const Icon(LucideIcons.share2, size: 17),
+                            label: Text(context.bheText(state.exportedPaths.length > 1 ? '分享全部' : '分享')),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: () =>
-                                  unawaited(state.saveExportedFiles()),
-                              icon: const Icon(LucideIcons.save, size: 17),
-                              label: Text(context.bheText('保存到相册')),
-                            ),
+                          FilledButton.icon(
+                            onPressed: state.exportStartBlockReason == null
+                                ? () => unawaited(state.saveExportedFiles())
+                                : null,
+                            icon: const Icon(LucideIcons.save, size: 17),
+                            label: Text(context.bheText(state.exportedPaths.length > 1 ? '保存全部到相册' : '保存到相册')),
                           ),
                         ],
                       ),
@@ -4339,7 +4419,9 @@ class _ExportViewState extends State<_ExportView> {
                 ),
               ),
             ],
+            _ExportOverlapNotice(state: state),
             _ExportAudioNotice(state: state),
+            _ExportHistorySection(key: ValueKey('history-${state.project.id}'), state: state),
             VideoSourceNotice(state: state),
           ],
         ),
@@ -4365,14 +4447,23 @@ class _Metric extends StatelessWidget {
 }
 
 class _SheetFrame extends StatelessWidget {
-  const _SheetFrame({required this.title, required this.child});
+  const _SheetFrame({
+    required this.title,
+    required this.child,
+    this.padding = const EdgeInsets.fromLTRB(20, 10, 20, 20),
+    this.titleStyle,
+    this.canClose = true,
+  });
   final String title;
   final Widget child;
+  final EdgeInsets padding;
+  final TextStyle? titleStyle;
+  final bool canClose;
 
   @override
   Widget build(BuildContext context) => SafeArea(
     child: Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+      padding: padding,
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -4393,11 +4484,11 @@ class _SheetFrame extends StatelessWidget {
                 Expanded(
                   child: Text(
                     title,
-                    style: Theme.of(context).textTheme.titleLarge,
+                    style: titleStyle ?? Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
                 IconButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: canClose ? () => Navigator.pop(context) : null,
                   tooltip: context.bheText('返回上一步'),
                   icon: const Icon(LucideIcons.x, size: 19),
                 ),
@@ -4440,7 +4531,7 @@ Future<void> _showQualitySheet(
     ),
   );
   if (value != null) {
-    state.updateSettings(current.copyWith(mode: value, sampleFps: 10));
+    state.updateSettings(current.copyWith(mode: value, sampleFps: 10), fields: {'mode', 'sampleFps'});
   }
 }
 
@@ -4520,7 +4611,7 @@ Future<void> _showClipSheet(BuildContext context, MobileAppState state) async {
     ),
   );
   if (value != null) {
-    state.updateSettings(current.copyWith(clip: value));
+    state.updateSettings(current.copyWith(clip: value), fields: {'clip'});
   }
 }
 
@@ -4622,6 +4713,7 @@ Future<void> _showRangeSheet(BuildContext context, MobileAppState state) async {
   if (value != null) {
     state.updateSettings(
       current.copyWith(startMs: value.start, endMs: value.end),
+      fields: {'startMs', 'endMs'},
     );
   }
 }
@@ -4729,7 +4821,7 @@ class _UpdateSheet extends StatelessWidget {
     if (hasUpdate) {
       children.addAll([
         Text(
-          context.bheText('新版本 v${manifest.version}'),
+          context.bheText('新版本 v${updater.targetVersion}'),
           style: theme.textTheme.titleMedium,
         ),
         const SizedBox(height: 2),
@@ -4738,7 +4830,7 @@ class _UpdateSheet extends StatelessWidget {
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 12),
-        for (final line in manifest
+        for (final line in updater
             .notesFor(english: english)
             .split(RegExp('[；;]'))
             .map((line) => line.trim())
@@ -4815,6 +4907,13 @@ class _UpdateSheet extends StatelessWidget {
       }
     }
 
+    if (status == UpdateStatus.failed) {
+      children.add(TextButton(
+        onPressed: () => showMobileDiagnostics(context, error: updater.diagnosticError),
+        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+        child: Text(context.bheText('反馈')),
+      ));
+    }
     return _SheetFrame(
       title: context.bheText('检查更新'),
       child: Column(

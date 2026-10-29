@@ -112,4 +112,83 @@ void main() {
       }
     },
   );
+
+  test(
+    'analysis clearing waits for review commit and clears its history',
+    () async {
+      final fixture = MobileVideoFixture();
+      final engine = RecordingAnalysis();
+      await fixture.init(engine: engine);
+      try {
+        final source = await fixture.file('original.mp4', 'original');
+        fixture.state.project = fixture.project(source.path);
+        final entered = Completer<void>(), release = Completer<void>();
+        var first = true;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              const MethodChannel('plugins.flutter.io/path_provider'),
+              (_) async {
+                if (first) {
+                  first = false;
+                  entered.complete();
+                  await release.future;
+                }
+                return fixture.root.path;
+              },
+            );
+        final review = fixture.state.updateCandidateNote('goal', 'in flight');
+        await entered.future;
+        final analysis = fixture.state.startAnalysis();
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(fixture.state.project.candidates.single.id, 'goal');
+        release.complete();
+        expect(await review, isTrue);
+        await analysis;
+        expect(engine.calls, 1);
+        expect(fixture.state.project.candidates.single.id, 'new');
+        expect(fixture.state.canUndoReview, isFalse);
+        expect(fixture.state.reviewNotice, isNull);
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
+
+  test(
+    'failed analysis clear preserves reviewed candidates and history',
+    () async {
+      final fixture = MobileVideoFixture();
+      final engine = RecordingAnalysis();
+      await fixture.init(engine: engine);
+      try {
+        final source = await fixture.file('original.mp4', 'original');
+        fixture.state.project = fixture.project(source.path);
+        expect(
+          await fixture.state.updateCandidateNote('goal', 'keep me'),
+          isTrue,
+        );
+        final notice = fixture.state.reviewNotice;
+        var first = true;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              const MethodChannel('plugins.flutter.io/path_provider'),
+              (_) async {
+                if (first) {
+                  first = false;
+                  throw PlatformException(code: 'analysis_save_failed');
+                }
+                return fixture.root.path;
+              },
+            );
+        await fixture.state.startAnalysis();
+        expect(engine.calls, 0);
+        expect(fixture.state.project.candidates.single.note, 'keep me');
+        expect(fixture.state.canUndoReview, isTrue);
+        expect(fixture.state.reviewNotice, notice);
+        expect(fixture.state.diagnosticError, isNotNull);
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
 }

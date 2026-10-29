@@ -77,7 +77,11 @@ void main() {
                 );
                 expect(
                   tester.getBottomLeft(notice).dy -
-                      tester.getBottomLeft(button).dy,
+                      tester
+                          .getBottomLeft(
+                            find.byKey(const ValueKey('video-feedback')),
+                          )
+                          .dy,
                   closeTo(4, .1),
                 );
                 expect(

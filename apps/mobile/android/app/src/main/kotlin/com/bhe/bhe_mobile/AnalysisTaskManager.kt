@@ -1,5 +1,6 @@
 package com.bhe.bhe_mobile
 
+import com.bhe.bhe_mobile.diagnostics.AppDiagnostics
 import android.content.Context
 import android.content.Intent
 import android.media.MediaMetadataRetriever
@@ -61,7 +62,7 @@ object AnalysisTaskManager {
     }
 
     @Synchronized
-    fun isRunning(): Boolean = thread?.isAlive == true || state.optString("status") == "running"
+    fun isRunning(): Boolean = AnalysisWorkerLiveness.isRunning(thread, state.optString("status"))
 
     @Synchronized
     fun hasWorkerThread(): Boolean = thread?.isAlive == true
@@ -93,6 +94,7 @@ object AnalysisTaskManager {
     fun prepare(serviceContext: Context, requestJson: String, methodResult: MethodResult? = null) {
         if (isRunning()) return
         context = serviceContext.applicationContext
+        AppDiagnostics.event("analysis.start")
         pendingResult = methodResult
         cancelRequested = AtomicBoolean(false)
         state = JSONObject()
@@ -155,6 +157,7 @@ object AnalysisTaskManager {
                 // The NPU passed the startup check but failed later. Forget
                 // that choice and redo the whole analysis on the CPU so all
                 // candidates come from one provider.
+                AppDiagnostics.event("analysis.provider.fallback", mapOf("provider" to "cpu"), error)
                 Log.w(TAG, "QNN analysis failed; retrying on CPU", error)
                 InferenceTuner.forget(appContext, request.getString("modelPath"), request.optInt("modelSize", 640))
                 analyze(appContext, JSONObject(request.toString()).put("executionProvider", "cpu"))
@@ -162,11 +165,13 @@ object AnalysisTaskManager {
         } catch (_: InterruptedException) {
             fail("ANALYSIS_CANCELLED", "分析已取消", cancelled = true)
         } catch (error: Exception) {
+            AppDiagnostics.event("analysis.failed", error = error)
             Log.e(TAG, "analysis failed", error)
             fail("ANALYSIS_FAILED", error.message ?: "移动端分析失败", cancelled = false)
         } finally {
             wakeLock.release()
-            synchronized(this) { thread = null }
+            // Keep the reference until the thread has actually exited: a
+            // cancellation acknowledgement can precede worker cleanup.
             appContext.stopService(Intent(appContext, AnalysisForegroundService::class.java).apply {
                 action = AnalysisForegroundService.ACTION_STOP
             })
@@ -1104,6 +1109,7 @@ object AnalysisTaskManager {
             "message" to message,
         )
         synchronized(this) {
+            if (state.optString("stage") != stage) AppDiagnostics.event("analysis.stage", mapOf("stage" to stage, "processed" to processed, "total" to total))
             state.put("stage", stage).put("progress", progress).put("processed", processed).put("total", total)
             state.put("message", message)
             persistState()
@@ -1112,6 +1118,7 @@ object AnalysisTaskManager {
     }
 
     private fun complete(result: Map<String, Any?>) {
+        AppDiagnostics.event("analysis.completed")
         synchronized(this) {
             state.put("status", "completed").put("result", JSONObject(result))
             persistState()
@@ -1122,6 +1129,7 @@ object AnalysisTaskManager {
     }
 
     private fun fail(code: String, message: String, cancelled: Boolean) {
+        AppDiagnostics.event("analysis.result", mapOf("code" to code, "cancelled" to cancelled))
         synchronized(this) {
             state.put("status", if (cancelled) "cancelled" else "failed")
                 .put("errorCode", code)

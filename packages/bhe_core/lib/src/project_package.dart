@@ -1,12 +1,13 @@
 import 'dart:convert';
 
 import 'models.dart';
+import 'export_history.dart';
 import 'project_identity.dart';
 
 class ProjectPackageCodec {
   const ProjectPackageCodec();
 
-  String encode(ProjectSnapshot project) {
+  String encode(ProjectSnapshot project, {bool includeLocalHistory = false}) {
     final manifest = _manifest(project);
     return const JsonEncoder.withIndent('  ').convert({
       'format': 'bhe-project',
@@ -14,6 +15,10 @@ class ProjectPackageCodec {
       'created_at': DateTime.now().toUtc().toIso8601String(),
       'project_id': project.id,
       'project_name': project.name,
+      if (includeLocalHistory && project.exportHistory.isNotEmpty)
+        'local_export_history': project.exportHistory
+            .map((e) => e.toJson())
+            .toList(),
       'manifest': manifest,
       ...manifest,
     });
@@ -22,6 +27,7 @@ class ProjectPackageCodec {
   ProjectSnapshot decode(
     String content, {
     Iterable<String> existingIds = const [],
+    bool includeLocalHistory = false,
   }) {
     final decoded = jsonDecode(content);
     if (decoded is! Map) throw const FormatException('项目包格式无效');
@@ -32,17 +38,25 @@ class ProjectPackageCodec {
       final project = _decodeV1(decoded);
       return project.copyWith(
         id: importedProjectId(project.id, existingIds: existingIds),
+        exportHistory: const [],
       );
     }
     if (version != 2) throw FormatException('不支持的项目包版本：$version');
     final manifest = decoded['manifest'] is Map
         ? (decoded['manifest'] as Map).cast<String, dynamic>()
         : decoded.cast<String, dynamic>();
-    return _snapshotFromManifest(
+    final snapshot = _snapshotFromManifest(
       manifest,
       id: importedProjectId(decoded['project_id'], existingIds: existingIds),
       name: decoded['project_name'] as String? ?? '未命名项目',
     );
+    return includeLocalHistory
+        ? snapshot.copyWith(
+            exportHistory: ExportHistoryEntry.readList(
+              decoded['local_export_history'],
+            ),
+          )
+        : snapshot;
   }
 
   static Map<String, dynamic> _manifest(ProjectSnapshot project) => {

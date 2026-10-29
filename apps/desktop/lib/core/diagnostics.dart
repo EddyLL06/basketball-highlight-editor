@@ -1,7 +1,11 @@
 import 'dart:ffi' show Abi;
 import 'dart:io';
 
-import 'engine_client.dart';
+import 'package:bhe_core/bhe_core.dart' show redactUserPaths;
+
+export 'package:bhe_core/bhe_core.dart' show redactUserPaths;
+
+import 'app_log.dart';
 
 /// 打包时由 `--dart-define=BHE_VERSION=<版本>` 注入，本地开发显示 dev。
 const appVersion = String.fromEnvironment('BHE_VERSION', defaultValue: 'dev');
@@ -11,7 +15,7 @@ const appVersion = String.fromEnvironment('BHE_VERSION', defaultValue: 'dev');
 Future<String> buildDiagnosticReport({
   String? error,
   Map<String, String>? environment,
-  int logLines = 200,
+  int logLines = 300,
 }) async {
   final env = environment ?? Platform.environment;
   final buffer = StringBuffer()
@@ -34,36 +38,48 @@ Future<String> buildDiagnosticReport({
     ..writeln()
     ..writeln('最近的运行日志:')
     ..writeln(log.isEmpty ? '(没有找到运行日志)' : log);
+  final updateLog = await readUpdateLogTail(engineLogDirectory(env));
+  if (updateLog.isNotEmpty) {
+    buffer
+      ..writeln()
+      ..writeln('最近的更新日志:')
+      ..writeln(updateLog);
+  }
   return redactUserPaths(buffer.toString(), env);
 }
 
 /// 读 engine.log 的最后几行；不够时从轮换出去的 engine.log.1 补。
 Future<String> readLogTail(String directory, int lines) async {
+  if (lines <= 0) return '';
   final collected = <String>[];
-  for (final name in const ['engine.log', 'engine.log.1']) {
-    if (collected.length >= lines) break;
-    final file = File('$directory${Platform.pathSeparator}$name');
-    if (!await file.exists()) continue;
-    final content = await file.readAsLines().catchError((_) => <String>[]);
-    final need = lines - collected.length;
-    collected.insertAll(
-      0,
-      content.length > need ? content.sublist(content.length - need) : content,
-    );
+  for (final name in const ['engine.log.1', 'engine.log']) {
+    try {
+      final file = File('$directory${Platform.pathSeparator}$name');
+      if (await file.exists()) collected.addAll(await file.readAsLines());
+    } on Object {
+      // A missing or unreadable log must not break diagnostic copying.
+    }
   }
-  return collected.join('\n');
+  final tail = collected.length > lines
+      ? collected.sublist(collected.length - lines)
+      : List<String>.from(collected);
+  final environment = collected.where(isEngineEnvironmentLine).lastOrNull;
+  if (environment != null && !tail.contains(environment)) {
+    if (tail.length == lines) tail.removeAt(0);
+    tail.insert(0, environment);
+  }
+  return tail.join('\n');
 }
 
-String redactUserPaths(String text, Map<String, String> env) {
-  var out = text;
-  final home = env['HOME'] ?? env['USERPROFILE'];
-  if (home != null && home.length > 1) out = out.replaceAll(home, '~');
-  final user = env['USER'] ?? env['USERNAME'];
-  if (user != null && user.length >= 2) {
-    out = out.replaceAllMapped(
-      RegExp('([\\\\/])${RegExp.escape(user)}(?=[\\\\/])'),
-      (m) => '${m[1]}<user>',
+Future<String> readUpdateLogTail(String directory) async {
+  try {
+    final file = File('$directory${Platform.pathSeparator}update.log');
+    if (!await file.exists()) return '';
+    final lines = await file.readAsLines();
+    return (lines.length > 60 ? lines.sublist(lines.length - 60) : lines).join(
+      '\n',
     );
+  } on Object {
+    return '';
   }
-  return out;
 }

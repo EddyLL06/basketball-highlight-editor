@@ -18,18 +18,28 @@ Future<void> _loadReviewVideo(_ReviewViewState view) async {
           onFailure: state.markVideoFailure,
         );
   if (!current()) {
-    await next?.dispose();
+    await disposeSourceVideo(next);
     return;
   }
   next?.addListener(view._videoChanged);
   final previous = view.controller;
   view._installSourcePlayer(next);
-  await previous?.dispose();
+  await disposeSourceVideo(previous);
   if (next != null && current() && view.candidates.isNotEmpty) {
     try {
       await view._replay(view.candidates.first);
-    } catch (_) {
-      if (current()) state.markVideoFailure(VideoSourceFailure.unplayable);
+    } catch (error, stack) {
+      final diagnostic = MobileDiagnostics.instance.error(
+        error,
+        stack,
+        operation: 'playback',
+      );
+      if (current()) {
+        state.markVideoFailure(
+          VideoSourceFailure.unplayable,
+          diagnostic: diagnostic,
+        );
+      }
     }
   }
 }

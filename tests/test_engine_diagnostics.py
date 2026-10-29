@@ -38,11 +38,14 @@ def _linked_video(tmp_path: Path):
 
 def test_failed_analysis_logs_the_video_and_the_stage_it_failed_in(tmp_path: Path, monkeypatch, capsys):
     service, project_root, video, model = _linked_video(tmp_path)
+    monkeypatch.setattr(service, "_ensure_detector_ready", lambda *args, **kwargs: None)
+
+    message = "create_proxy.py 执行失败: Unknown decoder 'hevc_cuvid'"
 
     def fail_in_proxy(commands, output, on_stage, **kwargs):
         on_stage("prepare_proxy", 0.02)
         kwargs["output_callback"]("scan_coarse", "device=cuda")
-        raise RuntimeError("create_proxy.py 执行失败: Unknown decoder 'hevc_cuvid'")
+        raise RuntimeError(message)
 
     monkeypatch.setattr("engine.python.basketball_engine.service.run_pipeline", fail_in_proxy)
     job = service.handle("start_analysis", {
@@ -64,7 +67,8 @@ def test_failed_analysis_logs_the_video_and_the_stage_it_failed_in(tmp_path: Pat
     assert f"{label} stage=prepare_proxy progress=0.02" in log
     assert f"{label} scan_coarse device=cuda" in log
     assert f"{label} failed stage=prepare_proxy" in log
-    assert "code=ANALYSIS_FAILED: create_proxy.py 执行失败: Unknown decoder 'hevc_cuvid'" in log
+    assert "code=ANALYSIS_FAILED:" in log
+    assert log.count("create_proxy.py 执行失败: Unknown decoder 'hevc_cuvid'") == 1
     assert "Traceback" in log
 
 
@@ -124,3 +128,21 @@ def test_a_project_folder_that_cannot_be_created_logs_the_parent_state(tmp_path:
     assert f"{root}: missing(" in log
     assert f"{root.parent}: missing(" in log
     assert f"{videos}: dir=False link=False reparse=False" in log
+
+
+def test_export_failure_records_the_long_message_once(tmp_path, monkeypatch, capsys):
+    service, root, video, _ = _linked_video(tmp_path)
+    store = ProjectStore(root)
+    job = store.create_job(store.project()['id'], video['id'], 'export', {})
+    message = 'unique-export-stderr-' + str(job['id'])
+
+    def fail(*args, **kwargs):
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(service, '_execute_export', fail)
+    service._run_export({'project_root': str(root)}, job['id'])
+    assert store.get_job(job['id'])['state'] == 'failed'
+    text = capsys.readouterr().err
+    assert text.count(message) == 1
+    assert 'code=EXPORT_FAILED' in text
+    assert 'Traceback' in text

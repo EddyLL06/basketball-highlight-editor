@@ -365,7 +365,7 @@ def test_a_broken_torch_without_onnx_still_reports_the_error(tmp_path, monkeypat
     model.write_bytes(b"pt")
     _imports_fail_with_oserror(monkeypatch, "ultralytics", "torch")
 
-    with pytest.raises(OSError, match="1114"):
+    with pytest.raises(inference.DetectorRuntimeUnavailable, match="1114"):
         inference.load_detector(model, device="cpu")
 
 
@@ -546,3 +546,50 @@ def test_a_wrong_call_to_the_coreml_detector_is_not_swallowed(tmp_path, monkeypa
 
     with pytest.raises(TypeError):
         inference.load_detector(model, device="coreml")
+
+
+def test_cpu_can_fall_back_after_a_torch_importerror(tmp_path, monkeypatch):
+    import builtins
+    from basketball_highlight import onnx_detector
+
+    model = tmp_path / 'model.pt'
+    model.write_bytes(b'pt')
+    model.with_suffix('.onnx').write_bytes(b'onnx')
+    original_import = builtins.__import__
+
+    def fail_torch(name, *args, **kwargs):
+        if name == 'ultralytics':
+            raise ImportError('torch import unavailable')
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, '__import__', fail_torch)
+    monkeypatch.setattr(onnx_detector, 'OnnxDetector',
+                        lambda path, **kwargs: type('Detector', (), {'device': 'cpu'})())
+    assert inference.load_detector(model, device='cpu').device == 'cpu'
+
+
+@pytest.mark.parametrize('error_type', [ImportError, OSError])
+@pytest.mark.parametrize('device', ['cpu', 'dml', 'coreml'])
+def test_torch_and_ort_failures_have_a_final_runtime_error(tmp_path, monkeypatch, error_type, device):
+    import builtins
+    from basketball_highlight import onnx_detector
+
+    model = tmp_path / 'model.pt'
+    model.write_bytes(b'pt')
+    model.with_suffix('.onnx').write_bytes(b'onnx')
+    (tmp_path / 'model.static.onnx').write_bytes(b'onnx')
+    original_import = builtins.__import__
+
+    def fail_torch(name, *args, **kwargs):
+        if name == 'ultralytics':
+            raise error_type('torch runtime unavailable')
+        return original_import(name, *args, **kwargs)
+
+    def fail_ort(*args, **kwargs):
+        raise error_type('onnxruntime DLL load failed')
+
+    monkeypatch.setattr(builtins, '__import__', fail_torch)
+    monkeypatch.setattr(onnx_detector, 'OnnxDetector', fail_ort)
+    with pytest.raises(inference.DetectorRuntimeUnavailable) as failure:
+        inference.load_detector(model, device=device)
+    assert isinstance(failure.value.__cause__, error_type)

@@ -17,7 +17,8 @@ class _VideoPreview extends StatefulWidget {
   final String path;
   final int sourceRevision;
   final bool unavailable;
-  final ValueChanged<VideoSourceFailure>? onFailure;
+  final void Function(VideoSourceFailure, {DiagnosticErrorRecord? diagnostic})?
+  onFailure;
   final double aspectRatio;
   final int seekStepMs;
   final int? initialPositionMs;
@@ -107,7 +108,12 @@ class _VideoPreviewState extends State<_VideoPreview> {
         return;
       }
       setState(() {});
-    } catch (error) {
+    } catch (error, stack) {
+      final diagnostic = MobileDiagnostics.instance.error(
+        error,
+        stack,
+        operation: 'playback',
+      );
       if (generation != _playerGeneration || controller != player) return;
       player.removeListener(_changed);
       controller = null;
@@ -115,14 +121,18 @@ class _VideoPreviewState extends State<_VideoPreview> {
       await _releasePlayer(player);
       if (!mounted || generation != _playerGeneration) return;
       setState(() {});
-      widget.onFailure?.call(VideoSourceFailure.unplayable);
+      widget.onFailure?.call(
+        VideoSourceFailure.unplayable,
+        diagnostic: diagnostic,
+      );
     }
   }
 
   Future<void> _releasePlayer(VideoPlayerController? player) async {
     try {
       await player?.dispose();
-    } catch (_) {
+    } catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'playback');
       // A failed platform cleanup must not strand the replacement preview.
     }
   }
@@ -150,12 +160,20 @@ class _VideoPreviewState extends State<_VideoPreview> {
     final stopAt = widget.stopAtMs;
     if (player?.value.hasError == true && !_failed) {
       _failed = true;
+      final diagnostic = MobileDiagnostics.instance.error(
+        StateError(player?.value.errorDescription ?? 'playback_failed'),
+        null,
+        operation: 'playback',
+      );
       final generation = _playerGeneration;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted &&
             generation == _playerGeneration &&
             controller == player) {
-          widget.onFailure?.call(VideoSourceFailure.unplayable);
+          widget.onFailure?.call(
+            VideoSourceFailure.unplayable,
+            diagnostic: diagnostic,
+          );
         }
       });
     }
@@ -163,7 +181,7 @@ class _VideoPreviewState extends State<_VideoPreview> {
         stopAt != null &&
         player!.value.isPlaying &&
         player.value.position.inMilliseconds >= stopAt) {
-      unawaited(player.pause());
+      unawaited(_enqueuePlayer((player) => player.pause()));
     }
     final position = player?.value.position.inMilliseconds;
     if (position != null && (position - _lastReportedPosition).abs() >= 100) {
@@ -223,7 +241,29 @@ class _VideoPreviewState extends State<_VideoPreview> {
     final task = _playerQueue.then((_) async {
       final player = controller;
       if (player == null || !player.value.isInitialized) return;
-      await action(player);
+      try {
+        await action(player);
+      } catch (error, stack) {
+        final diagnostic = MobileDiagnostics.instance.error(
+          error,
+          stack,
+          operation: 'playback',
+        );
+        final generation = _playerGeneration;
+        if (mounted && controller == player) {
+          setState(() => _failed = true);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted &&
+                generation == _playerGeneration &&
+                controller == player) {
+              widget.onFailure?.call(
+                VideoSourceFailure.unplayable,
+                diagnostic: diagnostic,
+              );
+            }
+          });
+        }
+      }
     });
     _playerQueue = task.then<void>((_) {}, onError: (_, _) {});
     return task;

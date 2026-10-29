@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 REQUIRED_SCRIPTS = (
+    "check_detector.py",
     "create_proxy.py",
     "scan_video.py",
     "generate_candidates.py",
@@ -19,7 +20,7 @@ REQUIRED_SCRIPTS = (
     "refine_candidates.py",
     "verify_rim_crossing.py",
 )
-REQUIRED_IMPORTS = ("cv2", "numpy", "ultralytics", "torch")
+REQUIRED_IMPORTS = ("cv2", "numpy", "ultralytics", "torch", "dill")
 
 
 def _parse_args() -> argparse.Namespace:

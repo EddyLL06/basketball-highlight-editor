@@ -8,11 +8,165 @@ import 'package:bhe_l10n/bhe_l10n.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:desktop/features/review/review_screen.dart';
+import 'package:desktop/components/cs_progress_track.dart';
 import 'package:desktop/features/review/media_readiness.dart';
 import 'package:desktop/providers/project_state.dart';
 import 'package:desktop/theme/tokens.dart';
 
 void main() {
+  for (final language in ['zh', 'en']) {
+    testWidgets('preflight stage and percentages stay consistent $language', (
+      tester,
+    ) async {
+      final notifier = _TagReviewNotifier(
+        const ProjectState(
+          job: {
+            'state': 'running',
+            'stage': 'engine_preflight',
+            'progress': 0.01,
+          },
+        ),
+      );
+      await _pumpReview(
+        tester,
+        notifier.initialState,
+        notifier: notifier,
+        locale: Locale(language),
+      );
+      await tester.pumpAndSettle();
+      for (final stage in [
+        ('engine_preflight', 0.01, '检查分析引擎', 'Checking analysis engine'),
+        ('prepare_proxy', 0.01, '生成预览视频', 'Generate preview video'),
+        ('coarse_scan', 0.35, '快速扫描候选', 'Scan for candidates'),
+      ]) {
+        notifier.replaceState(
+          notifier.current.copyWith(
+            job: {'state': 'running', 'stage': stage.$1, 'progress': stage.$2},
+          ),
+        );
+        await tester.pumpAndSettle();
+        final label = language == 'en' ? stage.$4 : stage.$3;
+        expect(
+          find.text('$label · ${(stage.$2 * 100).round()}%'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('engine_preflight'), findsNothing);
+        expect(
+          tester
+              .widget<CsProgressTrack>(find.byType(CsProgressTrack).first)
+              .value,
+          stage.$2,
+        );
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
+  for (final locale in ['zh', 'en']) {
+    for (final size in [const Size(1200, 800), const Size(760, 900)]) {
+      testWidgets('range and overlap markers $locale $size', (tester) async {
+        final state = ProjectState(
+          candidates: [
+            {
+              'id': 'later',
+              'video_id': 'a',
+              'event_time_ms': 3000,
+              'default_start_ms': 2500,
+              'default_end_ms': 4000,
+              'review_start_ms': 1000,
+              'review_end_ms': 4000,
+              'evidence': {
+                'rim_check': {'status': 'unsure'},
+              },
+            },
+            {
+              'id': 'first',
+              'video_id': 'a',
+              'event_time_ms': 1000,
+              'default_start_ms': 0,
+              'default_end_ms': 2000,
+            },
+            {
+              'id': 'excluded',
+              'video_id': 'a',
+              'event_time_ms': 2000,
+              'default_start_ms': 0,
+              'default_end_ms': 5000,
+              'selection_status': 'excluded',
+            },
+            {
+              'id': 'touching',
+              'video_id': 'a',
+              'event_time_ms': 5000,
+              'default_start_ms': 4000,
+              'default_end_ms': 6000,
+            },
+            {
+              'id': 'other',
+              'video_id': 'b',
+              'event_time_ms': 5500,
+              'default_start_ms': 0,
+              'default_end_ms': 6000,
+            },
+          ],
+        );
+        final notifier = _TagReviewNotifier(state);
+        await _pumpReview(
+          tester,
+          state,
+          notifier: notifier,
+          size: size,
+          locale: Locale(locale),
+        );
+        await tester.pumpAndSettle();
+        final adjusted = find.byKey(const ValueKey('adjusted-range-later'));
+        final overlapping = find.byKey(const ValueKey('overlapping-later'));
+        expect(adjusted, findsOneWidget);
+        expect(overlapping, findsOneWidget);
+        expect(
+          tester.widget<Tooltip>(adjusted).message,
+          locale == 'en' ? 'Duration adjusted' : '已调整时长',
+        );
+        expect(
+          tester.widget<Tooltip>(overlapping).message,
+          locale == 'en' ? 'Overlaps the previous kept clip' : '与上一段重叠',
+        );
+        for (final id in ['first', 'excluded', 'touching', 'other']) {
+          expect(find.byKey(ValueKey('adjusted-range-$id')), findsNothing);
+          expect(find.byKey(ValueKey('overlapping-$id')), findsNothing);
+        }
+
+        final row = find.byKey(const ValueKey('candidate-row-later'));
+        final originalHeight = tester.getSize(row).height;
+        await notifier.reviewCandidate('first', 'excluded');
+        await tester.pumpAndSettle();
+        expect(overlapping, findsNothing);
+        expect(adjusted, findsOneWidget);
+        for (final end in [4500, 4000]) {
+          notifier.replaceState(
+            notifier.current.copyWith(
+              candidates: [
+                for (final candidate in notifier.current.candidates)
+                  if (candidate['id'] == 'later')
+                    {
+                      ...candidate,
+                      'review_start_ms': 2500,
+                      'review_end_ms': end,
+                    }
+                  else
+                    candidate,
+              ],
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(adjusted, end == 4500 ? findsOneWidget : findsNothing);
+          expect(tester.getSize(row).height, originalHeight);
+        }
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
+
   testWidgets(
     'player tag filters compose with status without changing export scope',
     (tester) async {

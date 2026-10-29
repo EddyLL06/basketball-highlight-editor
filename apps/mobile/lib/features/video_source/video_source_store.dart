@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'project_paths.dart';
+import '../diagnostics/mobile_diagnostics.dart';
 
 class VideoSourceCancelled implements Exception {
   const VideoSourceCancelled();
@@ -99,6 +100,7 @@ class VideoSourceStore {
     required bool Function() isCurrent,
     String? previousPath,
     bool fromPicker = false,
+    Future<void> Function(Future<void> Function())? commit,
   }) async {
     if (!_active.add(projectId)) throw const VideoSourceCancelled();
     File? staging;
@@ -137,7 +139,10 @@ class VideoSourceStore {
           await source.resolveSymbolicLinks() == target.path) {
         final value = await validate(source);
         check();
-        await persist(target.path, value);
+        await (commit ?? (action) => action())(() async {
+          check();
+          await persist(target!.path, value);
+        });
         return value;
       }
       final token = '${DateTime.now().microsecondsSinceEpoch}_${_serial++}';
@@ -156,19 +161,29 @@ class VideoSourceStore {
       check();
       final value = await validate(staging);
       check();
-      if (await target.exists()) await files.move(target, backup);
-      try {
-        check();
-        await files.move(staging, target);
-        installed = true;
-        check();
-        await persist(target.path, value);
-        committed = true;
-      } catch (_) {
-        if (installed) await files.move(target, staging);
-        if (await backup.exists()) await files.move(backup, target);
-        rethrow;
-      }
+      await (commit ?? (action) => action())(() async {
+        if (await target!.exists()) await files.move(target, backup!);
+        try {
+          check();
+          await files.move(staging!, target);
+          installed = true;
+          check();
+          await persist(target.path, value);
+          committed = true;
+        } on Object catch (error, stack) {
+          try {
+            if (installed) await files.move(target, staging!);
+            if (await backup!.exists()) await files.move(backup, target);
+          } on Object catch (restoreError, restoreStack) {
+            MobileDiagnostics.instance.error(
+              restoreError,
+              restoreStack,
+              operation: 'video.restore',
+            );
+          }
+          Error.throwWithStackTrace(error, stack);
+        }
+      });
       // Only our backup and the exact old owned source may be retired. Never
       // enumerate and recursively delete a project's other files.
       String? oldPath;

@@ -41,6 +41,8 @@ class UpdateState {
   final File? file;
   final String? error;
 
+  String? get targetVersion => manifest?.versionFor(currentUpdatePlatform());
+
   UpdatePackage? get package => manifest?.packages[currentUpdatePlatform()];
 }
 
@@ -160,9 +162,13 @@ class UpdateNotifier extends Notifier<UpdateState> {
       );
       final skipped =
           !manual &&
-          prefs.getString(updateSkippedVersionKey) == manifest.version;
+          prefs.getString(updateSkippedVersionKey) ==
+              manifest.versionFor(currentUpdatePlatform());
       final available =
-          isNewerVersion(manifest.version, ref.read(appVersionProvider)) &&
+          isNewerVersion(
+            manifest.versionFor(currentUpdatePlatform()),
+            ref.read(appVersionProvider),
+          ) &&
           manifest.packages.containsKey(currentUpdatePlatform()) &&
           !skipped;
       state = UpdateState(
@@ -187,7 +193,7 @@ class UpdateNotifier extends Notifier<UpdateState> {
   }
 
   Future<void> skip() async {
-    final version = state.manifest?.version;
+    final version = state.targetVersion;
     if (version == null) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(updateSkippedVersionKey, version);
@@ -277,7 +283,7 @@ class UpdateNotifier extends Notifier<UpdateState> {
       session = await service.prepareInstall(
         file,
         package,
-        ready.manifest!.version,
+        windowsInstallerVersion(ready.targetVersion!),
       );
       if (lifecycle.isBusy()) {
         throw const UpdateException('请等待当前操作结束后再安装更新');

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'engine_session.dart';
+import 'app_log.dart';
 
 class EngineException implements Exception {
   const EngineException(this.code, this.message);
@@ -12,13 +13,6 @@ class EngineException implements Exception {
 
   @override
   String toString() => '$code: $message';
-}
-
-String engineLogDirectory(Map<String, String> env) {
-  final home = env['HOME'] ?? env['USERPROFILE'] ?? Directory.systemTemp.path;
-  if (Platform.isMacOS) return '$home/Library/Logs/BHE';
-  if (Platform.isWindows) return '${env['LOCALAPPDATA'] ?? home}\\BHE\\logs';
-  return '${env['XDG_STATE_HOME'] ?? '$home/.local/state'}/bhe/logs';
 }
 
 class EngineClient implements EngineTransport {
@@ -233,19 +227,7 @@ class EngineClient implements EngineTransport {
 
   void log(String message) {
     final file = logFile;
-    if (file == null) return;
-    try {
-      file.parent.createSync(recursive: true);
-      if (file.existsSync() && file.lengthSync() > 2 * 1024 * 1024) {
-        file.renameSync('${file.path}.1');
-      }
-      file.writeAsStringSync(
-        '[${DateTime.now().toIso8601String()}] $message\n',
-        mode: FileMode.append,
-      );
-    } on Object {
-      // 日志失败不影响主流程。
-    }
+    if (file != null) appendEngineLog(message, file: file);
   }
 
   void _closePending(EngineException error) {

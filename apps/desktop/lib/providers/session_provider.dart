@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/app_log.dart';
 import '../core/engine_client.dart';
 import '../core/engine_session.dart';
 import '../core/project_session.dart';

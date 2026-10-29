@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:video_player/video_player.dart';
 
+import '../diagnostics/mobile_diagnostics.dart';
 import '../video_source/video_playback.dart';
 import '../video_source/video_source_failure.dart';
 
@@ -13,6 +14,7 @@ import '../video_source/video_source_failure.dart';
 class RoiVideoPreview extends ChangeNotifier {
   VideoPlayerController? controller;
   VideoSourceFailure? failure;
+  DiagnosticErrorRecord? diagnosticError;
   bool _disposed = false;
   int _generation = 0;
   String _path = '';
@@ -21,6 +23,7 @@ class RoiVideoPreview extends ChangeNotifier {
     try {
       await player?.dispose();
     } catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'playback');
       developer.log(
         'ROI player disposal failed',
         error: error,
@@ -36,8 +39,9 @@ class RoiVideoPreview extends ChangeNotifier {
     final player = await openSourceVideo(
       path,
       isCurrent: current,
-      onFailure: (error) {
+      onFailure: (error, {diagnostic}) {
         failure = error;
+        diagnosticError = diagnostic;
         notifyListeners();
       },
     );
@@ -58,14 +62,39 @@ class RoiVideoPreview extends ChangeNotifier {
       controller = player;
       player.addListener(_changed);
       notifyListeners();
-    } catch (_) {
+    } catch (error, stack) {
+      final diagnostic = MobileDiagnostics.instance.error(
+        error,
+        stack,
+        operation: 'playback',
+      );
       await _release(player);
-      if (current()) _failed();
+      if (current()) {
+        diagnosticError = diagnostic;
+        _failed();
+      }
     }
   }
 
   void _changed() {
-    if (!_disposed) notifyListeners();
+    if (_disposed) return;
+    final player = controller;
+    if (player != null && player.value.hasError) {
+      final error = StateError(
+        player.value.errorDescription ?? 'playback_failed',
+      );
+      diagnosticError = MobileDiagnostics.instance.error(
+        error,
+        StackTrace.current,
+        operation: 'playback',
+      );
+      controller = null;
+      player.removeListener(_changed);
+      unawaited(_release(player));
+      _failed();
+      return;
+    }
+    notifyListeners();
   }
 
   void _failed() {
@@ -81,8 +110,16 @@ class RoiVideoPreview extends ChangeNotifier {
     final generation = _generation;
     try {
       await action(player);
-    } catch (_) {
-      if (_disposed || generation != _generation) return;
+    } catch (error, stack) {
+      final diagnostic = MobileDiagnostics.instance.error(
+        error,
+        stack,
+        operation: 'playback',
+      );
+      if (_disposed || generation != _generation || controller != player) {
+        return;
+      }
+      diagnosticError = diagnostic;
       controller = null;
       player.removeListener(_changed);
       await _release(player);

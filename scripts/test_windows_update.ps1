@@ -14,6 +14,7 @@ $Temp = Join-Path $tempBase ('bhe-updater-test-' + [Guid]::NewGuid().ToString('N
 [void][IO.Directory]::CreateDirectory($Temp)
 $Utf8 = New-Object Text.UTF8Encoding($false)
 $Session = $Temp
+$LogDirectory = Join-Path $Temp 'persistent-logs'
 $Tests = 0
 
 function Assert([bool]$Condition, [string]$Message) {
@@ -58,6 +59,26 @@ try {
         }
     }
     $script:Tests++
+    $loggingSession = Join-Path $Temp 'logging-session'
+    [void][IO.Directory]::CreateDirectory($loggingSession)
+    $unicode = [string][char]0x4e2d + [string][char]0x6587
+    Write-UpdateLog 'start' 'begin' ($unicode + "`nsecond line")
+    $logPath = Join-Path $LogDirectory 'update.log'
+    $bytes = [IO.File]::ReadAllBytes($logPath)
+    Assert (!($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191)) 'Update log must be UTF-8 without BOM'
+    $lines = [IO.File]::ReadAllLines($logPath, $Utf8)
+    Assert ($lines.Length -eq 1) 'Multiline details must stay on one log line'
+    Assert ($lines[0].Contains($unicode)) 'Unicode diagnostic detail was lost'
+    Remove-Item -LiteralPath $loggingSession -Recurse -Force
+    Assert (Test-Path -LiteralPath $logPath) 'Persistent log was removed with a session'
+    $savedLogDirectory = $LogDirectory
+    $LogDirectory = Join-Path $Temp 'blocked-log'
+    [IO.File]::WriteAllText($LogDirectory, 'file', $Utf8)
+    Write-UpdateLog 'test' 'unwritable'
+    $LogDirectory = $savedLogDirectory
+    Write-UpdateLog 'rollback' 'restored'
+    Assert (([IO.File]::ReadAllText($logPath, $Utf8)).Contains('phase=rollback result=restored')) 'Logging did not recover after a write failure'
+    $script:Tests += 4
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $fixture = Join-Path $Temp 'fixture'
@@ -204,7 +225,7 @@ public static class BheUpdateDirectoryLock {
             $helperInfo.WorkingDirectory = $sessionDirectory
             $helperInfo.UseShellExecute = $false
             $helperInfo.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $Helper +
-                '" -RequestPath "' + $requestPath + '" -NoErrorDialog'
+                '" -RequestPath "' + $requestPath + '" -NoErrorDialog -LogDirectory "' + (Join-Path $case 'persistent-logs') + '"'
             $helperProcess = [Diagnostics.Process]::Start($helperInfo)
             $heldFile = $null
             try {

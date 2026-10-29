@@ -15,6 +15,14 @@ extension BheLocalizedText on BheLocalizations {
         : source;
     final normalizedDirect = _englishText[normalized];
     if (normalizedDirect != null) return normalizedDirect;
+    final newline = normalized.indexOf('\n');
+    if (newline >= 0) {
+      final first = normalized.substring(0, newline);
+      final translated = text(first);
+      if (translated != first) {
+        return '$translated${normalized.substring(newline)}';
+      }
+    }
   final codedError = RegExp(r'^([A-Z][A-Z0-9_]+): (.+)$').firstMatch(normalized);
   if (codedError != null) {
     return '${codedError.group(1)}: ${text(codedError.group(2)!)}';
@@ -71,6 +79,45 @@ extension BheBuildContextText on BuildContext {
 }
 
 String? _translateDynamic(String source) {
+  final historyMore = RegExp(r'^查看全部 (\d+) 条$').firstMatch(source);
+  if (historyMore != null) return 'View all ${historyMore.group(1)} entries';
+  final labelBatch = RegExp(r'^已完成 (\d+)/(\d+) 个标签$').firstMatch(source);
+  if (labelBatch != null) return '${labelBatch.group(1)}/${labelBatch.group(2)} labels completed';
+  final labelProgress = RegExp(r'^正在合成标签 (\d+)/(\d+)：(.+)$').firstMatch(source);
+  if (labelProgress != null) return 'Merging label ${labelProgress.group(1)}/${labelProgress.group(2)}: ${labelProgress.group(3) == '未标记' ? 'Unlabelled' : labelProgress.group(3)}';
+  final mobileFormat = RegExp(r'^这个视频的格式（(.+)）手机无法处理。$').firstMatch(source);
+  if (mobileFormat != null) return 'This phone cannot process this video format (${mobileFormat.group(1)}).';
+
+  final gameStatsSummary = RegExp(r'^保留 (\d+) 个(?: · 命中率估算 (\d+)%)?$').firstMatch(source);
+  if (gameStatsSummary != null) {
+    final rate = gameStatsSummary.group(2);
+    return rate == null
+        ? '${gameStatsSummary.group(1)} kept'
+        : '${gameStatsSummary.group(1)} kept · est. hit rate $rate%';
+  }
+  final untaggedReminder = RegExp(r'^还有 (\d+) 个片段未标标签$').firstMatch(source);
+  if (untaggedReminder != null) {
+    final n = untaggedReminder.group(1);
+    return n == '1' ? '1 clip is still untagged' : '$n clips are still untagged';
+  }
+  final historyPartial = RegExp(r'^部分完成 (\d+)/(\d+)$').firstMatch(source);
+  if (historyPartial != null) {
+    return 'Partial ${historyPartial.group(1)}/${historyPartial.group(2)}';
+  }
+  final historyDone = RegExp(r'^全部完成 (\d+)$').firstMatch(source);
+  if (historyDone != null) return 'Done · ${historyDone.group(1)}';
+  final excludedSplit = RegExp(r'^手动 (\d+) · 复核 (\d+)$').firstMatch(source);
+  if (excludedSplit != null) {
+    return 'Manual ${excludedSplit.group(1)} · Rim ${excludedSplit.group(2)}';
+  }
+  final reducedClips = RegExp(r'^合并后减少了 (\d+) 个片段$').firstMatch(source);
+  if (reducedClips != null) {
+    return 'Merging reduced the clip count by ${reducedClips.group(1)}.';
+  }
+  final mergedOverlap = RegExp(r'^有 (\d+) 个重叠片段已合并为一段$').firstMatch(source);
+  if (mergedOverlap != null) {
+    return '${mergedOverlap.group(1)} overlapping clips merged into continuous segments';
+  }
   final minutes = RegExp(r'^(?:第 (\d+) 段 )?(\d+)–(\d+) 分钟$').firstMatch(source);
   if (minutes != null) {
     final range = '${minutes.group(2)}–${minutes.group(3)} min';
@@ -367,6 +414,118 @@ String _englishDuration(String value) => value
     .trim();
 
 const _englishText = <String, String>{
+  '已调整': 'Edited',
+  '重叠': 'Overlap',
+  '诊断信息暂时不可用。': 'Diagnostics are temporarily unavailable.',
+  '反馈与诊断': 'Feedback and diagnostics',
+  '遇到问题时，把下面的信息发给我们。已隐藏你的用户名和文件路径。': 'If you encounter a problem, send us the information below. Your username and file paths have been hidden.',
+  '已复制': 'Copied',
+  '在 GitHub 反馈': 'Report on GitHub',
+  '反馈': 'Feedback',
+  'BHE 诊断信息': 'BHE diagnostics',
+  'App 版本': 'App version',
+  '安卓版本': 'Android version',
+  'SDK': 'SDK',
+  '厂商': 'Manufacturer',
+  '手机型号': 'Device model',
+  'CPU 架构': 'CPU architecture',
+  '总内存': 'Total memory',
+  '可用内存': 'Available memory',
+  '可用存储': 'Available storage',
+  '屏幕尺寸': 'Screen size',
+  '语言': 'Language',
+  '未知': 'Unknown',
+  '当前错误': 'Current error',
+  '最近的运行日志': 'Recent logs',
+  '没有找到运行日志': 'No logs found',
+  '运行日志暂不可用': 'Logs are temporarily unavailable',
+  '复制失败，请重试。': 'Could not copy. Please try again.',
+  '无法打开反馈入口，请先复制诊断信息。': 'Could not open the feedback destination. Please copy the diagnostics first.',
+  '手机存储空间不足，请清理后重试。': 'Your phone is running out of storage. Free up space and try again.',
+  '没有读取这个文件的权限，请重新选择。': 'There is no permission to read this file. Please choose it again.',
+  '更新安装包找不到了，请重新下载。': 'The update package is missing. Please download it again.',
+  '文件找不到了，请重新选择。': 'The file is missing. Please choose it again.',
+  '设置无效，请检查视频范围后重试。': 'The settings are invalid. Check the video range and try again.',
+  '这个视频的格式手机无法处理。': 'This phone cannot process this video format.',
+  '出错了：视频分析未完成，请重试。': 'Something went wrong: video analysis did not finish. Please try again.',
+  '出错了：视频导出未完成，请重试。': 'Something went wrong: video export did not finish. Please try again.',
+  '出错了：更新操作未完成，请重试。': 'Something went wrong: the update did not finish. Please try again.',
+  '出错了：操作未完成，请重试。': 'Something went wrong: the operation did not finish. Please try again.',
+  '重命名项目': 'Rename project',
+  '项目列表': 'Projects',
+  '还没有项目': 'No projects yet',
+  '重试': 'Retry',
+  '关闭项目': 'Close project',
+  '最近修改': 'Last modified',
+  '当前': 'Current',
+  '片段': 'Clips',
+  '已分析': 'Analyzed',
+  '分析中断': 'Analysis interrupted',
+  '加载项目失败': 'Could not load projects',
+  '删除未完成，部分文件可能已移除，请刷新项目列表。': 'Deletion did not finish. Some files may already be removed; refresh the project list.',
+  '部分项目读取失败，查看反馈': 'Some projects could not be read; view diagnostics',
+  '新建项目，或从最近项目中打开一个': 'Create a project or open one from recent projects.',
+  '将删除项目及应用内视频副本、封面和导出文件；不会删除原视频或相册中的文件。': 'This removes the project and its app-owned video copy, cover, and exports. The original video and files in your gallery are not deleted.',
+  '输出方式': 'Output mode',
+  '导出历史': 'Export history',
+  '暂无导出记录': 'No export history',
+  '查看最近 3 条': 'Show latest 3',
+  '本机文件不可用': 'Local file unavailable',
+  '已保存到相册，请在相册查看': 'Saved to gallery. View it in your gallery.',
+  '已保存到相册': 'Saved to gallery',
+  '视频已导出，历史记录保存失败。': 'Video exported, but the history could not be saved.',
+  '已保存到相册，历史记录更新失败。': 'Saved to gallery, but the history could not be updated.',
+  '标签': 'Label',
+  '开始导出': 'Start export',
+  '每个片段原样导出': 'Export each clip separately',
+  '分别保存每个保留片段': 'Save each included clip separately',
+  '合并成一个视频': 'Merge into one video',
+  '按时间拼成一条集锦': 'Join clips in time order',
+  '按标签合成，含未标记': 'Merge by label, including unlabelled clips',
+  '分享全部': 'Share all',
+  '保存全部到相册': 'Save all to gallery',
+  '按标签合成完成': 'Merged by label',
+  '部分导出已完成': 'Some exports are complete',
+  '部分完成': 'Partially complete',
+  '全部完成': 'All complete',
+
+  '重命名球员': 'Rename player',
+  '名称不能为空': 'Name cannot be empty',
+  '正在切换项目，请稍候': 'Switching projects, please wait',
+  '本次审核未保存': 'This review was not saved',
+  '操作已取消': 'Action canceled',
+  '已有同名球员': 'A player with this name already exists',
+  '重命名': 'Rename',
+  '已标记的': 'The',
+  '个片段会变成未标记。': 'tagged clips will become untagged.',
+
+  '撤销上一步': 'Undo last action',
+  '撤销': 'Undo',
+  '已保留': 'Kept',
+  '已设标签': 'Player assigned',
+  '已改时长': 'Duration changed',
+  '已改备注': 'Note changed',
+  '已撤销': 'Undone',
+  '保存失败，请重试': 'Could not save. Try again.',
+
+  '检查分析引擎': 'Checking analysis engine',
+  '收起': 'Collapse',
+  '可多选': 'Multi-select',
+  '本次导出会包含这些片段。': 'This export will include them.',
+  '仍然导出': 'Export anyway',
+  '展开': 'Expand',
+  '从视频开头算起': 'From the start of the video',
+  '保留 ÷ 候选，粗略估算，非真实命中率': 'Kept ÷ candidates. Rough estimate, not a real rate.',
+  '引擎自检': 'Engine check',
+  '分析引擎缺少模型加载依赖，请安装最新版本的应用，仍然不行请发送诊断信息。':
+      'The analysis engine is missing a dependency required to load the model. Install the latest version of the app. If the problem persists, send us diagnostic information.',
+  '分析引擎在这台电脑上无法启动（运行库初始化失败）。请先安装最新的 VC++ 运行库后重启电脑，仍然不行请把 CPU 型号和诊断信息发给我们。':
+      'The analysis engine could not start on this computer (runtime initialization failed). Install the latest Visual C++ Redistributable and restart your computer. If the problem persists, send us your CPU model and diagnostic information.',
+  '分析引擎在这台电脑上无法启动（运行库初始化失败）。请检查或重新安装应用，仍然不行请把系统版本、CPU 型号和诊断信息发给我们。':
+      'The analysis engine could not start on this computer (runtime initialization failed). Check or reinstall the app. If the problem persists, send us your OS version, CPU model, and diagnostic information.',
+
+  '已调整时长': 'Duration adjusted',
+  '与上一段重叠': 'Overlaps the previous kept clip',
   '视频不可用': 'Video unavailable',
   '正在读取视频信息，大文件可能需要几秒。': 'Reading video information. Large files may take a few seconds.',
   '正在保存视频到本机，大文件可能需要几秒。': 'Saving the video locally. Large files may take a few seconds.',
@@ -489,7 +648,13 @@ const _englishText = <String, String>{
   '保存结果': 'Save results',
   '分析已取消': 'Analysis cancelled',
   '正在检查视频': 'Checking video',
+  '上次分析尚未确认停止，暂时不能导出。': 'The previous analysis has not been confirmed stopped. Export is unavailable.',
+  '正在分析，请等待分析结束。': 'Analysis is running. Wait for it to finish.',
+  '正在导出，请等待导出结束。': 'Export is running. Wait for it to finish.',
+  '上次任务尚未确认结束，请先确认停止。': 'The previous task has not been confirmed stopped. Check its status first.',
   '正在准备本地模型': 'Preparing the local model',
+  '上次分析尚未确认停止，暂时不能开始新分析。': 'The previous analysis may still be running. A new analysis cannot start yet.',
+  '请先复制诊断信息；若仍无法确认，请在系统设置中强制停止 BHE，重新打开后检查项目。': 'Copy diagnostics first. If the status remains unknown, force stop BHE in system settings, reopen it, and check the project.',
   '正在准备本地分析': 'Preparing local analysis',
   '正在分析视频': 'Analyzing video',
   '正在生成低分辨率代理视频': 'Generating a low-resolution proxy video',
@@ -501,6 +666,16 @@ const _englishText = <String, String>{
   '正在保存视频到本机': 'Saving video on this device',
   '大文件可能需要几秒': 'Large files may take a few seconds',
   '正在准备合并导出': 'Preparing merged export',
+  '正在结束上一次导出': 'Finishing the previous export',
+  '上次任务尚未确认结束，暂时不能开始新的同类任务。': 'The previous task may still be running. A new task of this kind cannot start yet.',
+  '请先复制诊断信息；若仍无法确认，请在系统设置中强制停止 BHE，重新打开后检查项目和已导出文件。': 'Copy the diagnostics first. If the status remains unknown, force stop BHE in system settings, reopen it, and check your project and exported files.',
+  '再次尝试停止': 'Try stopping again',
+  '检查停止状态': 'Check status',
+  '诊断与复制': 'Diagnostics and copy',
+  '上次任务仍在运行，请稍候或再次尝试停止。': 'The previous task is still running. Please wait or try stopping it again.',
+  '无法确认上次任务是否停止。': 'Could not confirm whether the previous task has stopped.',
+  '这个输出文件正在导出，请稍后重试。': 'This output is already being exported. Please try again later.',
+  '上一次导出尚未结束，请稍后重试。': 'The previous export has not finished. Please try again later.',
   '合并导出完成': 'Merged export complete',
   '导出已取消': 'Export cancelled',
   '已导出': 'Exported',
@@ -624,6 +799,7 @@ const _englishText = <String, String>{
   '项目': 'Project',
   '导入': 'Import',
   '审核': 'Review',
+  '分析': 'Analysis',
   '导出': 'Export',
   '重试导出': 'Retry export',
   '合并导出': 'Merge export',
@@ -909,6 +1085,17 @@ const _englishText = <String, String>{
   '还没有分组。把当前项目的球员存为分组后，其他项目可以一键导入。':
       'No groups yet. Save this project\'s players as a group to import them into other projects in one tap.',
   '把当前球员存为分组': 'Save current players as a group',
+  '默认': 'Default',
+  '分组已变更，请重新选择': 'The group changed. Choose it again.',
+  '球员顺序影响名单显示顺序': 'Player order determines roster order.',
+  '确认移除球员？': 'Remove this player?',
+  '管理分组': 'Manage groups',
+  '确认删除分组？': 'Delete this group?',
+  '已有同名分组，是否替换？': 'Replace the existing group?',
+  '替换': 'Replace',
+  '分组操作未完成': 'Group operation was not completed',
+  '分组数据异常，无法修改': 'Player group data is invalid and cannot be changed.',
+  '这个分组还没有球员': 'This group has no players yet',
   '球员名单': 'Player roster',
   '正在读取球员分组…': 'Loading player groups…',
   '还没有球员分组，可以在审核页把球员存为分组。': 'No player groups yet. Save players as a group on the review page.',

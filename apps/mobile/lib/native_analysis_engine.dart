@@ -6,8 +6,28 @@ import 'package:bhe_core/bhe_core.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'features/diagnostics/friendly_error.dart';
+import 'features/diagnostics/mobile_diagnostics.dart';
+import 'features/operation_status/task_stop_status.dart';
+
+class PreparedNativeAnalysis {
+  PreparedNativeAnalysis._(this.modelPath);
+  String modelPath;
+  bool cancelled = false;
+  bool dispatched = false;
+  Future<void>? cancelPending;
+  final Completer<void> _settled = Completer<void>();
+  Future<void> get settled => _settled.future;
+}
+
 class NativeAnalysisEngine implements MobileAnalysisEngine {
-  NativeAnalysisEngine();
+  NativeAnalysisEngine({
+    this.modelPreparer,
+    this.cancelTimeout = const Duration(seconds: 5),
+  });
+
+  final Future<String> Function()? modelPreparer;
+  final Duration cancelTimeout;
 
   static const _autoRoiDurationMs = 20 * 1000;
   static const _autoRoiMaxSamples = 12;
@@ -18,7 +38,8 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
   static const _progressChannel = EventChannel(
     'com.bhe.bhe/mobile_analysis_progress',
   );
-  bool _cancelled = false;
+  PreparedNativeAnalysis? _activeRun;
+  PreparedNativeAnalysis? get activeRun => _activeRun;
 
   @override
   Future<Map<String, dynamic>?> suggestRoi({
@@ -51,7 +72,8 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       return value?.map((key, value) => MapEntry(key.toString(), value));
     } on MissingPluginException {
       return null;
-    } on PlatformException catch (error) {
+    } on PlatformException catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'analysis');
       developer.log(
         'automatic ROI suggestion failed: ${error.message}',
         name: 'BHE-Analysis',
@@ -111,7 +133,8 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       }
     } on MissingPluginException {
       return;
-    } on PlatformException catch (error) {
+    } on PlatformException catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'analysis');
       developer.log(
         'analysis recovery failed: ${error.message}',
         name: 'BHE-Analysis',
@@ -122,6 +145,32 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
     }
   }
 
+  PreparedNativeAnalysis _newRun() {
+    _activeRun?.cancelled = true;
+    final run = PreparedNativeAnalysis._('');
+    _activeRun = run;
+    return run;
+  }
+
+  Future<PreparedNativeAnalysis?> prepareAnalysis() => _prepare(_newRun());
+
+  Future<PreparedNativeAnalysis?> _prepare(PreparedNativeAnalysis run) async {
+    if (run.cancelled || !identical(_activeRun, run)) return null;
+    final modelPath =
+        await (modelPreparer?.call() ??
+                _materializeModelWithProgress(isCancelled: () => run.cancelled))
+            .timeout(
+              const Duration(seconds: 60),
+              onTimeout: () => throw const MobileAnalysisException(
+                '本地模型准备超过 60 秒，请检查存储空间后重试。',
+              ),
+            );
+    if (run.cancelled || !identical(_activeRun, run)) return null;
+    run.modelPath = modelPath;
+    MobileDiagnostics.instance.event('analysis.model.ready');
+    return run;
+  }
+
   @override
   Stream<AnalysisProgress> analyze({
     required VideoInfo video,
@@ -130,27 +179,43 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
     required Roi netRoi,
     required AnalysisSettings settings,
   }) async* {
-    _cancelled = false;
+    final run = _newRun();
     yield const AnalysisProgress(
       stage: AnalysisStage.validateInput,
       progress: 0.02,
       message: '正在检查视频',
-    );
-    developer.log(
-      'analysis stream started: ${video.path}',
-      name: 'BHE-Analysis',
     );
     yield const AnalysisProgress(
       stage: AnalysisStage.prepareProxy,
       progress: 0.03,
       message: '正在准备本地模型',
     );
-    final modelPath = await _materializeModelWithProgress().timeout(
-      const Duration(seconds: 60),
-      onTimeout: () =>
-          throw const MobileAnalysisException('本地模型准备超过 60 秒，请检查存储空间后重试。'),
+    final prepared = await _prepare(run);
+    if (prepared == null) return;
+    yield* startPrepared(
+      prepared,
+      video: video,
+      hoopRoi: hoopRoi,
+      rimRoi: rimRoi,
+      netRoi: netRoi,
+      settings: settings,
     );
-    developer.log('model ready: $modelPath', name: 'BHE-Analysis');
+  }
+
+  // Platform progress is produced by the native worker; callers can wait for
+  // that confirmation before discarding the preceding review.
+  Stream<AnalysisProgress> startPrepared(
+    PreparedNativeAnalysis run, {
+    required VideoInfo video,
+    required Roi hoopRoi,
+    Roi? rimRoi,
+    required Roi netRoi,
+    required AnalysisSettings settings,
+  }) {
+    if (run.cancelled || !identical(_activeRun, run)) {
+      return const Stream<AnalysisProgress>.empty();
+    }
+    run.dispatched = true;
     final progressController = StreamController<AnalysisProgress>();
     final progressSubscription = _progressChannel
         .receiveBroadcastStream()
@@ -163,7 +228,7 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       'analyzeVideo',
       {
         'videoPath': video.path,
-        'modelPath': modelPath,
+        'modelPath': run.modelPath,
         'hoopRoi': hoopRoi.toJson(),
         if (rimRoi != null) 'rimRoi': rimRoi.toJson(),
         'netRoi': netRoi.toJson(),
@@ -187,6 +252,30 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
         'dedupeMs': 2000,
       },
     );
+    resultFuture.then<void>(
+      (_) {
+        if (!run._settled.isCompleted) run._settled.complete();
+      },
+      onError: (Object _, StackTrace _) {
+        if (!run._settled.isCompleted) run._settled.complete();
+      },
+    );
+    return _consumeAnalysis(
+      run,
+      resultFuture,
+      progressController,
+      progressSubscription,
+      iterator,
+    );
+  }
+
+  Stream<AnalysisProgress> _consumeAnalysis(
+    PreparedNativeAnalysis run,
+    Future<Map<Object?, Object?>?> resultFuture,
+    StreamController<AnalysisProgress> progressController,
+    StreamSubscription<dynamic> progressSubscription,
+    StreamIterator<AnalysisProgress> iterator,
+  ) async* {
     try {
       Map<Object?, Object?>? result;
       while (true) {
@@ -203,7 +292,15 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
           break;
         }
       }
-      if (_cancelled) return;
+      final pending = run.cancelPending;
+      if (pending != null) {
+        try {
+          await pending;
+        } on Object {
+          /* cancel() reports the failure */
+        }
+      }
+      if (run.cancelled) return;
       final candidates = ((result?['candidates'] as List?) ?? const [])
           .whereType<Map>()
           .map((item) => Candidate.fromJson(item.cast<String, dynamic>()))
@@ -218,12 +315,14 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       );
     } on MissingPluginException {
       throw const MobileAnalysisException('当前设备未注册移动端分析模块。');
-    } on PlatformException catch (error) {
-      throw MobileAnalysisException(error.message ?? error.code);
+    } on PlatformException catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'analysis');
+      throw MobileDiagnosticException(error, 'analysis');
     } finally {
       await progressSubscription.cancel();
       await iterator.cancel();
       await progressController.close();
+      if (identical(_activeRun, run)) _activeRun = null;
     }
   }
 
@@ -252,7 +351,9 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
     );
   }
 
-  Future<String> _materializeModelWithProgress() async {
+  Future<String> _materializeModelWithProgress({
+    bool Function()? isCancelled,
+  }) async {
     final directory = await getApplicationSupportDirectory();
     final file = File('${directory.path}/models/bball_model.onnx');
     final data = await rootBundle.load('assets/models/bball_model.onnx');
@@ -268,15 +369,17 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       return file.path;
     }
     await file.parent.create(recursive: true);
-    final temporary = File('${file.path}.tmp');
+    final temporaryDirectory = await file.parent.createTemp('.bball_model-');
+    final temporary = File('${temporaryDirectory.path}/model.tmp');
     const chunkSize = 1024 * 1024;
     final stopwatch = Stopwatch()..start();
     IOSink? output;
     try {
-      if (await temporary.exists()) await temporary.delete();
       output = temporary.openWrite();
       for (var offset = 0; offset < bytes.length; offset += chunkSize) {
-        if (_cancelled) throw const MobileAnalysisException('分析已取消');
+        if (isCancelled?.call() ?? false) {
+          throw const MobileAnalysisException('分析已取消');
+        }
         final end = (offset + chunkSize).clamp(0, bytes.length);
         output.add(bytes.sublist(offset, end));
         await output.flush();
@@ -291,22 +394,73 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
       if (await temporary.length() != bytes.length) {
         throw const MobileAnalysisException('本地模型复制不完整，请重试。');
       }
-      if (await file.exists()) await file.delete();
+      if (isCancelled?.call() ?? false) {
+        throw const MobileAnalysisException('分析已取消');
+      }
       await temporary.rename(file.path);
     } finally {
       await output?.close();
-      if (await temporary.exists()) await temporary.delete();
+      if (await temporaryDirectory.exists()) {
+        await temporaryDirectory.delete(recursive: true);
+      }
     }
     return file.path;
   }
 
+  /// Only the native task manager can confirm that its worker has exited.
+  Future<TaskStopStatus> nativeAnalysisStatus() async {
+    final value = await _channel
+        .invokeMethod<bool>('isAnalysisActive')
+        .timeout(cancelTimeout);
+    return switch (value) {
+      true => TaskStopStatus.running,
+      false => TaskStopStatus.stopped,
+      null => TaskStopStatus.unknown,
+    };
+  }
+
+  Future<void> requestNativeStop() async {
+    await _channel.invokeMethod<void>('cancelAnalysis').timeout(cancelTimeout);
+  }
+
+  Future<void> cancelPrepared(PreparedNativeAnalysis run) async {
+    if (identical(_activeRun, run)) await cancel();
+  }
+
   @override
   Future<void> cancel() async {
-    _cancelled = true;
-    try {
-      await _channel.invokeMethod<void>('cancelAnalysis');
-    } on MissingPluginException {
+    final run = _activeRun;
+    if (run == null) return;
+    if (!run.dispatched) {
+      run.cancelled = true;
       return;
+    }
+    final existing = run.cancelPending;
+    if (existing != null) return existing;
+    final request = _cancelDispatched(run);
+    run.cancelPending = request;
+    try {
+      await request;
+    } finally {
+      if (identical(run.cancelPending, request)) run.cancelPending = null;
+    }
+  }
+
+  Future<void> _cancelDispatched(PreparedNativeAnalysis run) async {
+    try {
+      await _channel
+          .invokeMethod<void>('cancelAnalysis')
+          .timeout(cancelTimeout);
+      run.cancelled = true;
+    } on MissingPluginException {
+      run.cancelled = true;
+    } on PlatformException catch (error, stack) {
+      MobileDiagnostics.instance.error(
+        error,
+        stack,
+        operation: 'analysis.cancel',
+      );
+      throw MobileDiagnosticException(error, 'analysis');
     }
   }
 
@@ -323,7 +477,8 @@ class NativeAnalysisEngine implements MobileAnalysisEngine {
             'outputPath': outputPath,
           }) ==
           true;
-    } on Object {
+    } on Object catch (error, stack) {
+      MobileDiagnostics.instance.error(error, stack, operation: 'video.cover');
       return false;
     }
   }

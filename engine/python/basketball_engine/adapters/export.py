@@ -14,7 +14,7 @@ from typing import Any, Dict
 from uuid import uuid4
 
 from .analysis import PipelineCancelled, terminate_process
-from ..diagnostics import log_diagnostic
+from ..diagnostics import log_diagnostic, log_failed_command
 from ..media_tools import resolve_media_tool
 
 
@@ -521,8 +521,42 @@ def run_atomic_ffmpeg(
                 stderr_stream.close()
         validate_media_file(temporary)
         temporary.replace(output_path)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        log_failed_command("media command failed", atomic_command, getattr(exc, "returncode", None))
+        raise
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def merge_overlapping_candidates(candidates):
+    sources = {}
+    for index, candidate in enumerate(candidates):
+        if int(candidate["review_start_ms"]) < 0 or int(candidate["review_end_ms"]) <= int(candidate["review_start_ms"]):
+            raise ValueError("INVALID_CLIP_RANGE")
+        sources.setdefault(candidate["source_path"], []).append((index, candidate))
+    groups = []
+    for members in sources.values():
+        current = []
+        end = None
+        for index, candidate in sorted(members, key=lambda item: int(item[1]["review_start_ms"])):
+            start = int(candidate["review_start_ms"])
+            if current and start > end:
+                groups.append(current)
+                current = []
+            current.append((index, candidate))
+            end = max(end, int(candidate["review_end_ms"])) if len(current) > 1 else int(candidate["review_end_ms"])
+        if current:
+            groups.append(current)
+    merged = []
+    for group in sorted(groups, key=lambda group: min(item[0] for item in group)):
+        first = min(group, key=lambda item: item[0])[1]
+        merged.append({
+            **first,
+            "review_start_ms": min(int(item[1]["review_start_ms"]) for item in group),
+            "review_end_ms": max(int(item[1]["review_end_ms"]) for item in group),
+            "has_audio": all(bool(item[1].get("has_audio", True)) for item in group),
+        })
+    return merged
 
 
 def export_goal_clips(
@@ -537,6 +571,11 @@ def export_goal_clips(
 ) -> Dict[str, Any]:
     if mode not in {"separate", "merge"}:
         raise ValueError("INVALID_EXPORT_MODE")
+    merged_overlap_count = 0
+    if mode == "merge" and effect == "none":
+        merged = merge_overlapping_candidates(candidates)
+        merged_overlap_count = len(candidates) - len(merged)
+        candidates = merged
     started = time.perf_counter()
     output_dir.mkdir(parents=True, exist_ok=True)
     files: list[Path] = []
@@ -585,6 +624,8 @@ def export_goal_clips(
             )
             merged_existed = merged_path.exists()
             concat_file = output_dir / "concat.txt"
+            if not concat_file.exists():
+                created_files.append(concat_file)
             concat_file.write_text(
                 "".join(concat_manifest_entry(path) for path in files),
                 encoding="utf-8",
@@ -601,7 +642,8 @@ def export_goal_clips(
                     cancel_check=cancel_check,
                     process_callback=process_callback,
                 )
-            except (OSError, subprocess.CalledProcessError):
+            except (OSError, subprocess.CalledProcessError) as exc:
+                log_diagnostic(f"merge copy failed, re-encoding: {exc}")
                 # Separate clips use a common encoder, so stream-copy is the
                 # fast path. Re-encode only when timestamps/codecs prevent a
                 # valid concat output.
@@ -633,5 +675,6 @@ def export_goal_clips(
         "files": [str(path) for path in export_files],
         "clip_files": [str(path) for path in files],
         "duration_ms": total_ms,
+        "merged_overlap_count": merged_overlap_count,
         "processing_ms": round((time.perf_counter() - started) * 1000),
     }

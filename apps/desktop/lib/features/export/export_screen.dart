@@ -1050,6 +1050,8 @@ class _ExportHistoryCard extends StatelessWidget {
     };
     final count = (item['candidate_count'] as num?)?.toInt() ?? 0;
     final duration = (item['duration_ms'] as num?)?.toInt() ?? 0;
+    final mergedOverlapCount =
+        ((item['metadata'] as Map?)?['merged_overlap_count'] as num?)?.toInt() ?? 0;
     final processing = (item['processing_ms'] as num?)?.toInt() ?? 0;
     final fileSize = (item['file_size_bytes'] as num?)?.toInt() ?? 0;
     final width = (item['width'] as num?)?.toInt();
@@ -1119,6 +1121,13 @@ class _ExportHistoryCard extends StatelessWidget {
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
+                if (mergedOverlapCount > 0)
+                  Text(
+                    context.bheText('有 $mergedOverlapCount 个重叠片段已合并为一段'),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: c.textSecondary,
+                    ),
+                  ),
                 const SizedBox(height: 2),
                 SelectableText(
                   path,

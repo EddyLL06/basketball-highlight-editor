@@ -116,3 +116,52 @@ def test_untagged_clips_get_their_own_video_only_when_included(tmp_path: Path, t
     })
 
     assert sorted(path.name for path in out.iterdir()) == ["张三.mp4", "未标记.mp4"]
+
+
+def test_overlap_is_merged_within_each_player_only(tmp_path, tagged_project):
+    service, store, project_root, ffprobe, (zhang, li) = tagged_project
+    store.update_clip_range('c1000', 0, 3000)
+    store.update_clip_range('c5000', 2000, 5000)
+    store.update_clip_range('c3000', 1000, 4000)
+    _, _, snapshot = service._export_candidate_snapshot(
+        store, None, {'player_ids': [zhang, li], 'include_unassigned': False},
+    )
+    result = service._execute_export({
+        'project_root': str(project_root), 'mode': 'merge_by_player',
+        'candidate_snapshot': snapshot, 'output_dir': str(tmp_path / 'out'),
+    })
+    assert result['export']['duration_ms'] == 8000
+    assert _duration(ffprobe, tmp_path / 'out' / '张三.mp4') == pytest.approx(5, abs=0.15)
+    assert _duration(ffprobe, tmp_path / 'out' / '李四_队长.mp4') == pytest.approx(3, abs=0.15)
+    assert result['export']['metadata']['merged_overlap_count'] == 1
+    assert store.list_exports(store.project()['id'])[0]['metadata']['merged_overlap_count'] == 1
+
+
+@pytest.mark.parametrize('cancel', [False, True])
+def test_per_player_failure_cleans_completed_groups(tmp_path, tagged_project, cancel):
+    from engine.python.basketball_engine.adapters.analysis import PipelineCancelled
+
+    service, store, _, _, _ = tagged_project
+    source = store.list_videos()[0]['source_path']
+    clips = [
+        {'source_path': source, 'player_name': 'A', 'event_time_ms': 1000,
+         'review_start_ms': 0, 'review_end_ms': 2000},
+        {'source_path': source if cancel else str(tmp_path / 'missing.mp4'),
+         'player_name': 'B', 'event_time_ms': 1000,
+         'review_start_ms': 0, 'review_end_ms': 2000},
+    ]
+    cancelled = False
+
+    def progress(stage, fraction):
+        nonlocal cancelled
+        if stage == 'merge_clips':
+            cancelled = True
+
+    out = tmp_path / 'out'
+    with pytest.raises(PipelineCancelled if cancel else subprocess.CalledProcessError):
+        service._export_merged_per_player(
+            store, clips, out, {Path(source)}, progress_callback=progress,
+            cancel_check=(lambda: cancelled) if cancel else None,
+        )
+    assert not list(out.glob('*.mp4'))
+    assert not list((store.root / 'artifacts' / 'exports').rglob('*.*'))

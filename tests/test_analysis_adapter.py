@@ -495,14 +495,14 @@ def test_a_long_failure_leads_with_the_real_error_not_a_cut_line(tmp_path: Path)
         "import sys\n"
         "for i in range(80):\n"
         "    print('processing frame line ' + str(i) + ' of the long running video', file=sys.stderr)\n"
-        "print('OSError: [WinError 1114] DLL init failed', file=sys.stderr)\n"
+        "print('RuntimeError: example analysis failure', file=sys.stderr)\n"
         "sys.exit(1)\n"
     )
     with pytest.raises(RuntimeError) as error:
         run_pipeline([[sys.executable, "-c", script]], tmp_path / "refined.json")
 
     lines = str(error.value).splitlines()
-    assert lines[0] == "pipeline step 执行失败: OSError: [WinError 1114] DLL init failed"
+    assert lines[0] == "pipeline step 执行失败: RuntimeError: example analysis failure"
     assert "processing frame line" in str(error.value)
     # 保留的日志从整行开始，没有被切断的半行
-    assert all(line.startswith("processing frame line") or line.startswith("OSError") for line in lines[1:] if line)
+    assert all(line.startswith("processing frame line") or line.startswith("RuntimeError") for line in lines[1:] if line)

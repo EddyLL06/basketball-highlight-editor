@@ -37,9 +37,9 @@ void main() {
     await pumpEventQueue();
     expect(state.playerGroups.single.name, '周六队');
 
-    state.addPlayer('罗斯');
-    state.addPlayer('小夏');
-    state.importPlayers(state.playerGroups.single.players);
+    await state.addPlayer('罗斯');
+    await state.addPlayer('小夏');
+    await state.importPlayers(state.playerGroups.single.players);
     expect(state.project.players, ['罗斯', '小夏', '科比']);
 
     await state.savePlayerGroup('周六队');

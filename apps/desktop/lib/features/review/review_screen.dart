@@ -14,6 +14,7 @@ import '../feedback/feedback_dialog.dart';
 import '../../components/cs_button.dart';
 import '../../components/cs_empty_state.dart';
 import '../../components/cs_progress_track.dart';
+import 'candidate_status_labels.dart';
 import '../../core/video_orientation.dart';
 import '../../providers/player_groups_provider.dart';
 import '../../providers/project_state.dart';
@@ -912,6 +913,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
                       .toDouble();
                   final queue = _CandidatePanel(
                     candidates: candidates,
+                    overlappingIds: _overlappingCandidateIds(allCandidates),
                     selectedId: selected?['id']?.toString(),
                     includedCount: includedCount,
                     reviewedCount: allCandidates.where(_isReviewed).length,
@@ -4763,6 +4765,7 @@ class _ClipTimeField extends StatelessWidget {
 class _CandidatePanel extends StatelessWidget {
   const _CandidatePanel({
     required this.candidates,
+    required this.overlappingIds,
     required this.selectedId,
     required this.includedCount,
     required this.reviewedCount,
@@ -4807,6 +4810,7 @@ class _CandidatePanel extends StatelessWidget {
   });
 
   final List<Map<String, dynamic>> candidates;
+  final Set<String> overlappingIds;
   final String? selectedId;
   final int includedCount;
   final int reviewedCount;
@@ -5095,6 +5099,7 @@ class _CandidatePanel extends StatelessWidget {
                         contexts: candidateRowContexts,
                         child: _CandidateRow(
                         candidate: candidate,
+                        overlapsPrevious: overlappingIds.contains(id),
                         index: index,
                         selected: id == selectedId,
                         excluded: _isExcluded(candidate),
@@ -5932,6 +5937,7 @@ class _EmptyCandidates extends StatelessWidget {
 class _CandidateRow extends StatelessWidget {
   const _CandidateRow({
     required this.candidate,
+    required this.overlapsPrevious,
     required this.index,
     required this.selected,
     required this.excluded,
@@ -5950,6 +5956,7 @@ class _CandidateRow extends StatelessWidget {
   final Map<String, dynamic> candidate;
   final int index;
   final bool selected;
+  final bool overlapsPrevious;
   final bool excluded;
   final bool busy;
   final VoidCallback onTap;
@@ -5966,6 +5973,12 @@ class _CandidateRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
     final theme = Theme.of(context);
+    final adjusted = _hasAdjustedRange(candidate);
+    final rimStatus = _rimCheckStatus(candidate);
+    final statusLabel = excluded
+        ? (_isAutoExcluded(candidate) ? '自动排除' : '已排除')
+        : rimStatus == 'made' ? '通过' : rimStatus == 'unsure' ? '未确认' : null;
+    final statusColor = excluded ? c.error : rimStatus == 'made' ? c.success : c.warning;
     return Semantics(
       button: true,
       selected: selected,
@@ -6094,36 +6107,17 @@ class _CandidateRow extends StatelessWidget {
                                             ),
                                       ),
                                     ),
-                                    if (excluded) ...[
-                                      const SizedBox(width: Spacing.xs),
-                                      Text(
-                                        context.bheText(
-                                          _isAutoExcluded(candidate)
-                                              ? '自动排除'
-                                              : '已排除',
+                                    if (adjusted || overlapsPrevious || statusLabel != null) ...[
+                                      const SizedBox(width: 4),
+                                      Flexible(
+                                        flex: 4,
+                                        child: CandidateStatusLabels(
+                                          candidateId: candidate['id'].toString(),
+                                          adjusted: adjusted,
+                                          overlapsPrevious: overlapsPrevious,
+                                          statusLabel: statusLabel,
+                                          statusColor: statusColor,
                                         ),
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(color: c.error),
-                                      ),
-                                    ],
-                                    if (!excluded &&
-                                        _rimCheckStatus(candidate) ==
-                                            'made') ...[
-                                      const SizedBox(width: Spacing.xs),
-                                      Text(
-                                        context.bheText('通过'),
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(color: c.success),
-                                      ),
-                                    ],
-                                    if (!excluded &&
-                                        _rimCheckStatus(candidate) ==
-                                            'unsure') ...[
-                                      const SizedBox(width: Spacing.xs),
-                                      Text(
-                                        context.bheText('未确认'),
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(color: c.warning),
                                       ),
                                     ],
                                   ],
@@ -6870,6 +6864,30 @@ int _clipEnd(Map<String, dynamic> candidate) {
   return value is num ? value.toInt() : int.tryParse('$value') ?? 0;
 }
 
+bool _hasAdjustedRange(Map<String, dynamic> candidate) {
+  return (candidate['default_start_ms'] != null &&
+          _clipStart(candidate) != _number(candidate['default_start_ms']).round()) ||
+      (candidate['default_end_ms'] != null &&
+          _clipEnd(candidate) != _number(candidate['default_end_ms']).round());
+}
+
+Set<String> _overlappingCandidateIds(List<Map<String, dynamic>> candidates) {
+  final previousByVideo = <Object?, Map<String, dynamic>>{};
+  final overlapping = <String>{};
+  for (final candidate in candidates) {
+    if (_isExcluded(candidate)) continue;
+    final source = candidate['video_id'] ?? candidate['source_path'];
+    final previous = previousByVideo[source];
+    if (previous != null &&
+        _clipStart(candidate) < _clipEnd(previous) &&
+        _clipEnd(candidate) > _clipStart(previous)) {
+      overlapping.add(candidate['id'].toString());
+    }
+    previousByVideo[source] = candidate;
+  }
+  return overlapping;
+}
+
 String _candidateSignature(Map<String, dynamic>? candidate) {
   if (candidate == null) return '';
   return '${candidate['id']}|${_clipStart(candidate)}|${_clipEnd(candidate)}';
@@ -7214,6 +7232,7 @@ String _analysisDetailLabel(
       : const <String, dynamic>{};
   final parts = <String>[];
   for (final entry in const <String, String>{
+    'engine_preflight': '引擎自检',
     'prepare_proxy': '代理',
     'coarse_scan': '粗扫',
     'generate_candidates': '候选',
@@ -7251,6 +7270,7 @@ String _formatSeconds(double value) {
 String _stageLabel(String stage) =>
     const <String, String>{
       'validate_input': '检查视频输入',
+      'engine_preflight': '检查分析引擎',
       'prepare_proxy': '生成预览视频',
       'coarse_scan': '快速扫描候选',
       'generate_candidates': '生成候选',

@@ -8,9 +8,9 @@ import '../../core/diagnostics.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
 
+export '../../core/contact_actions.dart' show githubIssueUrl;
+
 const communityUrl = 'https://bhe.jafir.top/#download';
-const githubIssueUrl =
-    'https://github.com/fly7632785/basketball-highlight-editor/issues/new?template=bug_report.yml';
 
 /// 反馈入口：先复制诊断信息，再发到交流群、邮件或 GitHub。
 /// [error] 不为空时（从报错进来）会一起显示并写进诊断信息。

@@ -17,6 +17,11 @@ on:
           - macos
           - windows
           - android
+      dry_run:
+        description: "默认演练；正式发布请显式选 false"
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -32,130 +37,182 @@ env:
 jobs:
   upload:
     name: Upload release assets to OSS
+    concurrency:
+      group: ${{ toJSON(inputs.dry_run) == 'false' && 'bhe-production-update-channel-v1' || 'bhe-dryrun-update-channel-v1' }}
+      cancel-in-progress: false
+    outputs:
+      publish_status: ${{ steps.publish.outputs.status }}
+      failure_stage: ${{ steps.failure_stage.outputs.stage }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
+      OSS_BUCKET: oss://shengshengniannian
+      OSS_PREFIX: shengshengniannian/basketball-highlight-editor/releases
+      OSS_ANDROID_KEY: shengshengniannian/app/android/bhe/latest.apk
+      OSSUTIL_VERSION: v1.7.19
+      TAG_NAME: ${{ inputs.tag }}
+      RELEASE_PLATFORM: ${{ inputs.platform }}
+      DRY_RUN: ${{ toJSON(inputs.dry_run) == 'false' && 'false' || 'true' }}
     steps:
+      - name: Check out publishing tools
+        id: checkout_publisher
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: publisher
+      - name: Check out exact release notes
+        id: checkout_source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG_NAME }}
+          path: source
       - name: Configure Alibaba Cloud credentials
+        id: credentials
+        if: ${{ toJSON(inputs.dry_run) == 'false' }}
         uses: aliyun/configure-aliyun-credentials-action@v1
         with:
           role-to-assume: ${{ vars.ALIYUN_RAM_ROLE_ARN }}
           oidc-provider-arn: ${{ vars.ALIYUN_OIDC_PROVIDER_ARN }}
-          role-session-name: bhe-manual-oss-${{ github.run_id }}
+          role-session-name: bhe-release-${{ github.run_id }}
           role-session-expiration: 1800
           audience: sts.aliyuncs.com
-
       - name: Install ossutil
+        id: install
+        if: ${{ toJSON(inputs.dry_run) == 'false' }}
         shell: bash
         run: |
           set -euo pipefail
           go_bin="$(go env GOPATH)/bin"
           go install "github.com/aliyun/ossutil@${OSSUTIL_VERSION}"
           echo "$go_bin" >> "$GITHUB_PATH"
-          "$go_bin/ossutil" help >/dev/null
-
-      - name: Download GitHub Release assets
+      - name: Download exact release assets
+        id: download_release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ inputs.tag }}
-          RELEASE_PLATFORM: ${{ inputs.platform }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/bhe-release-assets"
-          common_args=(
-            "$TAG_NAME"
-            --repo "$GITHUB_REPOSITORY"
-            --dir "$RUNNER_TEMP/bhe-release-assets"
-          )
+          args=("$TAG_NAME" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/bhe-release-assets")
           case "$RELEASE_PLATFORM" in
-            all)
-              gh release download "${common_args[@]}"
-              ;;
-            macos)
-              gh release download "${common_args[@]}" \
-                --pattern 'BHE-macos-*-v*.dmg' \
-                --pattern 'BHE-macos-*-v*.dmg.sha256'
-              ;;
-            windows)
-              gh release download "${common_args[@]}" \
-                --pattern 'BHE-windows-x64-v*.zip' \
-                --pattern 'BHE-windows-x64-v*.zip.sha256'
-              ;;
-            android)
-              gh release download "${common_args[@]}" \
-                --pattern 'BHE-android-arm64-v*.apk' \
-                --pattern 'BHE-android-arm64-v*.apk.sha256'
-              ;;
-            *)
-              echo "Unsupported release platform: $RELEASE_PLATFORM" >&2
-              exit 1
-              ;;
+            all) patterns=('BHE-*.dmg' 'BHE-*.dmg.sha256' 'BHE-*.zip' 'BHE-*.zip.sha256' 'BHE-*.apk' 'BHE-*.apk.sha256') ;;
+            macos) patterns=('BHE-macos-*.dmg' 'BHE-macos-*.dmg.sha256') ;;
+            windows) patterns=('BHE-windows-*.zip' 'BHE-windows-*.zip.sha256') ;;
+            android) patterns=('BHE-android-*.apk' 'BHE-android-*.apk.sha256') ;;
+            *) echo 'Unsupported platform' >&2; exit 1 ;;
           esac
-          test -n "$(find "$RUNNER_TEMP/bhe-release-assets" -type f -print -quit)"
-
-      - name: Configure temporary ossutil credentials
+          for pattern in "${patterns[@]}"; do args+=(--pattern "$pattern"); done
+          gh release download "${args[@]}"
+      - name: Configure ossutil credentials
+        id: config
+        if: ${{ toJSON(inputs.dry_run) == 'false' }}
         shell: bash
-        env:
-          OSSUTIL_CONFIG: ${{ runner.temp }}/ossutilconfig
         run: |
+          set +x
           set -euo pipefail
           umask 077
-          ossutil config \
-            --config-file "$OSSUTIL_CONFIG" \
-            --endpoint "$OSS_ENDPOINT" \
+          config="$RUNNER_TEMP/bhe-ossutilconfig"
+          ossutil config --config-file "$config" --endpoint "$OSS_ENDPOINT" \
             --access-key-id "$ALIBABA_CLOUD_ACCESS_KEY_ID" \
             --access-key-secret "$ALIBABA_CLOUD_ACCESS_KEY_SECRET" \
             --sts-token "$ALIBABA_CLOUD_SECURITY_TOKEN"
-
-      - name: Upload assets to OSS
+      - name: Publish verified update channel
+        id: publish
         shell: bash
         env:
-          OSSUTIL_CONFIG: ${{ runner.temp }}/ossutilconfig
+          UPDATE_SIGNING_KEY: ${{ secrets.BHE_UPDATE_SIGNING_KEY }}
         run: |
+          set +x
           set -euo pipefail
-          ossutil \
-            --config-file "$OSSUTIL_CONFIG" \
-            cp -r -f --update \
-            "$RUNNER_TEMP/bhe-release-assets/" \
-            "$OSS_BUCKET/$OSS_PREFIX/"
+          test -n "$UPDATE_SIGNING_KEY"
+          config="$RUNNER_TEMP/bhe-ossutilconfig"
+          key="$RUNNER_TEMP/bhe-update-signing-key.pem"
+          trap 'rm -f "$key" "$config"' EXIT
+          umask 077
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key"
+          transport_args=(--oss-root "$OSS_BUCKET")
+          if [[ "$DRY_RUN" == "true" ]]; then
+            dry_run_arg=--dry-run
+          else
+            dry_run_arg=
+            transport_args+=(--oss-config "$config")
+          fi
+          python3 publisher/scripts/publish_release_update.py \
+            --tag "$TAG_NAME" --platform "$RELEASE_PLATFORM" \
+            --assets-dir "$RUNNER_TEMP/bhe-release-assets" \
+            "${transport_args[@]}" \
+            --prefix "$OSS_PREFIX" --android-key "$OSS_ANDROID_KEY" \
+            --base-url "https://shengshengniannian.oss-cn-beijing.aliyuncs.com/$OSS_PREFIX" \
+            --android-base-url "https://oss.shengshengniannian.com/$OSS_PREFIX" \
+            --android-alias-url "https://oss.shengshengniannian.com/$OSS_ANDROID_KEY" \
+            --readme-zh source/README.md --readme-en source/README.en.md \
+            --signing-key "$key" --work-dir "$RUNNER_TEMP/bhe-update-channel" ${dry_run_arg:+--dry-run}
+          python3 -c 'import json,os; s=json.load(open(os.path.join(os.environ["RUNNER_TEMP"],"bhe-update-channel","publish-summary.json"))); print("status="+s["status"])' >> "$GITHUB_OUTPUT"
+      - name: Remove temporary credentials
+        if: always()
+        shell: bash
+        run: |
+          set +x
+          rm -f "$RUNNER_TEMP/bhe-update-signing-key.pem" "$RUNNER_TEMP/bhe-ossutilconfig"
+      - name: Preserve outcome and manifest files (see verification status)
+        id: backup
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-channel-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/bhe-update-channel/*.json
+            ${{ runner.temp }}/bhe-update-channel/*.json.sig
+          if-no-files-found: warn
 
-      - name: Publish stable download aliases
+
+      - name: Record failure stage
+        id: failure_stage
+        if: always()
         shell: bash
         env:
-          OSSUTIL_CONFIG: ${{ runner.temp }}/ossutilconfig
+          CHECKOUT_PUBLISHER: ${{ steps.checkout_publisher.outcome }}
+          CHECKOUT_SOURCE: ${{ steps.checkout_source.outcome }}
+          CREDENTIALS: ${{ steps.credentials.outcome }}
+          INSTALL: ${{ steps.install.outcome }}
+          DOWNLOAD_RELEASE: ${{ steps.download_release.outcome }}
+          DOWNLOAD_BUILD: ${{ '' }}
+          CONFIG: ${{ steps.config.outcome }}
+          BACKUP: ${{ steps.backup.outcome }}
+          PUBLISH: ${{ steps.publish.outcome }}
         run: |
-          set -euo pipefail
-          shopt -s nullglob
-          alias_dir="$RUNNER_TEMP/bhe-latest-aliases"
-          mkdir -p "$alias_dir"
+          stage=none
+          for pair in "checkout_publisher:$CHECKOUT_PUBLISHER" "checkout_source:$CHECKOUT_SOURCE" \
+            "credentials:$CREDENTIALS" "install:$INSTALL" "download_release:$DOWNLOAD_RELEASE" \
+            "download_build:$DOWNLOAD_BUILD" "config:$CONFIG" "publish:$PUBLISH" "backup:$BACKUP"; do
+            case "$pair" in *:failure|*:cancelled) stage="${pair%%:*}"; break ;; esac
+          done
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
 
-          publish_alias() {
-            local source="$1"
-            local alias="$2"
-            local destination="${3:-$OSS_PREFIX/$alias}"
-            local digest
-            local checksum="$alias_dir/$alias.sha256"
-
-            ossutil \
-              --config-file "$OSSUTIL_CONFIG" \
-              cp -f --meta "Cache-Control:no-cache" \
-              "$source" "$OSS_BUCKET/$destination"
-            digest="$(sha256sum "$source" | awk '{print $1}')"
-            printf '%s  %s\n' "$digest" "$alias" > "$checksum"
-            ossutil \
-              --config-file "$OSSUTIL_CONFIG" \
-              cp -f --meta "Cache-Control:no-cache" \
-              "$checksum" "$OSS_BUCKET/$destination.sha256"
-          }
-
-          for source in "$RUNNER_TEMP/bhe-release-assets"/BHE-macos-arm64-v*.dmg; do
-            publish_alias "$source" "BHE-macos-arm64-latest.dmg"
-          done
-          for source in "$RUNNER_TEMP/bhe-release-assets"/BHE-macos-x86_64-v*.dmg; do
-            publish_alias "$source" "BHE-macos-x86_64-latest.dmg"
-          done
-          for source in "$RUNNER_TEMP/bhe-release-assets"/BHE-windows-x64-v*.zip; do
-            publish_alias "$source" "BHE-windows-x64-latest.zip"
-          done
-          for source in "$RUNNER_TEMP/bhe-release-assets"/BHE-android-arm64-v8a-v*-debug-signed.apk; do
-            publish_alias "$source" "BHE-android-arm64-v8a-latest.apk" "$OSS_ANDROID_KEY"
-          done
+  publication-status:
+    name: Report production channel outcome
+    needs: upload
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarize publication and queue cancellation
+        env:
+          OUTCOME: ${{ needs.upload.result }}
+          DRY_RUN: ${{ toJSON(inputs.dry_run) == 'false' && 'false' || 'true' }}
+          PUBLISH_STATUS: ${{ needs.upload.outputs.publish_status }}
+          FAILURE_STAGE: ${{ needs.upload.outputs.failure_stage }}
+        run: |
+          if [[ "$DRY_RUN" == "true" ]]; then
+            case "$OUTCOME:$PUBLISH_STATUS" in
+              success:dry-run-ok) result='演练完成 dry-run-ok' ;;
+              failure:*) result='演练失败' ;;
+              cancelled:*) result='演练取消' ;;
+              *) result='演练未执行' ;;
+            esac
+            printf '### 更新通道演练\n\n失败阶段：%s；%s。未写入 OSS 发布对象；Actions 产物中保存演练文件（若已生成）。dry-run-ok 不代表正式发布成功。反映的是读取当时的通道状态，不保证之后发布一定成功；如有并行的正式发布请重跑。\n' "${FAILURE_STAGE:-none}" "$result" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '### 生产更新通道结果\n\nOSS job: **%s**\n\n同组只保留一个运行项和一个排队项；新排队项会取消旧排队项。只有 success 表示发布完成。\n' "$OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          fi

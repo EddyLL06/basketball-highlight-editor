@@ -57,14 +57,26 @@ class _InlineNotice extends StatelessWidget {
 }
 
 class VideoSourceNotice extends StatelessWidget {
-  const VideoSourceNotice({super.key, required this.state});
+  const VideoSourceNotice({
+    super.key,
+    required this.state,
+    this.suppressReviewFailure = false,
+  });
   final MobileAppState state;
+  final bool suppressReviewFailure;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: state,
     builder: (context, _) {
-      if (state.errorMessage == null && !state.relinkingVideo) {
+      final reviewFailure =
+          suppressReviewFailure &&
+          state.reviewDiagnosticError != null &&
+          identical(state.diagnosticError, state.reviewDiagnosticError);
+      final message = reviewFailure
+          ? state.videoSourceFailure?.message
+          : state.errorMessage;
+      if (message == null && !state.relinkingVideo) {
         return const SizedBox.shrink();
       }
       final busy = state.relinkingVideo;
@@ -78,56 +90,71 @@ class VideoSourceNotice extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: _InlineNotice(
           key: const ValueKey('video-source-notice'),
-          message: context.bheText(state.errorMessage ?? '正在重新选择视频'),
+          message: context.bheText(message ?? '正在重新选择视频'),
           error: true,
-          action: !state.canRelinkVideo && !busy
-              ? null
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextButton(
-                      key: const ValueKey('video-relink'),
-                      onPressed: busy || state.preparingVideo || state.exporting
-                          ? null
-                          : () => unawaited(state.relinkVideo()),
-                      style: actionStyle,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (busy) ...[
-                            const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-                          Flexible(
-                            child: Text(
-                              context.bheText(
-                                state.relinkCancelling
-                                    ? '正在取消'
-                                    : busy
-                                    ? '正在重新选择视频'
-                                    : '重新选择视频',
-                              ),
-                            ),
+          action: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (state.canRelinkVideo || busy)
+                TextButton(
+                  key: const ValueKey('video-relink'),
+                  onPressed: busy || state.preparingVideo || state.exporting
+                      ? null
+                      : () => unawaited(state.relinkVideo()),
+                  style: actionStyle,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (busy) ...[
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Flexible(
+                        child: Text(
+                          context.bheText(
+                            state.relinkCancelling
+                                ? '正在取消'
+                                : busy
+                                ? '正在重新选择视频'
+                                : '重新选择视频',
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                    if (busy)
-                      TextButton(
-                        key: const ValueKey('video-relink-cancel'),
-                        onPressed: state.relinkCancelling
-                            ? null
-                            : state.cancelVideoRelink,
-                        style: actionStyle,
-                        child: Text(context.bheText('取消')),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
+              if (busy)
+                TextButton(
+                  key: const ValueKey('video-relink-cancel'),
+                  onPressed: state.relinkCancelling
+                      ? null
+                      : state.cancelVideoRelink,
+                  style: actionStyle,
+                  child: Text(context.bheText('取消')),
+                ),
+              if (message != null)
+                TextButton(
+                  key: const ValueKey('video-feedback'),
+                  onPressed: () => showMobileDiagnostics(
+                    context,
+                    error:
+                        (reviewFailure ? null : state.diagnosticError) ??
+                        DiagnosticErrorRecord(
+                          StateError(message),
+                          null,
+                          'video',
+                        ),
+                  ),
+                  style: actionStyle,
+                  child: Text(context.bheText('反馈')),
+                ),
+            ],
+          ),
         ),
       );
     },
@@ -141,7 +168,7 @@ class VideoSourcePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      VideoSourceNotice(state: state),
+      VideoSourceNotice(state: state, suppressReviewFailure: true),
       Expanded(child: child),
     ],
   );

@@ -1,3 +1,4 @@
+import 'package:bhe_mobile/features/diagnostics/mobile_diagnostics.dart';
 import 'package:bhe_l10n/bhe_l10n.dart';
 import 'package:bhe_mobile/clip_range_editor.dart';
 import 'package:bhe_mobile/features/video_source/video_source_failure.dart';
@@ -297,4 +298,77 @@ void main() {
       },
     );
   }
+  testWidgets(
+    'a preview seek failure is caught and exposes recovery without an unhandled future',
+    (tester) async {
+      final source = await tester.runAsync(
+        () => fixture.file('original.mp4', 'original'),
+      );
+      fixture.state.project = fixture.project(source!.path);
+      await mount(tester);
+      try {
+        platform.failSeek = true;
+        final slider = find.descendant(
+          of: find.byKey(const ValueKey('project-video-preview')),
+          matching: find.byType(Slider),
+        );
+        tester.widget<Slider>(slider).onChanged!(2500);
+        await tester.pump();
+        await tester.runAsync(() => pumpEventQueue());
+        await tester.pump();
+        await tester.pump();
+        expect(fixture.state.videoSourceFailure, VideoSourceFailure.unplayable);
+        expect(find.text('视频不可用'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      } finally {
+        await unmount(tester);
+      }
+    },
+  );
+
+  testWidgets(
+    'a running clip player failure offers feedback with the original error',
+    (tester) async {
+      DiagnosticErrorRecord? captured;
+      final source = await tester.runAsync(
+        () => fixture.file('clip.mp4', 'original'),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ClipRangeEditor(
+              videoPath: source!.path,
+              aspectRatio: 16 / 9,
+              durationMs: 10000,
+              startMs: 1000,
+              endMs: 5000,
+              title: 'Clip',
+              confirmLabel: 'Done',
+              onFeedback: (error) => captured = error,
+            ),
+          ),
+        ),
+      );
+      await tester.runAsync(() => pumpEventQueue());
+      await tester.pump();
+      final player = tester
+          .widget<VideoPlayer>(find.byType(VideoPlayer))
+          .controller;
+      player.value = VideoPlayerValue.erroneous(
+        'injected runtime codec failure',
+      );
+      await tester.pump();
+      expect(find.byType(VideoPlayer), findsNothing);
+      final feedback = find.text('反馈');
+      await tester.ensureVisible(feedback);
+      await tester.tap(feedback);
+      await tester.pump();
+      expect(
+        captured?.error.toString(),
+        contains('injected runtime codec failure'),
+      );
+      expect(tester.takeException(), isNull);
+      await unmount(tester);
+    },
+  );
 }
