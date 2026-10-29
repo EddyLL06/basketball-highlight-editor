@@ -112,6 +112,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(ShooterQuickLabel), findsOneWidget);
       expect(find.byType(Dialog), findsNothing);
+      expect(tester.takeException(), isNull);
       expect(foreground(shooter), darkAppColors.orange);
       expect(foreground(basket), darkAppColors.textSecondary);
       expect(engine.roots, everyElement('/qa-project'));

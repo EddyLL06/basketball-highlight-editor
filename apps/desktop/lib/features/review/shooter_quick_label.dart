@@ -438,7 +438,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                           style: TextStyle(color: c.textSecondary),
                         ),
                         DropdownButton<String>(
-                          value: _videoId ?? 'all',
+                          value: _videos.any((v) => v['id'] == _videoId)
+                              ? _videoId
+                              : 'all',
                           isDense: true,
                           items: [
                             DropdownMenuItem(

@@ -107,7 +107,9 @@ class _ReleaseEngine extends _ReviewEngine {
   }
 }
 
-Future<void> _pump(WidgetTester tester, _ReviewEngine engine, {
+Future<void> _pump(
+  WidgetTester tester,
+  _ReviewEngine engine, {
   Size size = const Size(1400, 1100),
   double textScale = 1,
 }) async {
@@ -118,7 +120,9 @@ Future<void> _pump(WidgetTester tester, _ReviewEngine engine, {
   await tester.pumpWidget(
     MaterialApp(
       builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(textScale)),
+        data: MediaQuery.of(
+          context,
+        ).copyWith(textScaler: TextScaler.linear(textScale)),
         child: child!,
       ),
       home: ShooterQuickLabel(request: engine.request),
@@ -128,7 +132,9 @@ Future<void> _pump(WidgetTester tester, _ReviewEngine engine, {
 }
 
 void main() {
-  testWidgets('narrow cards with large text keep player actions usable', (tester) async {
+  testWidgets('narrow cards with large text keep player actions usable', (
+    tester,
+  ) async {
     final engine = _ReleaseEngine()..draft = false;
     engine.players.first['name'] = 'A long player name that needs wrapping';
     await _pump(tester, engine, size: const Size(760, 1100), textScale: 2);
