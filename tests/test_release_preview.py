@@ -331,3 +331,7 @@ def test_analysis_publishes_read_only_drafts_then_commits_cards_together(
         assert [c["id"] for c in result] == [row["id"]]
     else:
         assert result[0]["shooter_evidence"]["method"] == "ball_release_preview_v1"
+        latest = service.handle(
+            "list_shooter_review", {"project_root": str(store.root)}
+        )["jobs"][0]
+        assert latest["id"] == job_id and latest["state"] == "completed"

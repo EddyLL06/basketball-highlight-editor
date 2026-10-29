@@ -15,6 +15,7 @@ from .storage import now_iso
 from .release_preview import (
     cached_context,
     read_json,
+    read_json_string,
     render_release_previews,
     source_fingerprint,
 )
@@ -298,15 +299,21 @@ class ShooterReviewMixin:
         jobs = store.list_jobs(
             project_id=store.project()["id"], job_type="shooter_review", descending=True
         )
-        analyses = store.list_jobs(
+        history = store.list_jobs(
             store.project()["id"],
             job_type="analysis",
-            states=("queued", "running"),
             descending=True,
         )
+        analyses = [job for job in history if job["state"] in {"queued", "running"}]
+        recent = jobs[:1] + [
+            job
+            for job in history[:1]
+            if read_json_string(job.get("checkpoint_json")).get(
+                "shooter_preview_manifest"
+            )
+        ]
+        recent.sort(key=lambda job: job["created_at"], reverse=True)
         for analysis in analyses:
-            from .release_preview import read_json_string
-
             checkpoint = read_json_string(analysis.get("checkpoint_json"))
             path = Path(checkpoint.get("shooter_preview_manifest") or "")
             if not path.is_file() or not path.resolve().is_relative_to(
@@ -322,6 +329,8 @@ class ShooterReviewMixin:
             except OSError:
                 valid = False
             if valid and draft.get("generation") == analysis["id"]:
+                # Show one working set; committed data stays in SQLite.
+                rows = [row for row in rows if row["video_id"] != analysis["video_id"]]
                 rows.extend(
                     {**row, "draft": True, "shooter_review_state": "pending"}
                     for row in draft.get("candidates", [])
@@ -330,7 +339,7 @@ class ShooterReviewMixin:
             "candidates": rows,
             "players": store.list_players(),
             "videos": store.list_videos(),
-            "jobs": analyses[:1] or jobs[:1],
+            "jobs": analyses[:1] or recent[:1],
         }
 
     def prepare_shooter_review(self, payload):

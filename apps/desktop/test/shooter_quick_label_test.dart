@@ -79,6 +79,7 @@ class _ReleaseEngine extends _ReviewEngine {
         row['shooter_evidence'] = evidence;
         evidence['method'] = 'ball_release_preview_v1';
         evidence['recommended_track_id'] = null;
+        evidence['release_uncertain'] = true;
         for (final frame in evidence['frames'] as List) {
           frame['people'] = <dynamic>[];
           frame['focus_region'] = {
@@ -116,11 +117,14 @@ void main() {
       engine.draft = false;
       await tester.tap(find.byTooltip('Refresh'));
       await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Uncertain'));
+      await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
       await tester.pumpAndSettle();
       expect(engine.saves.single['player_id'], 'red');
       expect(engine.saves.single['track_id'], isNull);
       expect(engine.saves.single['review_state'], 'confirmed');
+      expect(find.byKey(const ValueKey('shooter-card-c0')), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );

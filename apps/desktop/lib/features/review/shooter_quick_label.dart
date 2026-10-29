@@ -52,6 +52,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     if (_videoId != null && row['video_id'] != _videoId) return false;
     if (_filter == 'pending') return row['shooter_review_state'] == 'pending';
     if (_filter == 'uncertain') {
+      if (row['shooter_review_state'] == 'confirmed') return false;
       return row['shooter_review_state'] == 'uncertain' ||
           _map(row['shooter_evidence'])['release_uncertain'] == true ||
           row['shooter_evidence'] == null;

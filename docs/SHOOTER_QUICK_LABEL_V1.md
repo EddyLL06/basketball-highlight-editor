@@ -8,9 +8,10 @@ commit together with the candidates. The person-track/import behavior described
 below is retained for compatibility with earlier developer artifacts.
 
 The review workspace adds a static shooter contact sheet. Each candidate has a
-source-video frame near the estimated release, selectable tracked-person crops,
-three nearby frames and project-player buttons. Human labels are saved through
-the Engine. Made/missed and inclusion decisions remain independent.
+proxy still near the estimated release, a generous release-area crop, nearby
+frames and project-player buttons. Human labels are saved through the Engine.
+Made/missed and inclusion decisions remain independent. Explicit legacy imports
+can also display the earlier tracked-person crops.
 
 Acceptance: generate or import evidence; label a player in one click; select an
 alternative track/frame; mark uncertain; undo; reopen the project and retain
@@ -35,8 +36,9 @@ Image caching includes source fingerprint, candidate event, generation and sourc
 frame. Frames and boxes use original decoded pixel coordinates. Crops include
 hands/ball context, and the full frame retains blue track boxes. Missing imagery
 is explicit, with video review available. Preparation never downloads models.
-The macOS preview artifact supplies the existing ball model and a pinned local
-person detector; development import can reuse existing attribution JSON.
+The macOS preview artifact supplies the existing BHE ball runtime. Lightweight
+release stills require no additional model; explicit import can reuse earlier
+attribution JSON without running a detector.
 
 The preview workflow reuses the existing macOS runtime/build scripts on GitHub
 Actions. SDK installation and packaging run on the hosted runner. Preview
@@ -47,8 +49,9 @@ performed by this feature branch workflow.
 
 Open a project in the desktop app, complete candidate analysis, then choose
 **射手快标 / Shooter quick label** in Review. Add roster names if needed and choose
-**Prepare frames**. Select a different detected person or adjacent frame when the
-suggested release is ambiguous. Click a name to save immediately. **Uncertain**
+**Refresh stills** for an existing project that needs its images filled. New
+analysis prepares these automatically. Select an adjacent frame or full context
+when the suggested release is ambiguous. Click a name to save immediately. **Uncertain**
 and **Clear** explicitly remove the player label; **Undo** restores the last
 successful label change in this page. **Watch clip** returns to ordinary video
 review. The same project-player labels drive the existing player export filters.

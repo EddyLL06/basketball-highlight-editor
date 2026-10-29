@@ -9,6 +9,11 @@ and explicit prediction import remain available separately.
 Reuse the current analysis proxy and its source-time offset. Read existing BHE
 ball trajectories in source coordinates, locate a sustained upward-motion segment,
 and display a generous area around its beginning plus adjacent proxy frames.
+When the existing track begins mid-flight, a bounded quadratic fit can suggest
+an earlier view. A descending-to-rising rim bounce splits the motion segment so
+the rebound is not mistaken for the original release. The fit and the approximate
+release-height band are heuristics; they do not identify a player or prove an
+exact hand-ball separation time.
 These are approximate release areas, not detected-person boxes. Missing release
 evidence produces a clearly uncertain wide view; it never invents a shooter.
 
