@@ -155,7 +155,7 @@ abstract class BheLocalizations {
   /// No description provided for @deleteProject.
   ///
   /// In zh, this message translates to:
-  /// **'删除当前项目'**
+  /// **'删除项目'**
   String get deleteProject;
 
   /// No description provided for @renameProject.

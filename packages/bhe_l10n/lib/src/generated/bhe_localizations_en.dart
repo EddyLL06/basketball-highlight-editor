@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'bhe_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -40,7 +39,7 @@ class BheLocalizationsEn extends BheLocalizations {
   String get openPackage => 'Open project package';
 
   @override
-  String get deleteProject => 'Delete current project';
+  String get deleteProject => 'Delete project';
 
   @override
   String get renameProject => 'Rename project';
