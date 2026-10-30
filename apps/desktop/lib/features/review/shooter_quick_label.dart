@@ -239,12 +239,11 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     if (selected != null) return selected.clamp(0, frames.length - 1).toInt();
     final saved = _map(row['shooter_selection']);
     final evidence = _map(row['shooter_evidence']);
-    final time =
-        (saved['generation'] == evidence['generation']
-                ? saved['time_ms']
-                : evidence['release_time_ms'])
-            as num? ??
-        0;
+    final time = (saved['generation'] == evidence['generation']
+        ? saved['time_ms'] : null) as num?;
+    if (time == null) {
+      return frames.length ~/ 2;
+    }
     var best = 0;
     for (var i = 1; i < frames.length; i++) {
       if (((frames[i]['time_ms'] as num) - time).abs() <
@@ -417,6 +416,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
           body: Column(
             children: [
               Container(
+                width: double.infinity,
                 color: c.surface,
                 padding: const EdgeInsets.symmetric(
                   horizontal: Spacing.md,
@@ -538,8 +538,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                     ),
                     Text(
                       t(
-                        '并排比较三帧，选中画面后点击球员姓名保存；数字 1–9 标记当前卡片。',
-                        'Compare three frames, then choose a player to save. Keys 1–9 label the selected card.',
+                        '看中间帧认人，点击姓名保存；前后帧按需切换。数字 1–9 标记当前卡片。',
+                        'Choose a name using the middle frame; switch adjacent frames when needed. Keys 1–9 label the selected card.',
                       ),
                       style: Theme.of(
                         context,
@@ -602,7 +602,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                     : LayoutBuilder(
                         builder: (context, size) {
                           final columns = size.maxWidth >= Breakpoints.md
-                              ? 3
+                              ? 5
                               : size.maxWidth >= 600
                               ? 2
                               : 1;
@@ -611,9 +611,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                                   Spacing.md * 2 -
                                   12 * (columns - 1)) /
                               columns;
-                          final imageHeight = ((cardWidth - 32) / 3 / .8)
-                              .clamp(144.0, 200.0)
-                              .toDouble();
+                          final imageHeight = (cardWidth - 20) * 4 / 3;
                           final legacy = visible.any(
                             (r) =>
                                 _map(r['shooter_evidence'])['method'] !=
@@ -630,7 +628,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                                   crossAxisCount: columns,
                                   mainAxisExtent:
                                       imageHeight +
-                                      246 * scale +
+                                      220 * scale +
                                       (legacy ? 62 : 0),
                                   mainAxisSpacing: 12,
                                   crossAxisSpacing: 12,
@@ -639,7 +637,6 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                             itemBuilder: (context, index) => _card(
                               visible[index],
                               _rows.indexOf(visible[index]) + 1,
-                              imageHeight,
                             ),
                           );
                         },
@@ -683,92 +680,118 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     _focus.requestFocus();
   }
 
-  Widget _frameTile(JsonMap row, JsonMap frame, int index, double imageHeight) {
+  Widget _framePreview(JsonMap row, JsonMap frame, int index) {
     final c = AppColors.of(context);
     final id = _id(row), evidence = _map(row['shooter_evidence']);
     final focus = _map(frame['focus_region']);
     final track = _track(row, frame);
-    final person = _maps(
-      frame['people'],
-    ).where((p) => p['track_id'] == track).firstOrNull;
+    final person = _maps(frame['people'])
+        .where((p) => p['track_id'] == track).firstOrNull;
     final cropPath = person?['crop_path'] ?? focus['crop_path'];
-    final path =
-        (_context ? frame['context_path'] : cropPath ?? frame['context_path'])
-            as String?;
-    // Keep extrapolated and wide views generous. Observed rising-ball regions
-    // already include ample margin and can be enlarged slightly without new work.
-    final zoom =
-        !_context &&
-            cropPath != null &&
-            evidence['reason'] == 'upward_ball_motion_estimate'
-        ? 1.12
-        : 1.0;
-    final selected = index == _frameIndex(row);
-    final delta =
-        ((frame['time_ms'] as num) -
-                ((evidence['release_time_ms'] as num?) ?? 0))
-            .round();
-    return Expanded(
-      child: Semantics(
-        selected: selected,
-        label: t(
-          '第 ${index + 1} 帧，${_time(frame['time_ms'])}',
-          'Frame ${index + 1}, ${_time(frame['time_ms'])}',
+    final path = (_context ? frame['context_path']
+        : cropPath ?? frame['context_path']) as String?;
+    final zoom = !_context && cropPath != null &&
+        evidence['reason'] == 'upward_ball_motion_estimate' ? 1.12 : 1.0;
+    final hasRegion = !_context && cropPath != null;
+    return Semantics(
+      image: true,
+      label: t('第 ${index + 1} 帧，${_time(frame['time_ms'])}',
+          'Frame ${index + 1}, ${_time(frame['time_ms'])}'),
+      child: Container(
+        key: ValueKey('shooter-preview-$id-$index'),
+        decoration: BoxDecoration(
+          color: Colors.black,
+          border: Border.all(color: c.borderStrong),
+          borderRadius: BorderRadius.circular(CsRadius.sm),
         ),
-        child: OutlinedButton(
-          key: ValueKey('shooter-frame-$id-$index'),
-          onPressed: () => _selectFrame(row, index),
-          style: OutlinedButton.styleFrom(
-            padding: EdgeInsets.zero,
-            foregroundColor: selected ? c.orange : c.textSecondary,
-            backgroundColor: c.surface2,
-            side: BorderSide(
-              color: selected ? c.orange : c.borderStrong,
-              width: selected ? 2 : 1,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(CsRadius.sm),
-            ),
-          ),
-          child: Column(
-            children: [
-              SizedBox(
-                height: imageHeight,
-                width: double.infinity,
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(4),
-                  ),
-                  child: ColoredBox(
-                    color: Colors.black,
-                    child: ClipRect(
-                      child: Transform.scale(
-                        key: ValueKey('shooter-frame-zoom-$id-$index'),
-                        scale: zoom,
-                        child: SizedBox.expand(child: _image(path)),
-                      ),
-                    ),
-                  ),
-                ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ClipRect(
+              child: Transform.scale(
+                key: ValueKey('shooter-frame-zoom-$id-$index'),
+                scale: zoom,
+                child: SizedBox.expand(child: _image(path)),
               ),
-              SizedBox(
-                height: 26,
-                child: Center(
-                  child: Text(
-                    '$delta ms',
-                    maxLines: 1,
-                    style: const TextStyle(fontSize: 11),
-                  ),
+            ),
+            Positioned(
+              left: 6, top: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: c.background.withValues(alpha: .82),
+                  borderRadius: BorderRadius.circular(4),
                 ),
+                child: Text(hasRegion ? t('出手区域', 'Release area') : t('全景', 'Full frame'),
+                  style: TextStyle(fontSize: 10, color: hasRegion ? c.data : c.textSecondary)),
               ),
-            ],
-          ),
+            ),
+            Positioned(
+              right: 6, top: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: c.background.withValues(alpha: .82),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text('${index + 1} / ${_frames(row).length}',
+                  style: TextStyle(fontSize: 10, color: c.textSecondary)),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _card(JsonMap row, int number, double imageHeight) {
+  String _frameLabel(int index, int count) {
+    final middle = count ~/ 2;
+    if (index == middle) return t('中间帧', 'Middle');
+    return index < middle ? t('前一帧', 'Previous') : t('后一帧', 'Next');
+  }
+
+  Widget _framePicker(JsonMap row) {
+    final c = AppColors.of(context);
+    final id = _id(row), frames = _frames(row);
+    return SizedBox(
+      height: 30,
+      child: Row(
+        key: ValueKey('shooter-frames-$id'),
+        children: [
+          for (var i = 0; i < frames.length; i++) ...[
+            if (i > 0) const SizedBox(width: 3),
+            Expanded(
+              child: Semantics(
+                selected: i == _frameIndex(row),
+                child: Tooltip(
+                  message: '${_frameLabel(i, frames.length)} · ${_time(frames[i]['time_ms'])}',
+                  child: TextButton(
+                    key: ValueKey('shooter-frame-$id-$i'),
+                    onPressed: () => _selectFrame(row, i),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      minimumSize: const Size(24, 28),
+                      foregroundColor: i == _frameIndex(row) ? c.orange : c.textSecondary,
+                      backgroundColor: i == _frameIndex(row)
+                          ? c.orange.withValues(alpha: .14) : c.surface2,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4)),
+                      textStyle: const TextStyle(fontSize: 10),
+                    ),
+                    child: Text(_frameLabel(i, frames.length), maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _card(JsonMap row, int number) {
     final c = AppColors.of(context);
     final id = _id(row),
         evidence = _map(row['shooter_evidence']),
@@ -838,21 +861,17 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                 ],
               ),
               const SizedBox(height: 6),
-              SizedBox(
-                height: imageHeight + 28,
+              AspectRatio(
+                key: ValueKey('shooter-photo-$id'),
+                aspectRatio: 3 / 4,
                 child: frames.isEmpty
                     ? _image(null)
-                    : Row(
-                        key: ValueKey('shooter-frames-$id'),
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (var i = 0; i < frames.length; i++) ...[
-                            if (i > 0) const SizedBox(width: 4),
-                            _frameTile(row, frames[i], i, imageHeight),
-                          ],
-                        ],
-                      ),
+                    : _framePreview(row, frame, _frameIndex(row)),
               ),
+              if (frames.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                _framePicker(row),
+              ],
               const SizedBox(height: 6),
               if (!light)
                 SizedBox(
@@ -932,6 +951,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                     style: TextButton.styleFrom(
                       foregroundColor: c.orange,
                       minimumSize: const Size(44, 32),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       padding: const EdgeInsets.symmetric(horizontal: 6),
                       textStyle: const TextStyle(fontSize: 11),
                     ),
@@ -974,7 +994,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                             textStyle: const TextStyle(fontSize: 12),
                           ),
                           child: Text(
-                            '${i < 9 ? '${i + 1} · ' : ''}${_players[i]['name']}',
+                            '${_players[i]['name']}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       if (_players.isEmpty)
@@ -997,6 +1019,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                     style: TextButton.styleFrom(
                       minimumSize: const Size(44, 32),
                       padding: const EdgeInsets.symmetric(horizontal: 6),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: const TextStyle(fontSize: 11),
                     ),
                     child: Text(t('不确定', 'Uncertain')),
                   ),
@@ -1007,6 +1031,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                     style: TextButton.styleFrom(
                       minimumSize: const Size(44, 32),
                       padding: const EdgeInsets.symmetric(horizontal: 6),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: const TextStyle(fontSize: 11),
                     ),
                     child: Text(t('清除', 'Clear')),
                   ),
@@ -1025,6 +1051,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                     style: TextButton.styleFrom(
                       minimumSize: const Size(44, 32),
                       padding: const EdgeInsets.symmetric(horizontal: 6),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: const TextStyle(fontSize: 11),
                     ),
                   ),
                 ],

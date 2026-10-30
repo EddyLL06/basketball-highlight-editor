@@ -8,6 +8,8 @@ class _ReviewEngine {
   final saves = <JsonMap>[];
   bool rejectSave = false;
   int rowCount = 2;
+  int releaseOffset = 0;
+  int? savedTimeMs;
   final players = <JsonMap>[
     {'id': 'red', 'name': 'Red'},
     {'id': 'green', 'name': 'Green'},
@@ -32,11 +34,15 @@ class _ReviewEngine {
               'selection_status': 'excluded',
               'player_id': null,
               'shooter_review_state': 'pending',
-              'shooter_selection': <String, dynamic>{},
+              'shooter_selection': <String, dynamic>{
+                if (savedTimeMs != null) ...{
+                  'generation': 'g1', 'time_ms': savedTimeMs,
+                },
+              },
               'shooter_evidence': {
                 'generation': 'g1',
                 'tracking_scope': 'scope$i',
-                'release_time_ms': 1100 + i * 2000,
+                'release_time_ms': 1100 + i * 2000 + releaseOffset,
                 'release_uncertain': i == 1,
                 'recommended_track_id': 1,
                 'frames': [
@@ -147,21 +153,27 @@ void main() {
   });
 
   testWidgets(
-    'desktop grid has three compact cards per row and three parallel frames',
+    'desktop grid has five portrait cards and displays only the middle frame by default',
     (tester) async {
       final engine = _ReleaseEngine()
         ..draft = false
-        ..rowCount = 4;
+        ..rowCount = 6
+        ..releaseOffset = -100;
       await _pump(tester, engine);
       final cards = [
-        for (var i = 0; i < 4; i++) find.byKey(ValueKey('shooter-card-c$i')),
+        for (var i = 0; i < 6; i++) find.byKey(ValueKey('shooter-card-c$i')),
       ];
-      expect(tester.getTopLeft(cards[0]).dy, tester.getTopLeft(cards[2]).dy);
+      expect(tester.getTopLeft(cards[0]).dy, tester.getTopLeft(cards[4]).dy);
       expect(
-        tester.getTopLeft(cards[3]).dy,
+        tester.getTopLeft(cards[5]).dy,
         greaterThan(tester.getTopLeft(cards[0]).dy),
       );
-      expect(tester.getSize(cards[0]).height, lessThan(460));
+      final photoSize = tester.getSize(find.byKey(const ValueKey('shooter-photo-c0')));
+      expect(photoSize.width / photoSize.height, closeTo(3 / 4, .001));
+      expect(tester.getSize(cards[0]).height, lessThan(620));
+      expect(find.byKey(const ValueKey('shooter-preview-c0-1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('shooter-preview-c0-0')), findsNothing);
+      expect(find.byKey(const ValueKey('shooter-preview-c0-2')), findsNothing);
       final frames = [
         for (var i = 0; i < 3; i++) find.byKey(ValueKey('shooter-frame-c0-$i')),
       ];
@@ -174,9 +186,29 @@ void main() {
         tester.getTopLeft(frames[1]).dx,
         lessThan(tester.getTopLeft(frames[2]).dx),
       );
+      await tester.tap(frames[2]);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('shooter-preview-c0-2')), findsOneWidget);
+      expect(find.byKey(const ValueKey('shooter-preview-c0-1')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('shooter-name-c0-red')));
+      await tester.pumpAndSettle();
+      expect(engine.saves.single['time_ms'], 1200);
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('saved human frame is restored and can be switched back to the middle', (tester) async {
+    final engine = _ReleaseEngine()..draft = false..savedTimeMs = 1000;
+    await _pump(tester, engine);
+    expect(find.byKey(const ValueKey('shooter-preview-c0-0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('shooter-preview-c0-1')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('shooter-frame-c0-1')));
+    await tester.tap(find.byKey(const ValueKey('shooter-name-c0-green')));
+    await tester.pumpAndSettle();
+    expect(engine.saves.single['time_ms'], 1100);
+    expect(find.byKey(const ValueKey('shooter-preview-c0-1')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   for (final emptyRoster in [false, true]) {
     testWidgets(
@@ -285,11 +317,8 @@ void main() {
     (tester) async {
       final engine = _ReviewEngine();
       await _pump(tester, engine);
-      final card = find.byKey(const ValueKey('shooter-card-c0'));
       await tester.tap(find.byKey(const ValueKey('shooter-person-c0-2')));
-      await tester.tap(
-        find.descendant(of: card, matching: find.text('100 ms')),
-      );
+      await tester.tap(find.byKey(const ValueKey('shooter-frame-c0-2')));
       await tester.tap(find.byKey(const ValueKey('shooter-name-c0-green')));
       await tester.pumpAndSettle();
       expect(engine.saves.single, containsPair('track_id', 2));

@@ -14,9 +14,12 @@ Switching pauses playback, keeps each page's selection/filters, and refreshes
 the ordinary review labels when returning. Watch clip selects that candidate
 in Basket review without closing or navigating away from the Review module.
 
-At desktop widths the contact sheet has exactly three cards per row. Each
-compact card displays its three adjacent frames side by side; selecting a frame
-sets the evidence saved with the player label. Existing observed rising-ball
+The approved [HTML layout prototype](prototypes/shooter-quick-label-five-column.html)
+uses five portrait cards per row at desktop widths. Each card gives one still a
+3:4 image area and displays the middle frame by default. Previous / Middle / Next
+buttons switch that one image when needed; a saved human-selected frame is
+restored instead of being silently replaced. The selected frame remains the
+evidence saved with the player label. Existing observed rising-ball
 crops receive a small display-only enlargement, while extrapolated or missing
 release regions retain their wider context. Full-context viewing remains one
 click away and no image regeneration or extra inference is required.
