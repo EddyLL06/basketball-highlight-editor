@@ -375,3 +375,36 @@ def test_native_intel_smoke_uses_release_constraints():
     assert 'pytest' not in install
     smoke = next(step for step in job['steps'] if step.get('name') == 'Check NumPy and preprocessing')
     assert smoke['run'] == 'python scripts/check_numpy_preprocess.py'
+
+
+def test_manual_url_rewrite_is_explicit_and_skips_release_assets():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/upload-release-assets-oss.yml').read_text())
+    choice = workflow[True]['workflow_dispatch']['inputs']['rewrite_urls']
+    assert choice['default'] == 'none' and choice['options'] == ['none', 'dl', 'oss']
+    job = workflow['jobs']['upload']
+    assert "'bhe-production-update-channel-v1'" in job['concurrency']['group']
+    download = next(step for step in job['steps'] if step.get('id') == 'download_release')
+    assert download['if'] == "${{ inputs.rewrite_urls == 'none' }}"
+    publish = next(step['run'] for step in job['steps'] if step.get('id') == 'publish')
+    subprocess.run(['bash', '-n'], input=publish, text=True, check=True)
+    assert '--rewrite-urls "$URL_REWRITE_MODE"' in publish
+
+
+def test_manual_workflow_passes_only_known_rewrite_options(tmp_path):
+    workflow = yaml.safe_load((ROOT / '.github/workflows/upload-release-assets-oss.yml').read_text())
+    script = next(step['run'] for step in workflow['jobs']['upload']['steps'] if step.get('id') == 'publish')
+    python = tmp_path / 'python3'
+    python.write_text('#!/bin/bash\nif [[ "$1" == -c ]]; then echo status=dry-run-ok; else printf "%s\\n" "$@" > "$ARG_LOG"; fi\n')
+    python.chmod(0o755)
+    for value in ('none', 'dl', 'oss', 'unknown'):
+        arglog = tmp_path / ('args-' + value)
+        env = dict(os.environ, PATH=str(tmp_path) + ':' + os.environ['PATH'], RUNNER_TEMP=str(tmp_path),
+                   UPDATE_SIGNING_KEY='fake', TAG_NAME='v0.1.13', RELEASE_PLATFORM='all', OSS_BUCKET='oss://fake',
+                   OSS_PREFIX='releases', OSS_ANDROID_KEY='android/latest.apk', DRY_RUN='true',
+                   URL_REWRITE_MODE=value, ARG_LOG=str(arglog), GITHUB_OUTPUT=str(tmp_path / 'output'))
+        result = subprocess.run(['bash', '-euo', 'pipefail', '-c', script], env=env, capture_output=True, text=True)
+        assert (result.returncode != 0) == (value == 'unknown')
+        if value != 'unknown':
+            args = arglog.read_text().splitlines()
+            assert ('--rewrite-urls' in args) == (value != 'none')
+            if value != 'none': assert args[args.index('--rewrite-urls') + 1] == value

@@ -17,6 +17,15 @@ on:
           - macos
           - windows
           - android
+      rewrite_urls:
+        description: "Only rewrite current manifest package URLs (none / dl / oss)"
+        required: true
+        type: choice
+        default: none
+        options:
+          - none
+          - dl
+          - oss
       dry_run:
         description: "默认演练；正式发布请显式选 false"
         required: true
@@ -55,6 +64,7 @@ jobs:
       OSSUTIL_VERSION: v1.7.19
       TAG_NAME: ${{ inputs.tag }}
       RELEASE_PLATFORM: ${{ inputs.platform }}
+      URL_REWRITE_MODE: ${{ inputs.rewrite_urls }}
       DRY_RUN: ${{ toJSON(inputs.dry_run) == 'false' && 'false' || 'true' }}
     steps:
       - name: Check out publishing tools
@@ -90,6 +100,7 @@ jobs:
           echo "$go_bin" >> "$GITHUB_PATH"
       - name: Download exact release assets
         id: download_release
+        if: ${{ inputs.rewrite_urls == 'none' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -140,8 +151,14 @@ jobs:
             dry_run_arg=
             transport_args+=(--oss-config "$config")
           fi
+          rewrite_args=()
+          case "${URL_REWRITE_MODE:-none}" in
+            none) ;;
+            dl|oss) rewrite_args=(--rewrite-urls "$URL_REWRITE_MODE") ;;
+            *) echo 'Unsupported URL rewrite target' >&2; exit 1 ;;
+          esac
           python3 publisher/scripts/publish_release_update.py \
-            --tag "$TAG_NAME" --platform "$RELEASE_PLATFORM" \
+            --tag "$TAG_NAME" --platform "$RELEASE_PLATFORM" ${rewrite_args[@]+"${rewrite_args[@]}"} \
             --assets-dir "$RUNNER_TEMP/bhe-release-assets" \
             "${transport_args[@]}" \
             --prefix "$OSS_PREFIX" --android-key "$OSS_ANDROID_KEY" \
