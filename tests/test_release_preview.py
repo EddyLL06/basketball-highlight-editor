@@ -426,3 +426,77 @@ def test_refresh_failure_preserves_evidence_and_labels(prepared_label, monkeypat
     store.create_job(store.project()["id"], row["video_id"], "analysis")
     with pytest.raises(ProtocolError, match="现有"):
         service.handle("prepare_shooter_review", {"project_root": str(store.root)})
+
+
+def test_person_candidates_use_only_middle_proxy_frame_and_map_source_boxes(release_project):
+    from engine.python.basketball_engine.person_candidates import RegionPersonCandidates
+
+    _, store, video, row, source, proxy, _ = release_project
+
+    class Detector:
+        images = []
+
+        def detect(self, image):
+            self.images.append(image.copy())
+            h, w = image.shape[:2]
+            return [{"bbox": [2, 5, w - 2, h - 5], "confidence": .85}]
+
+    detector = Detector()
+    item = render_release_previews(video, source, [row], store.root / "people", "g",
+        proxy=proxy, offset_ms=2000, person_detector=RegionPersonCandidates(detector))[0]
+    assert len(detector.images) == 1
+    assert detector.images[0][:, :, 0].mean() > detector.images[0][:, :, 2].mean()
+    assert item["frames"][0]["people"] == item["frames"][2]["people"] == []
+    person = item["frames"][1]["people"][0]
+    assert person["id"].startswith("g:") and Path(person["crop_path"]).is_file()
+    x1, y1, x2, y2 = person["bbox"]
+    assert 0 <= x1 < x2 <= 320 and 0 <= y1 < y2 <= 240
+    assert item["person_detection"]["time_ms"] == item["frames"][1]["time_ms"]
+    assert item["person_detection"]["input_source"] == "analysis_proxy"
+
+
+def test_person_inference_cannot_fall_back_to_original_quality(release_project, monkeypatch):
+    _, store, video, row, source, _, _ = release_project
+    monkeypatch.setattr(cv2, "VideoCapture", lambda *a: pytest.fail("Do not open original frames for inference"))
+    with pytest.raises(ProtocolError, match="代理"):
+        render_release_previews(video, source, [row], store.root / "blocked", "g", person_detector=object())
+
+
+def test_opt_in_person_job_and_selection_are_frame_scoped(release_project, monkeypatch):
+    from engine.python.basketball_engine.person_candidates import RegionPersonCandidates
+
+    service, store, _, _, _, _, _ = release_project
+
+    class Detector:
+        def detect(self, image):
+            return [{"bbox": [2, 4, 30, 60], "confidence": .9}]
+
+    monkeypatch.setattr(service, "_region_person_candidates", lambda: RegionPersonCandidates(Detector()))
+    job_id = service.handle("prepare_shooter_review", {"project_root": str(store.root), "person_detection": True})["job"]["id"]
+    for thread in list(service._job_threads.values()):
+        thread.join(10)
+    assert store.get_job(job_id)["state"] == "completed"
+    row = service.handle("list_shooter_review", {"project_root": str(store.root)})["candidates"][0]
+    frame = row["shooter_evidence"]["frames"][1]
+    player = store.create_player("Shooter")
+    payload = {"project_root": str(store.root), "candidate_id": row["id"], "generation": job_id,
+        "player_id": player["id"], "review_state": "confirmed", "time_ms": frame["time_ms"],
+        "person_id": frame["people"][0]["id"]}
+    saved = service.handle("set_candidate_shooter", payload)
+    assert saved["selection"]["person_id"] == payload["person_id"]
+    for change in [{"person_id": "other-frame-person"}, {"time_ms": row["shooter_evidence"]["frames"][0]["time_ms"]}]:
+        with pytest.raises(ProtocolError):
+            service.handle("set_candidate_shooter", {**payload, **change})
+    assert store.list_candidates()[0]["player_id"] == player["id"]
+
+
+def test_missing_proxy_blocks_person_job_before_model_load(prepared_label, release_project, monkeypatch):
+    service, store, payload = prepared_label
+    release_project[5].unlink()
+    monkeypatch.setattr(service, "_region_person_candidates", lambda: pytest.fail("Missing proxy must not load a model"))
+    job_id = service.handle("prepare_shooter_review", {"project_root": str(store.root), "person_detection": True})["job"]["id"]
+    for thread in list(service._job_threads.values()):
+        thread.join(10)
+    assert store.get_job(job_id)["error_code"] == "PERSON_PROXY_REQUIRED"
+    row = service.handle("list_shooter_review", {"project_root": str(store.root)})["candidates"][0]
+    assert row["shooter_evidence"]["generation"] == payload["generation"]

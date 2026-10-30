@@ -1,7 +1,7 @@
 """Cheap release-area stills from existing BHE ball evidence and video proxy.
 
-No person detector, tracking model, or additional ball inference is used here.
-All geometry is approximate; the user supplies the shooter's identity.
+The default path uses no detector. Opt-in person candidates inspect only a bounded
+region of the middle proxy frame. The user still supplies the shooter's identity.
 """
 
 from __future__ import annotations
@@ -212,6 +212,7 @@ def estimate_release(candidate, points, width, height):
         "time_ms": time_ms,
         "bbox": [left, top, left + box_width, top + box_height],
         "reason": reason,
+        "anchor": {"x": cx, "y": cy, "time_ms": time_ms, "basis": reason},
     }
 
 
@@ -228,12 +229,15 @@ def render_release_previews(
     cancel=None,
     progress=None,
     on_candidate=None,
+    person_detector=None,
 ):
     """Read a few sorted frames from the existing proxy, with bounded memory."""
     import cv2
 
     source = Path(source)
     proxy = Path(proxy or source)
+    if person_detector is not None and proxy.resolve() == source.resolve():
+        raise ProtocolError("PERSON_PROXY_REQUIRED", "人物候选仅使用分析代理，请先完成视频分析")
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     capture = cv2.VideoCapture(str(proxy))
@@ -275,6 +279,7 @@ def render_release_previews(
             "release_time_ms": release_time,
             "release_uncertain": True,
             "reason": release["reason"],
+            "release_anchor": release.get("anchor"),
             "frames": [],
             "image_source": "analysis_proxy"
             if proxy.resolve() != source.resolve()
@@ -295,7 +300,9 @@ def render_release_previews(
         expected[token], done[token] = len(indices), 0
         items.append(item)
         for frame_index in indices:
-            requests.setdefault(frame_index, []).append((token, item, release["bbox"]))
+            requests.setdefault(frame_index, []).append(
+                (token, item, release["bbox"], frame_index == indices[len(indices) // 2])
+            )
     read_position = -1
     try:
         for ordinal, frame_index in enumerate(sorted(requests)):
@@ -313,9 +320,28 @@ def render_release_previews(
                     "SHOOTER_FRAME_MISSING", "现有代理的出手画面读取失败"
                 )
             time_ms = offset_ms + round(frame_index * 1000 / fps)
-            for token, item, bbox in requests[frame_index]:
+            for token, item, bbox, middle in requests[frame_index]:
                 context = frame.copy()
                 focus = None
+                people, person_result = [], None
+                if person_detector is not None and middle:
+                    region = [v / scale[i % 2] for i, v in enumerate(bbox)] if bbox else None
+                    anchor = item.get("release_anchor")
+                    point = (anchor["x"] / scale[0], anchor["y"] / scale[1]) if anchor else None
+                    person_result = person_detector.infer(frame, region, release_point=point, cancel=cancel)
+                    for index, person in enumerate(person_result.pop("people"), 1):
+                        left, top, right, bottom = person["bbox"]
+                        person_path = directory / f"{token}_{time_ms}_person_{index}.jpg"
+                        if not cv2.imwrite(str(person_path), frame[top:bottom, left:right], [cv2.IMWRITE_JPEG_QUALITY, 88]):
+                            raise OSError("Could not save person candidate")
+                        cv2.rectangle(context, (left, top), (right, bottom), (80, 210, 90), 2)
+                        cv2.putText(context, str(index), (left, max(16, top - 3)), cv2.FONT_HERSHEY_SIMPLEX, .6, (80, 210, 90), 2)
+                        people.append({**person, "id": f"{generation}:{token}:{time_ms}:{index}",
+                            "bbox": [v * scale[i % 2] for i, v in enumerate(person["bbox"])],
+                            "crop_path": str(person_path)})
+                    person_result.update(input_source="analysis_proxy", input_frame_size=[pw, ph],
+                        regions=[[v * scale[i % 2] for i, v in enumerate(region)] for region in person_result["regions"]])
+                    item["person_detection"] = {**person_result, "time_ms": time_ms}
                 if bbox:
                     x1, y1, x2, y2 = [
                         round(v / scale[i % 2]) for i, v in enumerate(bbox)
@@ -346,6 +372,8 @@ def render_release_previews(
                         "time_ms": time_ms,
                         "context_path": str(context_path),
                         "focus_region": focus,
+                        **({"people": people, "person_detection": person_result or {"status": "not_sampled"}}
+                           if person_detector is not None else {}),
                     }
                 )
                 done[token] += 1

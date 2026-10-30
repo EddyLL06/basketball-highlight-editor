@@ -24,3 +24,26 @@ from its cached proxy and ball trajectories without additional detector inferenc
 Drafts are read-only. Failed or cancelled preparation preserves committed data.
 Release regions are approximate; review ambiguous cases in video. Automatic shooter
 recognition is being developed for a later version.
+
+## 可选人物候选接口（开发中）
+
+桌面界面仍使用上述半自动流程。Engine 调用 `prepare_shooter_review` 时可显式传入
+`person_detection: true`，仅对每个候选默认中间帧的出手区域检测人物。
+输入严格复用与源视频指纹及裁剪偏移匹配的分析代理；代理缺失时报
+`PERSON_PROXY_REQUIRED`，不会改用原画推理。检测输入默认 320，区域无人物时只扩大
+1.2 倍重试一次，超过半帧面积预算或仍无人物则留给人工，不扫描整帧。
+
+此接口需本地提供 `yolo11n.pt`（`BHE_PERSON_MODEL` 或运行目录的 `models/yolo11n.pt`），
+SHA-256 为 `0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1`。
+模型在 Engine 会话中复用；缺失或校验失败时任务失败并保留原证据及人工标签。
+运行时不下载模型，当前安装包也不附带它。
+
+`list_shooter_review` 的中间帧可含 `people`：`id`、源画面坐标 `bbox`、代理人物裁剪
+`crop_path`、人物检测 `confidence`、几何距离 `release_distance` 及区域边缘提示。
+编号仅在该候选、生成批次和帧内有效，不是跨片段 Track ID。
+`person_detection` 记录代理尺寸、推理区域、尝试次数和耗时。
+人物检测置信度和几何排序均不表示射手或姓名已确认。
+
+人工保存仍需项目内的 `player_id`；`set_candidate_shooter` 可额外附带当前
+`generation`、`time_ms` 对应的 `person_id`，错误批次或帧会被拒绝。
+Made / Missed、片段取舍与备注保持独立。参考图关联姓名属于后续阶段。
