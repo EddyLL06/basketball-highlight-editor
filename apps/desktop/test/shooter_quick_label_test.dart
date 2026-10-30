@@ -36,7 +36,8 @@ class _ReviewEngine {
               'shooter_review_state': 'pending',
               'shooter_selection': <String, dynamic>{
                 if (savedTimeMs != null) ...{
-                  'generation': 'g1', 'time_ms': savedTimeMs,
+                  'generation': 'g1',
+                  'time_ms': savedTimeMs,
                 },
               },
               'shooter_evidence': {
@@ -168,10 +169,15 @@ void main() {
         tester.getTopLeft(cards[5]).dy,
         greaterThan(tester.getTopLeft(cards[0]).dy),
       );
-      final photoSize = tester.getSize(find.byKey(const ValueKey('shooter-photo-c0')));
+      final photoSize = tester.getSize(
+        find.byKey(const ValueKey('shooter-photo-c0')),
+      );
       expect(photoSize.width / photoSize.height, closeTo(3 / 4, .001));
       expect(tester.getSize(cards[0]).height, lessThan(620));
-      expect(find.byKey(const ValueKey('shooter-preview-c0-1')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('shooter-preview-c0-1')),
+        findsOneWidget,
+      );
       expect(find.byKey(const ValueKey('shooter-preview-c0-0')), findsNothing);
       expect(find.byKey(const ValueKey('shooter-preview-c0-2')), findsNothing);
       final frames = [
@@ -188,7 +194,10 @@ void main() {
       );
       await tester.tap(frames[2]);
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('shooter-preview-c0-2')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('shooter-preview-c0-2')),
+        findsOneWidget,
+      );
       expect(find.byKey(const ValueKey('shooter-preview-c0-1')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('shooter-name-c0-red')));
       await tester.pumpAndSettle();
@@ -197,18 +206,29 @@ void main() {
     },
   );
 
-  testWidgets('saved human frame is restored and can be switched back to the middle', (tester) async {
-    final engine = _ReleaseEngine()..draft = false..savedTimeMs = 1000;
-    await _pump(tester, engine);
-    expect(find.byKey(const ValueKey('shooter-preview-c0-0')), findsOneWidget);
-    expect(find.byKey(const ValueKey('shooter-preview-c0-1')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('shooter-frame-c0-1')));
-    await tester.tap(find.byKey(const ValueKey('shooter-name-c0-green')));
-    await tester.pumpAndSettle();
-    expect(engine.saves.single['time_ms'], 1100);
-    expect(find.byKey(const ValueKey('shooter-preview-c0-1')), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+  testWidgets(
+    'saved human frame is restored and can be switched back to the middle',
+    (tester) async {
+      final engine = _ReleaseEngine()
+        ..draft = false
+        ..savedTimeMs = 1000;
+      await _pump(tester, engine);
+      expect(
+        find.byKey(const ValueKey('shooter-preview-c0-0')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('shooter-preview-c0-1')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('shooter-frame-c0-1')));
+      await tester.tap(find.byKey(const ValueKey('shooter-name-c0-green')));
+      await tester.pumpAndSettle();
+      expect(engine.saves.single['time_ms'], 1100);
+      expect(
+        find.byKey(const ValueKey('shooter-preview-c0-1')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   for (final emptyRoster in [false, true]) {
     testWidgets(
@@ -266,6 +286,7 @@ void main() {
     await tester.ensureVisible(
       find.descendant(of: card, matching: find.text('Watch clip')),
     );
+    await tester.pumpAndSettle();
     await tester.tap(
       find.descendant(of: card, matching: find.text('Watch clip')),
     );

@@ -239,8 +239,11 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     if (selected != null) return selected.clamp(0, frames.length - 1).toInt();
     final saved = _map(row['shooter_selection']);
     final evidence = _map(row['shooter_evidence']);
-    final time = (saved['generation'] == evidence['generation']
-        ? saved['time_ms'] : null) as num?;
+    final time =
+        (saved['generation'] == evidence['generation']
+                ? saved['time_ms']
+                : null)
+            as num?;
     if (time == null) {
       return frames.length ~/ 2;
     }
@@ -685,18 +688,26 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     final id = _id(row), evidence = _map(row['shooter_evidence']);
     final focus = _map(frame['focus_region']);
     final track = _track(row, frame);
-    final person = _maps(frame['people'])
-        .where((p) => p['track_id'] == track).firstOrNull;
+    final person = _maps(
+      frame['people'],
+    ).where((p) => p['track_id'] == track).firstOrNull;
     final cropPath = person?['crop_path'] ?? focus['crop_path'];
-    final path = (_context ? frame['context_path']
-        : cropPath ?? frame['context_path']) as String?;
-    final zoom = !_context && cropPath != null &&
-        evidence['reason'] == 'upward_ball_motion_estimate' ? 1.12 : 1.0;
+    final path =
+        (_context ? frame['context_path'] : cropPath ?? frame['context_path'])
+            as String?;
+    final zoom =
+        !_context &&
+            cropPath != null &&
+            evidence['reason'] == 'upward_ball_motion_estimate'
+        ? 1.12
+        : 1.0;
     final hasRegion = !_context && cropPath != null;
     return Semantics(
       image: true,
-      label: t('第 ${index + 1} 帧，${_time(frame['time_ms'])}',
-          'Frame ${index + 1}, ${_time(frame['time_ms'])}'),
+      label: t(
+        '第 ${index + 1} 帧，${_time(frame['time_ms'])}',
+        'Frame ${index + 1}, ${_time(frame['time_ms'])}',
+      ),
       child: Container(
         key: ValueKey('shooter-preview-$id-$index'),
         decoration: BoxDecoration(
@@ -716,27 +727,36 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
               ),
             ),
             Positioned(
-              left: 6, top: 6,
+              left: 6,
+              top: 6,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                 decoration: BoxDecoration(
                   color: c.background.withValues(alpha: .82),
                   borderRadius: BorderRadius.circular(4),
                 ),
-                child: Text(hasRegion ? t('出手区域', 'Release area') : t('全景', 'Full frame'),
-                  style: TextStyle(fontSize: 10, color: hasRegion ? c.data : c.textSecondary)),
+                child: Text(
+                  hasRegion ? t('出手区域', 'Release area') : t('全景', 'Full frame'),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: hasRegion ? c.data : c.textSecondary,
+                  ),
+                ),
               ),
             ),
             Positioned(
-              right: 6, top: 6,
+              right: 6,
+              top: 6,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                 decoration: BoxDecoration(
                   color: c.background.withValues(alpha: .82),
                   borderRadius: BorderRadius.circular(4),
                 ),
-                child: Text('${index + 1} / ${_frames(row).length}',
-                  style: TextStyle(fontSize: 10, color: c.textSecondary)),
+                child: Text(
+                  '${index + 1} / ${_frames(row).length}',
+                  style: TextStyle(fontSize: 10, color: c.textSecondary),
+                ),
               ),
             ),
           ],
@@ -765,22 +785,30 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
               child: Semantics(
                 selected: i == _frameIndex(row),
                 child: Tooltip(
-                  message: '${_frameLabel(i, frames.length)} · ${_time(frames[i]['time_ms'])}',
+                  message:
+                      '${_frameLabel(i, frames.length)} · ${_time(frames[i]['time_ms'])}',
                   child: TextButton(
                     key: ValueKey('shooter-frame-$id-$i'),
                     onPressed: () => _selectFrame(row, i),
                     style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 2),
                       minimumSize: const Size(24, 28),
-                      foregroundColor: i == _frameIndex(row) ? c.orange : c.textSecondary,
+                      foregroundColor: i == _frameIndex(row)
+                          ? c.orange
+                          : c.textSecondary,
                       backgroundColor: i == _frameIndex(row)
-                          ? c.orange.withValues(alpha: .14) : c.surface2,
+                          ? c.orange.withValues(alpha: .14)
+                          : c.surface2,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4)),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
                       textStyle: const TextStyle(fontSize: 10),
                     ),
-                    child: Text(_frameLabel(i, frames.length), maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      _frameLabel(i, frames.length),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ),
               ),
