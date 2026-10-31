@@ -149,7 +149,8 @@ def test_sparse_departure_is_tentative_and_extrapolation_is_not_contact():
     assert select_release_shooter(frames, observed)["status"] == "unknown"
 
 
-def test_actual_held_ball_can_disambiguate_shooter_from_airborne_defender():
+@pytest.mark.parametrize("confidence", [0.8, 0.3])
+def test_actual_held_ball_can_disambiguate_shooter_from_airborne_defender(confidence):
     arc = {
         "event_time": 2.0, "launch": {"time": 1.0, "observed": True},
         "x_coefficients": [100, 200], "y_coefficients": [300, 300, 100],
@@ -165,12 +166,15 @@ def test_actual_held_ball_can_disambiguate_shooter_from_airborne_defender():
         {"time": 1.0, "people": [person("defender2", [90, 90, 150, 250]), person("shooter2", [40, 150, 90, 270])]},
     ]
     assert select_release_shooter(frames, arc)["selected_track_id"] == 1
-    raw = [{"time": .8, "balls": [{"x": 75, "y": 160, "confidence": .8}]}]
+    raw = [{"time": .8, "balls": [{"x": 75, "y": 160, "confidence": confidence}]}]
     extended = with_release_contacts(arc, raw, frame_size=(400, 300))
     assert len(arc["observations"]) == 3 and "contact_observations" not in arc
     decision = select_release_shooter(frames, extended)
     assert decision["selected_track_id"] == 2
     assert decision["rankings"][0]["evidence_frame"]["ball"]["source"] == "observed_release_neighbour"
+    assert decision["reason"] == "observed_pre_release_ownership_then_departure"
+    if confidence < .35:
+        assert decision["confidence_band"] == "tentative"
 
 
 def test_release_contact_gate_does_not_invent_or_accept_unrelated_balls():
@@ -186,3 +190,33 @@ def test_release_contact_gate_does_not_invent_or_accept_unrelated_balls():
     assert with_release_contacts(None, bad, frame_size=(400, 300)) is None
     frames = [{"time": .8, "people": [person("a", [50, 160, 100, 280])]}]
     assert select_release_shooter(frames, extended)["status"] == "unknown"
+
+
+@pytest.mark.parametrize("following", [
+    [],
+    [{"time": 1.0, "x": 100, "y": 100, "confidence": .8}],
+    [{"time": 1.0, "x": 100, "y": 180, "confidence": .8},
+     {"time": 1.2, "x": 120, "y": 200, "confidence": .8}],
+    [{"time": 1.0, "x": 100, "y": 100, "confidence": .8},
+     {"time": 1.2, "x": 20, "y": 90, "confidence": .8}],
+])
+def test_weak_held_ball_needs_two_consistent_actual_rising_detections(following):
+    arc = {"event_time": 2.0, "launch": {"time": 1.0, "observed": True},
+           "x_coefficients": [100, 200], "y_coefficients": [300, 300, 100],
+           "residual_threshold_px": 8, "observations": following}
+    raw = [{"time": .8, "balls": [{"x": 75, "y": 160, "confidence": .3}]}]
+    extended = with_release_contacts(arc, raw, frame_size=(400, 300))
+    assert all(p["time"] != .8 for p in extended["contact_observations"])
+
+
+def test_pre_release_overlap_still_abstains_without_clear_ownership():
+    arc = {**flight(), "event_time": 2.0, "x_coefficients": [100, 200],
+           "y_coefficients": [300, 300, 100], "residual_threshold_px": 8}
+    raw = [{"time": .8, "balls": [{"x": 75, "y": 160, "confidence": .3}]}]
+    extended = with_release_contacts(arc, raw, frame_size=(400, 300))
+    frames = [{"time": .8, "people": [
+        person("a", [50, 160, 100, 280]), person("b", [50, 160, 100, 280])
+    ]}]
+    decision = select_release_shooter(frames, extended)
+    assert decision["status"] == "unknown"
+    assert "pre_release_ownership" not in decision

@@ -210,6 +210,27 @@ def fit_ball_flight(
     }
 
 
+def _ascending_release_pair(ball, flight):
+    """Require two actual rising detections to support a preceding held ball."""
+    future = sorted(
+        (p for p in flight["observations"]
+         if 0.12 <= p["time"] - ball["time"] <= 0.7
+         and p["confidence"] >= 0.35),
+        key=lambda p: p["time"],
+    )
+    if len(future) < 2:
+        return False
+    first, second = future[:2]
+    if first["time"] - ball["time"] > 0.25 or second["time"] - first["time"] > 0.45:
+        return False
+    before = (first["x"] - ball["x"], first["y"] - ball["y"])
+    after = (second["x"] - first["x"], second["y"] - first["y"])
+    if before[1] > -4 or after[1] > -4:
+        return False
+    product = math.hypot(*before) * math.hypot(*after)
+    return product > 0 and sum(a * b for a, b in zip(before, after)) / product >= 0.7
+
+
 def with_release_contacts(flight, records, *, frame_size):
     """Attach actual nearby release observations without changing the fitted arc.
 
@@ -217,6 +238,7 @@ def with_release_contacts(flight, records, *, frame_size):
     Search only 0.4 seconds either side of the launch hint, with a bounded
     residual and confidence gate. Polynomial positions only gate detections;
     they never become contact evidence themselves.
+    A weak preceding detection additionally needs two consistent rising points.
     """
     if flight is None:
         return None
@@ -243,7 +265,13 @@ def with_release_contacts(flight, records, *, frame_size):
             if not (
                 all(math.isfinite(v) for v in (x, y, confidence))
                 and 0 <= x < width and 0 <= y < height
-                and 0.35 <= confidence <= 1
+                and 0.25 <= confidence <= 1
+            ):
+                continue
+            observed = {"time": stamp, "x": x, "y": y, "confidence": confidence}
+            if confidence < 0.35 and not (
+                0.12 <= launch_time - stamp <= 0.25
+                and _ascending_release_pair(observed, flight)
             ):
                 continue
             distance = math.hypot(x - expected_x, y - expected_y)
@@ -383,6 +411,54 @@ def select_release_shooter(frames, flight):
         )
     result["rankings"].sort(key=lambda r: (-r["score"], r["track_id"]))
     rankings = result["rankings"]
+    # Prefer a clearly held ball immediately before free flight over a later
+    # airborne ball that merely passes close to a defender's raised hands.
+    ownership = []
+    for ball in flight.get("contact_observations", []):
+        if not (
+            0.12 <= launch["time"] - ball["time"] <= 0.25
+            and ball["confidence"] >= 0.25
+            and _ascending_release_pair(ball, flight)
+        ):
+            continue
+        matching = []
+        for track in tracks:
+            for person in track["observations"]:
+                if abs(person["time"] - ball["time"]) < 0.04:
+                    matching.append((
+                        _contact(person["bbox"], ball), track["id"], person
+                    ))
+        matching.sort(key=lambda p: (-p[0], p[1]))
+        if not matching or matching[0][0] < 0.75:
+            continue
+        gap = matching[0][0] - (matching[1][0] if len(matching) > 1 else 0)
+        if gap >= 0.25:
+            ownership.append((ball["time"], gap, ball, matching))
+    if ownership:
+        _, gap, ball, matching = max(ownership, key=lambda p: (p[0], p[1]))
+        contacts = {track_id: (score, person) for score, track_id, person in matching}
+        for rank in rankings:
+            score, person = contacts.get(rank["track_id"], (0.0, None))
+            if person is not None:
+                rank["departure_score"] = round(max(
+                    (1 - _contact(person["bbox"], p) for p in flight["observations"]
+                     if 0.15 <= p["time"] - ball["time"] <= 1.2
+                     and p["y"] < ball["y"] - 4), default=0.0,
+                ), 4)
+            rank["flight_contact_score"] = rank["contact_score"]
+            rank["pre_release_contact_score"] = round(score, 4)
+            rank["score"] = round(
+                0.65 * score + 0.2 * rank["departure_score"] + 0.15 * rank["score"], 4
+            )
+            if person is not None:
+                rank["contact_score"] = round(score, 4)
+                rank["evidence_frame"] = {
+                    "score": score, "time": person["time"], "person_id": person["id"],
+                    "bbox": person["bbox"], "ball": ball,
+                    "person_confidence": person["confidence"],
+                }
+        rankings.sort(key=lambda r: (-r["score"], r["track_id"]))
+        result["pre_release_ownership"] = {"time": ball["time"], "contact_margin": round(gap, 4)}
     if (
         not rankings
         or rankings[0]["contact_score"] < 0.5
@@ -402,8 +478,10 @@ def select_release_shooter(frames, flight):
         if margin >= 0.2
         and rankings[0]["score"] >= 0.8
         and rankings[0]["contact_frames"] >= 2
+        and rankings[0]["evidence_frame"]["ball"]["confidence"] >= 0.35
         and launch["observed"]
         else "tentative",
-        reason="observed_ball_upper_body_contact_then_departure",
+        reason="observed_pre_release_ownership_then_departure" if ownership
+        else "observed_ball_upper_body_contact_then_departure",
     )
     return result
