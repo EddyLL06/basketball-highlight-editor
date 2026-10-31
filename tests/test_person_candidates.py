@@ -9,6 +9,7 @@ from engine.python.basketball_engine.person_candidates import (
     RegionPersonCandidates,
     RegionPolicy,
     YoloPersonCropDetector,
+    person_search_region,
 )
 from engine.python.basketball_engine.protocol import ProtocolError
 
@@ -21,6 +22,48 @@ class FakeDetector:
     def detect(self, image):
         self.images.append(image.copy())
         return next(self.responses)
+
+
+def test_observed_launch_uses_a_contained_body_crop():
+    original = [200, 50, 580, 430]
+    box, policy = person_search_region(
+        original,
+        1000,
+        500,
+        release_point=(390, 180),
+        basis="upward_ball_motion_estimate",
+    )
+    assert policy == "observed_release_compact_v1"
+    assert 200 <= box[0] < 390 < box[2] <= 580
+    assert 50 <= box[1] < 180 < box[3] <= 430
+    assert (box[2] - box[0]) * (box[3] - box[1]) <= 1000 * 500 * 0.19
+
+
+@pytest.mark.parametrize(
+    "point,basis",
+    [
+        ((390, 180), "existing_ball_flight_backprojection"),
+        ((390, 180), None),
+        ((30, 180), "upward_ball_motion_estimate"),
+        ((800, 180), "upward_ball_motion_estimate"),
+        ((float("nan"), 180), "upward_ball_motion_estimate"),
+        (None, "upward_ball_motion_estimate"),
+    ],
+)
+def test_uncertain_or_edge_launch_retains_original_region(point, basis):
+    original = [0, 50, 580, 430]
+    box, policy = person_search_region(
+        original, 1000, 500, release_point=point, basis=basis
+    )
+    assert box == tuple(original)
+    assert policy == "approximate_release_region_v1"
+
+
+def test_missing_region_cannot_be_invented_from_anchor():
+    box, _ = person_search_region(
+        None, 1000, 500, release_point=(390, 180), basis="upward_ball_motion_estimate"
+    )
+    assert box is None
 
 
 def test_detector_only_receives_crop_and_boxes_map_back_to_proxy():

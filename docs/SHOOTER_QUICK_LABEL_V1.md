@@ -33,6 +33,11 @@ recognition is being developed for a later version.
 `PERSON_PROXY_REQUIRED`，不会改用原画推理。检测输入默认 320，区域无人物时只扩大
 1.2 倍重试一次，超过半帧面积预算或仍无人物则留给人工，不扫描整帧。
 
+直接观察到球上升轨迹、且出手点不靠画面左右边缘时，人物搜索范围可缩至最多画面宽度
+28%、高度 66%，并限制在原出手区域内。反推轨迹、边缘位置或无效出手点保留原区域。
+这是保守的搜索规则，不是射手置信度；蓝框参考画面仍保持较宽上下文。
+实际策略写入 `person_detection.search_policy`，仍遵守一次小幅重试的上限。
+
 此接口需本地提供 `yolo11n.pt`（`BHE_PERSON_MODEL` 或运行目录的 `models/yolo11n.pt`），
 SHA-256 为 `0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1`。
 模型在 Engine 会话中复用；缺失或校验失败时任务失败并保留原证据及人工标签。

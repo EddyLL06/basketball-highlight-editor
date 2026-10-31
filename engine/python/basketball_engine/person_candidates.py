@@ -74,6 +74,32 @@ def release_distance(box, point):
     return math.hypot(dx, dy) / max(h, 1)
 
 
+def person_search_region(region, width, height, *, release_point=None, basis=None):
+    """Use a smaller body region only for directly observed upward ball motion.
+
+    The observed-motion basis is a conservative gate, not a calibrated confidence.
+    Back-projected or edge-adjacent releases retain their wider context.
+    """
+    original = clipped_region(region, width, height)
+    fallback = (original, "approximate_release_region_v1")
+    if original is None or basis != "upward_ball_motion_estimate":
+        return fallback
+    try:
+        x, y = map(float, release_point)
+        if not all(math.isfinite(v) for v in (x, y)):
+            return fallback
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    x1, y1, x2, y2 = original
+    if not (x1 <= x <= x2 and y1 <= y <= y2 and width * 0.14 <= x <= width * 0.86):
+        return fallback
+    w, h = min(x2 - x1, width * 0.28), min(y2 - y1, height * 0.66)
+    left = max(x1, min(x2 - w, x - w / 2))
+    top = max(y1, min(y2 - h, y - h * (0.27 / 0.76)))
+    compact = clipped_region((left, top, left + w, top + h), width, height)
+    return compact, "observed_release_compact_v1"
+
+
 class RegionPersonCandidates:
     def __init__(self, detector, policy=None):
         self.detector = detector

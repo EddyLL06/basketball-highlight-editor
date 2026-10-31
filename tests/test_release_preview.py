@@ -453,6 +453,12 @@ def test_person_candidates_use_only_middle_proxy_frame_and_map_source_boxes(rele
     assert 0 <= x1 < x2 <= 320 and 0 <= y1 < y2 <= 240
     assert item["person_detection"]["time_ms"] == item["frames"][1]["time_ms"]
     assert item["person_detection"]["input_source"] == "analysis_proxy"
+    assert item["person_detection"]["search_policy"] == "observed_release_compact_v1"
+    search = item["person_detection"]["regions"][0]
+    expected_shape = (
+        int((search[3] - search[1]) / 2), int((search[2] - search[0]) / 2),
+    )
+    assert detector.images[0].shape[:2] == expected_shape
 
 
 def test_person_inference_cannot_fall_back_to_original_quality(release_project, monkeypatch):

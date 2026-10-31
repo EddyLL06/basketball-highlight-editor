@@ -325,10 +325,17 @@ def render_release_previews(
                 focus = None
                 people, person_result = [], None
                 if person_detector is not None and middle:
+                    from .person_candidates import person_search_region
+
                     region = [v / scale[i % 2] for i, v in enumerate(bbox)] if bbox else None
                     anchor = item.get("release_anchor")
                     point = (anchor["x"] / scale[0], anchor["y"] / scale[1]) if anchor else None
+                    region, search_policy = person_search_region(
+                        region, pw, ph, release_point=point,
+                        basis=anchor.get("basis") if anchor else None,
+                    )
                     person_result = person_detector.infer(frame, region, release_point=point, cancel=cancel)
+                    person_result["search_policy"] = search_policy
                     for index, person in enumerate(person_result.pop("people"), 1):
                         left, top, right, bottom = person["bbox"]
                         person_path = directory / f"{token}_{time_ms}_person_{index}.jpg"
