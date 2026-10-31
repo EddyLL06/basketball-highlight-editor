@@ -1,9 +1,20 @@
 import pytest
 
 from engine.python.basketball_engine.release_shooter import (
+    expanded_ball_regions,
+    flight_position,
     fit_ball_flight,
     select_release_shooter,
 )
+
+
+def test_expanded_ball_tiles_cover_proxy_with_overlap_and_reject_bad_sizes():
+    left, right = expanded_ball_regions(960, 540)
+    assert left == (0, 0, 672, 540) and right == (288, 0, 960, 540)
+    assert left[2] > right[0]
+    for width, height in [(0, 540), (960, 2), (960.5, 540), (True, 540)]:
+        with pytest.raises(ValueError):
+            expanded_ball_regions(width, height)
 
 
 def test_proxy_ball_flight_rejects_stationary_distractors_and_is_repeatable():
@@ -36,6 +47,35 @@ def test_proxy_ball_flight_rejects_stationary_distractors_and_is_repeatable():
     assert fit_ball_flight(records[:3], **kwargs) is None
     still = [{"time": r["time"], "balls": [r["balls"][1]]} for r in records]
     assert fit_ball_flight(still, **kwargs) is None
+    assert fit_ball_flight(still, **kwargs, expanded=True) is None
+
+
+def test_expanded_fallback_can_find_flight_before_a_late_rim_event():
+    records = []
+    for i in range(9):
+        t = -0.8 + i * 0.1
+        records.append(
+            {
+                "time": 10 + t,
+                "balls": [
+                    {
+                        "x": 250 + 150 * t + 60 * t * t,
+                        "y": 150 + 260 * t + 250 * t * t,
+                        "confidence": 0.8,
+                    }
+                ],
+            }
+        )
+    kwargs = {
+        "event_time": 11,
+        "rim": {"center_x": 250, "rim_y": 150, "width": 20},
+        "frame_size": (600, 300),
+    }
+    assert fit_ball_flight(records, **kwargs) is None
+    result = fit_ball_flight(records, **kwargs, expanded=True)
+    assert result is not None and result["support"] == 9
+    assert len(result["x_coefficients"]) == 3
+    assert flight_position(result, 10) == pytest.approx((250, 150))
 
 
 def person(identifier, box):

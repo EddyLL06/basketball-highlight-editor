@@ -15,16 +15,31 @@ import numpy as np
 METHOD = "proxy_ball_release_shooter_v1"
 
 
+def expanded_ball_regions(width, height):
+    """Two overlapping proxy tiles for a failed first-pass ball search only.
+
+    Ball inference may cover the court; this is never a person-search fallback.
+    Each tile preserves more ball pixels at the existing 640 model input size.
+    """
+    if type(width) is not int or type(height) is not int or min(width, height) < 32:
+        raise ValueError("BALL_PROXY_SIZE_INVALID")
+    span = math.ceil(width * 0.7)
+    return [(0, 0, span, height), (width - span, 0, width, height)]
+
+
 def flight_position(flight, time):
     t = time - flight["event_time"]
-    vx, x0 = flight["x_coefficients"]
     a, b, c = flight["y_coefficients"]
-    return vx * t + x0, a * t * t + b * t + c
+    return float(np.polyval(flight["x_coefficients"], t)), a * t * t + b * t + c
 
 
-def fit_ball_flight(records, *, event_time, rim, frame_size):
+def fit_ball_flight(records, *, event_time, rim, frame_size, expanded=False):
     """Robustly fit one descending-at-rim flight, ignoring stationary false balls."""
     width, height = frame_size
+    if type(expanded) is not bool:
+        raise ValueError("BALL_SEARCH_MODE_INVALID")
+    earlier_rim_seconds = 1.4 if expanded else 0
+    max_trials = 4000 if expanded else 1200
     points = []
     for record in records:
         for ball in record.get("balls", []):
@@ -51,6 +66,18 @@ def fit_ball_flight(records, *, event_time, rim, frame_size):
     rim_x, rim_y = rim["center_x"], rim["rim_y"]
 
     def valid(xc, yc):
+        if expanded:
+            discriminant = yc[1] ** 2 - 4 * yc[0] * (yc[2] - rim_y)
+            if not height * 0.025 < yc[0] < height * 5 or discriminant <= 0:
+                return False
+            crossing = (-yc[1] + math.sqrt(discriminant)) / (2 * yc[0])
+            return (
+                -earlier_rim_seconds <= crossing <= 0.3
+                and abs(np.polyval(xc, crossing) - rim_x)
+                <= max(rim["width"] * 3, width * 0.22)
+                and abs(xc[0]) <= width * 1.5
+                and abs(2 * xc[0] * crossing + xc[1]) <= width * 2
+            )
         return (
             height * 0.025 < yc[0] < height * 5
             and yc[1] > height * 0.02
@@ -60,7 +87,7 @@ def fit_ball_flight(records, *, event_time, rim, frame_size):
         )
 
     def inliers(xc, yc):
-        distance = np.hypot(xs - (xc[0] * times + xc[1]), ys - np.polyval(yc, times))
+        distance = np.hypot(xs - np.polyval(xc, times), ys - np.polyval(yc, times))
         indices = []
         for time in sorted(set(times)):
             group = np.flatnonzero(times == time)
@@ -70,23 +97,22 @@ def fit_ball_flight(records, *, event_time, rim, frame_size):
         return np.array(indices, dtype=int), distance
 
     n = len(points)
-    if math.comb(n, 3) <= 1200:
+    if math.comb(n, 3) <= max_trials:
         triples = itertools.combinations(range(n), 3)
     else:
         rng = np.random.default_rng(0)
-        triples = (sorted(rng.choice(n, 3, replace=False)) for _ in range(1200))
+        triples = (sorted(rng.choice(n, 3, replace=False)) for _ in range(max_trials))
     best = None
     for triple in triples:
         selected = list(triple)
         ts = times[selected]
-        if len(set(ts)) < 3 or max(ts) - min(ts) < 0.4:
+        if len(set(ts)) < 3 or max(ts) - min(ts) < (0.4 - 1e-6 if expanded else 0.4):
             continue
         design = np.column_stack((ts * ts, ts, np.ones(3)))
         try:
             yc = np.linalg.solve(design, ys[selected])
-            xc = np.linalg.lstsq(
-                np.column_stack((ts, np.ones(3))), xs[selected], rcond=None
-            )[0]
+            x_design = design if expanded else np.column_stack((ts, np.ones(3)))
+            xc = np.linalg.lstsq(x_design, xs[selected], rcond=None)[0]
         except np.linalg.LinAlgError:
             continue
         if not valid(xc, yc):
@@ -94,7 +120,7 @@ def fit_ball_flight(records, *, event_time, rim, frame_size):
         indices, errors = inliers(xc, yc)
         if (
             len(indices) < 4
-            or max(times[indices]) < -0.55
+            or max(times[indices]) < -earlier_rim_seconds - 0.55
             or np.ptp(times[indices]) < 0.5
         ):
             continue
@@ -103,6 +129,11 @@ def fit_ball_flight(records, *, event_time, rim, frame_size):
             + float(confidence[indices].sum()) * 0.15
             - float(errors[indices].mean()) / threshold * 0.35
         )
+        if expanded:
+            crossing = (
+                -yc[1] + math.sqrt(yc[1] ** 2 - 4 * yc[0] * (yc[2] - rim_y))
+            ) / (2 * yc[0])
+            score += max(0.0, -crossing) * 0.35
         if best is None or score > best[0]:
             best = score, indices, xc, yc
     if best is None:
@@ -112,9 +143,12 @@ def fit_ball_flight(records, *, event_time, rim, frame_size):
     refined_y = np.linalg.lstsq(
         np.column_stack((ts * ts, ts, np.ones(len(ts)))), ys[indices], rcond=None
     )[0]
-    refined_x = np.linalg.lstsq(
-        np.column_stack((ts, np.ones(len(ts)))), xs[indices], rcond=None
-    )[0]
+    x_design = (
+        np.column_stack((ts * ts, ts, np.ones(len(ts))))
+        if expanded
+        else np.column_stack((ts, np.ones(len(ts))))
+    )
+    refined_x = np.linalg.lstsq(x_design, xs[indices], rcond=None)[0]
     if valid(refined_x, refined_y):
         xc, yc = refined_x, refined_y
         indices, errors = inliers(xc, yc)
@@ -149,7 +183,7 @@ def fit_ball_flight(records, *, event_time, rim, frame_size):
             return None
         launch = {
             "time": event_time + t,
-            "x": float(xc[0] * t + xc[1]),
+            "x": float(np.polyval(xc, t)),
             "y": height * 0.38,
             "observed": False,
         }
