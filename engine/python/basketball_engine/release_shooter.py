@@ -418,6 +418,32 @@ def _stationary_contact_conflict(rankings, tracks):
     return False
 
 
+def _release_gap_supported(evidence, flight):
+    """A weak contact cannot bridge a long unexplained visible-flight gap.
+
+    Gaps at the upper image boundary remain valid: the ball can leave the
+    frame near the apex. Polynomial positions only explain missing evidence;
+    they never become observed contacts.
+    """
+    ball = evidence["ball"]
+    if ball["confidence"] >= 0.5 or "y_coefficients" not in flight:
+        return True
+    later = [p for p in flight["observations"] if p["time"] > ball["time"] + 0.04]
+    if not later:
+        return False
+    following = min(later, key=lambda p: p["time"])
+    if following["time"] - ball["time"] <= 0.45:
+        return True
+    start = ball["time"] - flight["event_time"]
+    end = following["time"] - flight["event_time"]
+    a, b, c = flight["y_coefficients"]
+    times = [start, end]
+    if a > 0 and start < -b / (2 * a) < end:
+        times.append(-b / (2 * a))
+    margin = max(8.0, 3 * flight.get("residual_threshold_px", 8.0))
+    return min(a * t * t + b * t + c for t in times) <= margin
+
+
 def select_release_shooter(frames, flight):
     """Choose a shot-local person using observed ball contact and departure."""
     tracks = local_person_tracks(frames)
@@ -544,6 +570,9 @@ def select_release_shooter(frames, flight):
         result["pre_release_ownership"] = {"time": ball["time"], "contact_margin": round(gap, 4)}
     if not ownership and _stationary_contact_conflict(rankings, tracks):
         result["reason"] = "airborne_contact_conflicts_with_nearby_release_motion"
+        return result
+    if rankings and not _release_gap_supported(rankings[0]["evidence_frame"], flight):
+        result["reason"] = "weak_release_contact_has_unexplained_flight_gap"
         return result
     if (
         not rankings

@@ -263,3 +263,28 @@ def test_isolated_weak_launch_can_reanchor_only_to_observed_rising_ball():
     assert refine_release_anchor(arc, [], frame_size=(400, 300)) is arc
     assert refine_release_anchor({**arc, "launch": {**arc["launch"], "confidence": .8}}, records, frame_size=(400, 300))["launch"]["time"] == 1
     assert refine_release_anchor(None, records, frame_size=(400, 300)) is None
+
+
+def test_weak_contact_cannot_jump_across_missing_visible_release_evidence():
+    arc = {"event_time": 3.0, "launch": {"time": 1.0, "observed": True},
+           "y_coefficients": [100, 200, 150], "residual_threshold_px": 8,
+           "observations": [{"time": 1.0, "x": 100, "y": 150, "confidence": .2},
+                            {"time": 1.8, "x": 150, "y": 54, "confidence": .8},
+                            {"time": 2.0, "x": 170, "y": 50, "confidence": .8}]}
+    frames = [{"time": 1.0, "people": [person("a", [80, 150, 120, 270])]}]
+    result = select_release_shooter(frames, arc)
+    assert result["status"] == "unknown"
+    assert result["reason"] == "weak_release_contact_has_unexplained_flight_gap"
+    arc["observations"][1]["time"] = 1.4
+    assert select_release_shooter(frames, arc)["selected_track_id"] == 1
+
+
+def test_weak_release_gap_is_allowed_when_ball_leaves_upper_frame():
+    arc = {"event_time": 3.0, "launch": {"time": 1.0, "observed": True},
+           "y_coefficients": [300, 900, 675], "residual_threshold_px": 8,
+           "observations": [{"time": 1.0, "x": 100, "y": 75, "confidence": .2},
+                            {"time": 1.8, "x": 150, "y": 27, "confidence": .8},
+                            {"time": 2.0, "x": 170, "y": 75, "confidence": .8}]}
+    frames = [{"time": 1.0, "people": [person("a", [80, 75, 120, 195])]}]
+    result = select_release_shooter(frames, arc)
+    assert result["selected_track_id"] == 1 and result["confidence_band"] == "tentative"
