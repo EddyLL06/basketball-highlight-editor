@@ -231,6 +231,52 @@ def _ascending_release_pair(ball, flight):
     return product > 0 and sum(a * b for a, b in zip(before, after)) / product >= 0.7
 
 
+def refine_release_anchor(flight, records, *, frame_size):
+    """Revisit a weak isolated launch hint using an actual later rising ball.
+
+    A lone low-confidence inlier followed by a long gap can be a dribble before
+    the shot. Keep the arc intact and move only the regional sampling hint.
+    """
+    if flight is None:
+        return None
+    launch = flight["launch"]
+    if not launch["observed"] or launch.get("confidence", 1) >= 0.25:
+        return flight
+    later = [p for p in flight["observations"] if p["time"] > launch["time"] + 0.01]
+    if not later or min(p["time"] for p in later) - launch["time"] < 0.6 - 1e-6:
+        return flight
+    width, height = frame_size
+    choices = []
+    for record in records:
+        try:
+            stamp = float(record["time"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not launch["time"] + 0.2 - 1e-6 <= stamp <= launch["time"] + 0.8 + 1e-6:
+            continue
+        expected_x, expected_y = flight_position(flight, stamp)
+        for ball in record.get("balls", []):
+            try:
+                x, y, confidence = (float(ball[k]) for k in ("x", "y", "confidence"))
+            except (KeyError, TypeError, ValueError):
+                continue
+            observed = {"time": stamp, "x": x, "y": y, "confidence": confidence}
+            if (
+                all(math.isfinite(v) for v in (x, y, confidence))
+                and 0 <= x < width and height * 0.22 <= y <= height * 0.75
+                and 0.35 <= confidence <= 1
+                and math.hypot(x - expected_x, y - expected_y)
+                <= max(3 * flight["residual_threshold_px"], height * 0.1)
+                and _ascending_release_pair(observed, flight)
+            ):
+                choices.append(observed)
+    if not choices:
+        return flight
+    chosen = min(choices, key=lambda p: (p["time"], -p["confidence"]))
+    return {**flight, "launch": {**chosen, "observed": True},
+            "original_launch": dict(launch), "launch_refinement": "observed_rise_after_weak_isolated_hint"}
+
+
 def with_release_contacts(flight, records, *, frame_size):
     """Attach actual nearby release observations without changing the fitted arc.
 
@@ -340,6 +386,38 @@ def _contact(box, ball):
     return math.exp(-5 * (dx + vertical + abs(dy) * 0.25))
 
 
+def _stationary_contact_conflict(rankings, tracks):
+    """Veto ambiguous airborne proximity; jumping alone never assigns a shooter."""
+    if not rankings:
+        return False
+    best = rankings[0]["evidence_frame"]
+    box, ball, stamp = best["bbox"], best["ball"], best["time"]
+    if ball["y"] > box[1] - 0.04 * (box[3] - box[1]):
+        return False
+
+    def lift(track):
+        before = [p for p in track["observations"] if stamp - 0.41 <= p["time"] <= stamp]
+        if len(before) < 3:
+            return None
+        baseline = before[0]["bbox"][3]
+        height = max(p["bbox"][3] - p["bbox"][1] for p in before)
+        return max(baseline - p["bbox"][3] for p in before) / max(1, height)
+
+    selected = next(t for t in tracks if t["id"] == rankings[0]["track_id"])
+    own_lift = lift(selected)
+    if own_lift is None or own_lift > 0.04:
+        return False
+    for track in tracks:
+        if track is selected:
+            continue
+        rival_lift = lift(track)
+        person = next((p for p in track["observations"] if abs(p["time"] - stamp) < 0.04), None)
+        if rival_lift is not None and rival_lift >= 0.1 and person is not None:
+            if _contact(person["bbox"], ball) >= 0.4:
+                return True
+    return False
+
+
 def select_release_shooter(frames, flight):
     """Choose a shot-local person using observed ball contact and departure."""
     tracks = local_person_tracks(frames)
@@ -399,10 +477,15 @@ def select_release_shooter(frames, flight):
         score = (
             0.7 * best["score"] + 0.15 * sum(nearby) / len(nearby) + 0.15 * departure
         )
+        reliability = 1.0
+        if len(track["observations"]) == 1 and best["person_confidence"] < 0.5:
+            reliability = 0.75 + 0.25 * best["person_confidence"] / 0.5
+            score *= reliability
         result["rankings"].append(
             {
                 "track_id": track["id"],
                 "score": round(score, 4),
+                "evidence_reliability": round(reliability, 4),
                 "contact_score": round(best["score"], 4),
                 "departure_score": round(departure, 4),
                 "contact_frames": len(contacts),
@@ -459,6 +542,9 @@ def select_release_shooter(frames, flight):
                 }
         rankings.sort(key=lambda r: (-r["score"], r["track_id"]))
         result["pre_release_ownership"] = {"time": ball["time"], "contact_margin": round(gap, 4)}
+    if not ownership and _stationary_contact_conflict(rankings, tracks):
+        result["reason"] = "airborne_contact_conflicts_with_nearby_release_motion"
+        return result
     if (
         not rankings
         or rankings[0]["contact_score"] < 0.5

@@ -6,6 +6,7 @@ from engine.python.basketball_engine.release_shooter import (
     fit_ball_flight,
     select_release_shooter,
     with_release_contacts,
+    refine_release_anchor,
 )
 
 
@@ -220,3 +221,45 @@ def test_pre_release_overlap_still_abstains_without_clear_ownership():
     decision = select_release_shooter(frames, extended)
     assert decision["status"] == "unknown"
     assert "pre_release_ownership" not in decision
+
+
+def test_single_weak_person_box_does_not_block_consistent_release_track():
+    artifact = {**person("artifact", [78, 99, 124, 222]), "confidence": .23}
+    frames = [
+        {"time": 1.0, "people": [person("a", [80, 100, 120, 220]), artifact]},
+        {"time": 1.2, "people": [person("b", [80, 100, 120, 220])]},
+    ]
+    result = select_release_shooter(frames, flight())
+    assert result["selected_track_id"] == 1
+    assert result["rankings"][1]["evidence_reliability"] < 1
+
+
+def test_airborne_proximity_conflicting_with_jump_motion_abstains():
+    arc = flight()
+    arc["observations"][0]["y"] = 95
+    frames = [
+        {"time": t, "people": [person("stationary" + str(t), [80, 110, 120, 230]),
+                               person("moving" + str(t), box)]}
+        for t, box in [(.6, [55, 120, 90, 255]), (.8, [55, 100, 90, 235]), (1.0, [55, 115, 90, 250])]
+    ]
+    result = select_release_shooter(frames, arc)
+    assert result["status"] == "unknown" and result["selected_track_id"] is None
+    assert result["reason"] == "airborne_contact_conflicts_with_nearby_release_motion"
+    for frame in frames:
+        frame["people"][1]["bbox"] = [55, 115, 90, 250]
+    assert select_release_shooter(frames, arc)["selected_track_id"] == 1
+
+
+def test_isolated_weak_launch_can_reanchor_only_to_observed_rising_ball():
+    arc = {"event_time": 3.0, "launch": {"time": 1.0, "x": 100, "y": 150, "confidence": .1, "observed": True},
+           "x_coefficients": [50, 200], "y_coefficients": [40, 80, 150], "residual_threshold_px": 8,
+           "observations": [{"time": 1.0, "x": 100, "y": 150, "confidence": .1},
+                            {"time": 2.0, "x": 150, "y": 110, "confidence": .8},
+                            {"time": 2.2, "x": 160, "y": 100, "confidence": .8}]}
+    records = [{"time": 1.8, "balls": [{"x": 140, "y": 130, "confidence": .8}]}]
+    refined = refine_release_anchor(arc, records, frame_size=(400, 300))
+    assert refined["launch"]["time"] == 1.8 and refined["launch"]["observed"] is True
+    assert refined["observations"] == arc["observations"] and arc["launch"]["time"] == 1
+    assert refine_release_anchor(arc, [], frame_size=(400, 300)) is arc
+    assert refine_release_anchor({**arc, "launch": {**arc["launch"], "confidence": .8}}, records, frame_size=(400, 300))["launch"]["time"] == 1
+    assert refine_release_anchor(None, records, frame_size=(400, 300)) is None
