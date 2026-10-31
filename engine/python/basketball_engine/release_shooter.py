@@ -33,12 +33,21 @@ def flight_position(flight, time):
     return float(np.polyval(flight["x_coefficients"], t)), a * t * t + b * t + c
 
 
-def fit_ball_flight(records, *, event_time, rim, frame_size, expanded=False):
+def fit_ball_flight(
+    records, *, event_time, rim, frame_size, expanded=False, earlier_rim_seconds=1.4
+):
     """Robustly fit one descending-at-rim flight, ignoring stationary false balls."""
     width, height = frame_size
     if type(expanded) is not bool:
         raise ValueError("BALL_SEARCH_MODE_INVALID")
-    earlier_rim_seconds = 1.4 if expanded else 0
+    if (
+        isinstance(earlier_rim_seconds, bool)
+        or not isinstance(earlier_rim_seconds, (int, float))
+        or not math.isfinite(earlier_rim_seconds)
+        or not 0 <= earlier_rim_seconds <= 2.6
+    ):
+        raise ValueError("BALL_SEARCH_TIME_INVALID")
+    earlier_rim_seconds = earlier_rim_seconds if expanded else 0
     max_trials = 4000 if expanded else 1200
     points = []
     for record in records:
@@ -201,6 +210,54 @@ def fit_ball_flight(records, *, event_time, rim, frame_size, expanded=False):
     }
 
 
+def with_release_contacts(flight, records, *, frame_size):
+    """Attach actual nearby release observations without changing the fitted arc.
+
+    A held ball need not lie exactly on its subsequent free-flight parabola.
+    Search only 0.4 seconds either side of the launch hint, with a bounded
+    residual and confidence gate. Polynomial positions only gate detections;
+    they never become contact evidence themselves.
+    """
+    if flight is None:
+        return None
+    width, height = frame_size
+    launch_time = flight["launch"]["time"]
+    gate = max(3 * flight["residual_threshold_px"], height * 0.1)
+    contacts = {p["time"]: dict(p) for p in flight["observations"]}
+    for record in records:
+        try:
+            stamp = float(record["time"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not math.isfinite(stamp) or not launch_time - 0.4 <= stamp <= launch_time + 0.4:
+            continue
+        if stamp in contacts:
+            continue
+        expected_x, expected_y = flight_position(flight, stamp)
+        eligible = []
+        for ball in record.get("balls", []):
+            try:
+                x, y, confidence = (float(ball[k]) for k in ("x", "y", "confidence"))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not (
+                all(math.isfinite(v) for v in (x, y, confidence))
+                and 0 <= x < width and 0 <= y < height
+                and 0.35 <= confidence <= 1
+            ):
+                continue
+            distance = math.hypot(x - expected_x, y - expected_y)
+            if distance <= gate:
+                eligible.append((distance, -confidence, x, y, confidence))
+        if eligible:
+            _, _, x, y, confidence = min(eligible)
+            contacts[stamp] = {
+                "time": stamp, "x": x, "y": y, "confidence": confidence,
+                "source": "observed_release_neighbour",
+            }
+    return {**flight, "contact_observations": [contacts[t] for t in sorted(contacts)]}
+
+
 def _box_match(a, b):
     aw, ah = a[2] - a[0], a[3] - a[1]
     bw, bh = b[2] - b[0], b[3] - b[1]
@@ -279,7 +336,7 @@ def select_release_shooter(frames, flight):
             # Contact evidence must be an actual observation, never an extrapolated ball.
             nearby = [
                 p
-                for p in flight["observations"]
+                for p in flight.get("contact_observations", flight["observations"])
                 if abs(p["time"] - person["time"]) < 0.04
             ]
             for ball in nearby:

@@ -5,6 +5,7 @@ from engine.python.basketball_engine.release_shooter import (
     flight_position,
     fit_ball_flight,
     select_release_shooter,
+    with_release_contacts,
 )
 
 
@@ -76,6 +77,14 @@ def test_expanded_fallback_can_find_flight_before_a_late_rim_event():
     assert result is not None and result["support"] == 9
     assert len(result["x_coefficients"]) == 3
     assert flight_position(result, 10) == pytest.approx((250, 150))
+    # A late candidate after a rim bounce can still refer to the initial flight.
+    kwargs["event_time"] = 11.6
+    assert fit_ball_flight(records, **kwargs, expanded=True) is None
+    earlier = fit_ball_flight(records, **kwargs, expanded=True, earlier_rim_seconds=2.6)
+    assert earlier is not None and flight_position(earlier, 10) == pytest.approx((250, 150))
+    for bad in (True, -1, 2.7, float("nan"), "2"):
+        with pytest.raises(ValueError, match="BALL_SEARCH_TIME_INVALID"):
+            fit_ball_flight(records, **kwargs, expanded=True, earlier_rim_seconds=bad)
 
 
 def person(identifier, box):
@@ -138,3 +147,42 @@ def test_sparse_departure_is_tentative_and_extrapolation_is_not_contact():
     assert result["status"] == "predicted" and result["confidence_band"] == "tentative"
     frames[0]["time"] = 0.6
     assert select_release_shooter(frames, observed)["status"] == "unknown"
+
+
+def test_actual_held_ball_can_disambiguate_shooter_from_airborne_defender():
+    arc = {
+        "event_time": 2.0, "launch": {"time": 1.0, "observed": True},
+        "x_coefficients": [100, 200], "y_coefficients": [300, 300, 100],
+        "residual_threshold_px": 8,
+        "observations": [
+            {"time": 1.0, "x": 100, "y": 100, "confidence": .8},
+            {"time": 1.2, "x": 120, "y": 52, "confidence": .8},
+            {"time": 1.4, "x": 140, "y": 28, "confidence": .8},
+        ],
+    }
+    frames = [
+        {"time": .8, "people": [person("defender", [100, 100, 160, 260]), person("shooter", [50, 160, 100, 280])]},
+        {"time": 1.0, "people": [person("defender2", [90, 90, 150, 250]), person("shooter2", [40, 150, 90, 270])]},
+    ]
+    assert select_release_shooter(frames, arc)["selected_track_id"] == 1
+    raw = [{"time": .8, "balls": [{"x": 75, "y": 160, "confidence": .8}]}]
+    extended = with_release_contacts(arc, raw, frame_size=(400, 300))
+    assert len(arc["observations"]) == 3 and "contact_observations" not in arc
+    decision = select_release_shooter(frames, extended)
+    assert decision["selected_track_id"] == 2
+    assert decision["rankings"][0]["evidence_frame"]["ball"]["source"] == "observed_release_neighbour"
+
+
+def test_release_contact_gate_does_not_invent_or_accept_unrelated_balls():
+    arc = {**flight(), "event_time": 2.0, "x_coefficients": [100, 200],
+           "y_coefficients": [300, 300, 100], "residual_threshold_px": 8}
+    bad = [{"time": .8, "balls": [
+        {"x": 75, "y": 170, "confidence": .2},
+        {"x": 350, "y": 170, "confidence": .99},
+        {"x": float("nan"), "y": 170, "confidence": .9},
+    ]}, {"time": .2, "balls": [{"x": 75, "y": 170, "confidence": .9}]}]
+    extended = with_release_contacts(arc, bad, frame_size=(400, 300))
+    assert extended["contact_observations"] == arc["observations"]
+    assert with_release_contacts(None, bad, frame_size=(400, 300)) is None
+    frames = [{"time": .8, "people": [person("a", [50, 160, 100, 280])]}]
+    assert select_release_shooter(frames, extended)["status"] == "unknown"
