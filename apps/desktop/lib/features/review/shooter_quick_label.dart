@@ -39,6 +39,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
   JsonMap _gallery = {};
   final Map<String, dynamic> _personChoices = {};
   bool _showReferences = false;
+  bool _selectingReferences = false;
+  String? _referencePlayerId;
   final _frameChoices = <String, int>{};
   final _saving = <String>{};
   final _undo = <JsonMap>[];
@@ -125,6 +127,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
         }
         _rows = next;
         _players = _maps(result['players']);
+        if (!_players.any((p) => p['id'] == _referencePlayerId)) {
+          _referencePlayerId = _players.firstOrNull?['id'] as String?;
+        }
         _videos = _maps(result['videos']);
         _gallery = _map(result['identity_gallery']);
         if (!_videos.any((v) => v['id'] == _videoId)) _videoId = null;
@@ -166,7 +171,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
           _frameChoices.clear();
           await _load();
           if (mounted && _job?['stage'] == 'shooter_references') {
-            setState(() => _showReferences = true);
+            setState(() {
+              _showReferences = true;
+              _selectingReferences = _referencePlayerId != null;
+            });
           }
           return;
         }
@@ -198,6 +206,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
 
   Future<void> _identify() async {
     setState(() {
+      _selectingReferences = false;
       _preparing = true;
       _error = null;
     });
@@ -222,6 +231,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
       'player_id': playerId,
       'human_confirmed': true,
     });
+    if (mounted) setState(() => _referencePlayerId = playerId);
     await _load();
   }
 
@@ -272,7 +282,37 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
   JsonMap _evidence(JsonMap row) =>
       _auto(row).isNotEmpty ? _auto(row) : _map(row['shooter_evidence']);
 
-  Future<void> _personDetail(JsonMap row) async {
+  Future<void> _personDetail(JsonMap row, {bool forceDetail = false}) async {
+    if (!forceDetail && _selectingReferences && _saving.isNotEmpty) {
+      return;
+    }
+    if (!forceDetail && _selectingReferences && _referencePlayerId != null &&
+        !_running && !_preparing && _saving.isEmpty) {
+      final frames = _frames(row);
+      final sample = frames.isEmpty ? <String, dynamic>{} :
+          _map(frames[_frameIndex(row)]['sample']);
+      if (sample['id'] != null) {
+        final existing = _maps(_gallery['references']).where((r) =>
+            r['sample_id'] == sample['id'] && r['player_id'] == _referencePlayerId).firstOrNull;
+        setState(() => _saving.add(_id(row)));
+        _notifyBusy();
+        try {
+          if (existing == null) {
+            await _reference(row, sample, _referencePlayerId!);
+          } else {
+            await _removeReference(existing);
+          }
+        } catch (e) {
+          if (mounted) setState(() => _error = e.toString());
+        } finally {
+          if (mounted) {
+            setState(() => _saving.remove(_id(row)));
+            _notifyBusy();
+          }
+        }
+        return;
+      }
+    }
     final auto = _auto(row);
     if (auto.isEmpty) {
       setState(() => _context = !_context);
@@ -286,6 +326,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
       players: _players,
       selected: frame?['sample'] as JsonMap?,
       busy: _running || _preparing,
+      referencePlayerId: _referencePlayerId,
       onReference: (sample, player) => _reference(row, sample, player),
     );
     if (!mounted || selected == null) return;
@@ -304,7 +345,12 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     setState(() {
       _personChoices[_id(row)] = selected['track_id'];
       _activeId = _id(row);
-      _frameChoices.remove(_id(row));
+      final chosen = _frames(row).indexWhere((f) => _map(f['sample'])['id'] == selected['id']);
+      if (chosen >= 0) {
+        _frameChoices[_id(row)] = chosen;
+      } else {
+        _frameChoices.remove(_id(row));
+      }
     });
   }
 
@@ -498,6 +544,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
 
   KeyEventResult _key(FocusNode node, KeyEvent event) {
     if (!widget.active ||
+        _selectingReferences ||
         event is! KeyDownEvent ||
         _saving.isNotEmpty ||
         _addingPlayer) {
@@ -631,7 +678,12 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                           onSelected: (value) {
                             if (value == 'references') {
                               setState(
-                                () => _showReferences = !_showReferences,
+                                () {
+                                  _showReferences = !_showReferences;
+                                  if (!_showReferences) {
+                                    _selectingReferences = false;
+                                  }
+                                },
                               );
                             }
                             if (value == 'context') {
@@ -670,8 +722,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                     ),
                     Text(
                       t(
-                        '点击姓名保存；点击人物画面查看详情或设置参考图。数字 1–9 标记当前卡片。',
-                        'Choose a name to save. Open an image for details or references. Keys 1–9 label the selected card.',
+                        _selectingReferences ? '选参考图：点击清楚的人物图片加入，再点一次移除；框错时点图片上的调整按钮。' : '点击姓名保存；点击人物画面查看详情或设置参考图。数字 1–9 标记当前卡片。',
+                        _selectingReferences ? 'Select references: click a clear person image to add or remove it. Use the adjustment button if the person is wrong.' : 'Choose a name to save. Open an image for details or references. Keys 1–9 label the selected card.',
                       ),
                       style: Theme.of(
                         context,
@@ -683,9 +735,16 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                         players: _players,
                         gallery: _gallery,
                         expanded: _showReferences,
-                        busy: _running || _preparing,
+                        busy: _running || _preparing || _saving.isNotEmpty,
                         onRemove: (r) => unawaited(_removeReference(r)),
                         onAddPlayer: () => unawaited(_addPlayer()),
+                        activePlayerId: _referencePlayerId,
+                        selecting: _selectingReferences,
+                        onPlayerChanged: (id) => setState(() {
+                          _referencePlayerId = id;
+                          _selectingReferences = id != null;
+                        }),
+                        onSelectingChanged: (value) => setState(() => _selectingReferences = value),
                       ),
                     if (_rows.any(
                       (r) =>
@@ -846,6 +905,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
         ? 1.12
         : 1.0;
     final hasRegion = !_context && cropPath != null;
+    final reference = _maps(_gallery['references']).where((r) =>
+        r['sample_id'] == _map(frame['sample'])['id']).firstOrNull;
     return Semantics(
       image: true,
       label: t(
@@ -858,7 +919,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
           key: ValueKey('shooter-preview-$id-$index'),
           decoration: BoxDecoration(
             color: Colors.black,
-            border: Border.all(color: c.borderStrong),
+          border: Border.all(color: reference == null ? c.borderStrong : c.orange,
+              width: reference == null ? 1 : 2),
             borderRadius: BorderRadius.circular(CsRadius.sm),
           ),
           clipBehavior: Clip.antiAlias,
@@ -970,6 +1032,21 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                 ),
               ),
             ),
+            if (_selectingReferences && _auto(row).isNotEmpty)
+              Positioned(right: 4, bottom: 4, child: IconButton(
+                key: ValueKey('adjust-shooter-person-$id'),
+                tooltip: t('调整人物或画面', 'Adjust person or frame'),
+                style: IconButton.styleFrom(backgroundColor: c.background.withValues(alpha: .85)),
+                onPressed: _saving.isNotEmpty ? null : () => unawaited(_personDetail(row, forceDetail: true)),
+                icon: const Icon(Icons.tune, size: 18),
+              )),
+            if (reference != null)
+              Positioned(left: 4, bottom: 4, child: Container(
+                color: c.background.withValues(alpha: .85),
+                padding: const EdgeInsets.all(4),
+                child: Text(t('已选为参考图', 'Reference selected'),
+                    style: TextStyle(color: c.orange, fontSize: 11)),
+              )),
           ],
         ],
       ),

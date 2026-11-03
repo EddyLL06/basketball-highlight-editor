@@ -19,7 +19,7 @@ class _ReviewEngine {
   int identifyRequests = 0;
   final referenceRequests = <JsonMap>[];
   final adoptionRequests = <JsonMap>[];
-  bool secondPerson = false;
+  bool secondPerson = false, secondFrame = false;
   final adoptedIds = <String>{};
 
   Future<JsonMap> request(String command, JsonMap payload) async {
@@ -84,6 +84,10 @@ class _ReviewEngine {
                           'time_ms': 1100,
                           'crop_path': null,
                           'context_path': null,
+                        },
+                        if (secondFrame) {
+                          'id': 'sample-c$i-late', 'track_id': 1, 'time_ms': 1200,
+                          'crop_path': null, 'context_path': null,
                         },
                       ],
                     },
@@ -183,6 +187,34 @@ Future<void> _pump(
 }
 
 void main() {
+  testWidgets('reference mode keeps the player and the chosen frame across cards', (tester) async {
+    final engine = _ReviewEngine()..automatic = true..secondFrame = true;
+    await _pump(tester, engine);
+    await tester.tap(find.byTooltip('More actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Player references'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('reference-player')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Green').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('adjust-shooter-person-c0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, '2'));
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('shooter-preview-c0-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('shooter-preview-c1-0')));
+    await tester.pumpAndSettle();
+    expect(engine.referenceRequests.map((r) => r['player_id']), ['green', 'green']);
+    expect(engine.referenceRequests.first['sample_id'], 'sample-c0-late');
+    expect(engine.referenceRequests.last['sample_id'], 'sample-c1');
+    expect(engine.saves, isEmpty);
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('batch adoption uses the displayed suggestions once', (
     tester,
   ) async {

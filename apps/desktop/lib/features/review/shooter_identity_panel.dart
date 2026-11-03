@@ -16,6 +16,10 @@ class ShooterIdentityPanel extends StatelessWidget {
     required this.busy,
     required this.onRemove,
     required this.onAddPlayer,
+    required this.activePlayerId,
+    required this.selecting,
+    required this.onPlayerChanged,
+    required this.onSelectingChanged,
   });
 
   final List<JsonMap> players;
@@ -23,6 +27,10 @@ class ShooterIdentityPanel extends StatelessWidget {
   final bool expanded, busy;
   final ValueChanged<JsonMap> onRemove;
   final VoidCallback onAddPlayer;
+  final String? activePlayerId;
+  final bool selecting;
+  final ValueChanged<String?> onPlayerChanged;
+  final ValueChanged<bool> onSelectingChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +46,9 @@ class ShooterIdentityPanel extends StatelessWidget {
     return ExpansionTile(
       key: ValueKey('identity-gallery-$expanded'),
       initiallyExpanded: expanded,
+      onExpansionChanged: (open) {
+        if (!open && selecting) onSelectingChanged(false);
+      },
       tilePadding: EdgeInsets.zero,
       childrenPadding: const EdgeInsets.only(bottom: Spacing.sm),
       title: Text(zh ? '球员参考图' : 'Player references'),
@@ -50,12 +61,30 @@ class ShooterIdentityPanel extends StatelessWidget {
         style: TextStyle(color: c.textSecondary, fontSize: 12),
       ),
       children: [
+        Wrap(spacing: Spacing.sm, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          SizedBox(width: 220, child: DropdownButton<String>(
+            key: const Key('reference-player'),
+            isExpanded: true,
+            value: activePlayerId,
+            hint: Text(zh ? '选择参考球员' : 'Reference player'),
+            items: players.map((p) => DropdownMenuItem(value: p['id'] as String,
+                child: Text(p['name'] as String, maxLines: 1,
+                    overflow: TextOverflow.ellipsis))).toList(),
+            onChanged: busy ? null : onPlayerChanged,
+          )),
+          FilterChip(
+            key: const Key('select-reference-images'),
+            label: Text(zh ? '点图选参考' : 'Select reference images'),
+            selected: selecting,
+            onSelected: busy || activePlayerId == null ? null : onSelectingChanged,
+          ),
+        ]),
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
             zh
-                ? '点击人物画面设置参考图；每人至少两次不同出手，建议 3–5 张。'
-                : 'Open a person image to set references. Use at least two different shots per player; 3–5 recommended.',
+                  ? '选定球员后，连续点击清楚的人物图加入参考；每人至少两次不同出手，建议 3–5 张。框错时点图片上的调整按钮。'
+                  : 'Choose a player, then click clear person images to add references. Use at least two different shots; 3–5 recommended. Use the image adjustment button if the person is wrong.',
             style: TextStyle(color: c.textSecondary, fontSize: 12),
           ),
         ),
@@ -149,6 +178,7 @@ Future<JsonMap?> showShooterPersonDetail(
   required List<JsonMap> players,
   required JsonMap? selected,
   required bool busy,
+  String? referencePlayerId,
   required Future<void> Function(JsonMap sample, String playerId) onReference,
 }) => showDialog<JsonMap>(
   context: context,
@@ -157,7 +187,8 @@ Future<JsonMap?> showShooterPersonDetail(
     final tracks = (observation['tracks'] as List).whereType<Map>().toList();
     var trackId = selected?['track_id'] ?? observation['selected_track_id'];
     var sampleId = selected?['id'];
-    var playerId = players.firstOrNull?['id'] as String?;
+    var playerId = players.any((p) => p['id'] == referencePlayerId)
+        ? referencePlayerId : (players.firstOrNull?['id'] as String?);
     var full = false, saving = false;
     String? error;
     return StatefulBuilder(
