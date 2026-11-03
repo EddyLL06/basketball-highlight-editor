@@ -71,7 +71,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
       if (_auto(row).isNotEmpty) {
         return row['shooter_review_state'] == 'uncertain' ||
             _auto(row)['selected_track_id'] == null ||
-            _map(_auto(row)['prediction'])['status'] != 'suggested';
+            _suggestion(row)['status'] != 'suggested';
       }
       return row['shooter_review_state'] == 'uncertain' ||
           _map(row['shooter_evidence'])['release_uncertain'] == true ||
@@ -114,7 +114,15 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
       final result = await widget.request('list_shooter_review', {});
       if (!mounted) return;
       setState(() {
-        _rows = _maps(result['candidates']);
+        final next = _maps(result['candidates']);
+        for (final row in next) {
+          final previous = _rows.where((r) => _id(r) == _id(row)).firstOrNull;
+          if (previous != null && _auto(previous)['generation'] != _auto(row)['generation']) {
+            _personChoices.remove(_id(row));
+            _frameChoices.remove(_id(row));
+          }
+        }
+        _rows = next;
         _players = _maps(result['players']);
         _videos = _maps(result['videos']);
         _gallery = _map(result['identity_gallery']);
@@ -234,6 +242,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
       await widget.request('apply_shooter_suggestions', {
         'gallery_hash': _gallery['hash'],
         if (_videoId != null) 'video_id': _videoId,
+        'candidate_ids': _rows.where((r) =>
+            (_videoId == null || r['video_id'] == _videoId) &&
+            r['player_id'] == null && r['shooter_review_state'] == 'pending' &&
+            _suggestion(r)['status'] == 'suggested').map(_id).toList(),
       });
       await _load();
     } catch (e) {
@@ -244,6 +256,11 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
   }
 
   JsonMap _auto(JsonMap row) => _map(row['shooter_auto']);
+  JsonMap _suggestion(JsonMap row) {
+    final auto = _auto(row), choice = _personChoices[_id(row)];
+    if (choice != null && choice != auto['selected_track_id']) return {};
+    return _map(auto['prediction']);
+  }
   JsonMap _evidence(JsonMap row) =>
       _auto(row).isNotEmpty ? _auto(row) : _map(row['shooter_evidence']);
 
@@ -264,6 +281,18 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
       onReference: (sample, player) => _reference(row, sample, player),
     );
     if (!mounted || selected == null) return;
+    if (selected['watch_clip'] == true) {
+      if (widget.onWatchClip case final watch?) {
+        watch(_id(row));
+      } else {
+        Navigator.pop(context, _id(row));
+      }
+      return;
+    }
+    if (selected['review_state'] case final String state) {
+      await _save(row, null, state);
+      return;
+    }
     setState(() {
       _personChoices[_id(row)] = selected['track_id'];
       _activeId = _id(row);
@@ -655,7 +684,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                           (_videoId == null || r['video_id'] == _videoId) &&
                           r['player_id'] == null &&
                           r['shooter_review_state'] == 'pending' &&
-                          _map(_auto(r)['prediction'])['status'] == 'suggested',
+                          _suggestion(r)['status'] == 'suggested',
                     ))
                       Align(
                         alignment: Alignment.centerRight,
@@ -954,7 +983,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
         _saving.isEmpty &&
         !_addingPlayer;
     final active = _activeId == id;
-    final suggestion = _map(_auto(row)['prediction']);
+    final suggestion = _suggestion(row);
     final suggestedName = suggestion['status'] == 'suggested'
         ? (_players
               .where((p) => p['id'] == suggestion['player_id'])
@@ -1117,7 +1146,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                   ),
                 ),
               ),
-              Wrap(
+              if (_auto(row).isEmpty) Wrap(
                 spacing: 4,
                 children: [
                   TextButton(
@@ -1173,6 +1202,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                         '片段已排除 · 射手仍可标注',
                         'Excluded clip · shooter can still be labeled',
                       )
+                    : _auto(row).isNotEmpty
+                    ? t('点图查看详情 · 人工选择优先', 'Open image for details · your choice comes first')
                     : t(
                         '出手区域为估计 · 射手独立保存',
                         'Approximate release area · shooter saved separately',

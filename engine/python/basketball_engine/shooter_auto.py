@@ -365,6 +365,11 @@ class ShooterAutoMixin:
         view = self.list_shooter_review(payload)
         if payload.get('gallery_hash') != view['identity_gallery']['hash']:
             raise ProtocolError('SHOOTER_REFERENCES_CHANGED', '参考图已更新，请重新识别')
+        requested = payload.get('candidate_ids')
+        if requested is not None and (not isinstance(requested, list) or
+                any(not isinstance(sid, str) for sid in requested) or len(set(requested)) != len(requested) or
+                not set(requested).issubset({c['id'] for c in view['candidates']})):
+            raise ProtocolError('INVALID_REQUEST', '候选选择已变化，请刷新后重试')
         accepted = 0
         current_rows = observations(store)
         with store.connect() as connection:
@@ -372,6 +377,8 @@ class ShooterAutoMixin:
             if gallery(store, current_rows, connection)[3] != payload.get('gallery_hash'):
                 raise ProtocolError('SHOOTER_REFERENCES_CHANGED', '参考图已更新，请重新识别')
             for candidate in view['candidates']:
+                if requested is not None and candidate['id'] not in requested:
+                    continue
                 if payload.get('video_id') and candidate['video_id'] != payload['video_id']:
                     continue
                 auto = candidate.get('shooter_auto') or {}

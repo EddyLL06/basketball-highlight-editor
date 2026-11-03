@@ -308,8 +308,21 @@ Future<JsonMap?> showShooterPersonDetail(
               ),
             ),
           ),
-          actions: [
-            TextButton(
+              actions: [
+                TextButton(
+                  onPressed: saving ? null : () => Navigator.pop(context, <String, dynamic>{'watch_clip': true}),
+                  child: Text(zh ? '看视频' : 'Watch clip'),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: zh ? '更多操作' : 'More actions',
+                  enabled: !busy && !saving,
+                  onSelected: (value) => Navigator.pop(context, <String, dynamic>{'review_state': value}),
+                  itemBuilder: (_) => [
+                    PopupMenuItem(value: 'uncertain', child: Text(zh ? '不确定' : 'Uncertain')),
+                    PopupMenuItem(value: 'pending', child: Text(zh ? '清除' : 'Clear')),
+                  ],
+                ),
+                TextButton(
               onPressed: saving
                   ? null
                   : () =>

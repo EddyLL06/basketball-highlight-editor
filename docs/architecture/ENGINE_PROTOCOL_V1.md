@@ -307,6 +307,34 @@ JOB_CANCELLED
 失败或取消保留旧数据。旧项目可单独补齐画面，优先复用匹配的代理，只提取必要静帧。
 常见错误：`SHOOTER_EVIDENCE_CHANGED`、`SHOOTER_CANDIDATES_CHANGED`、`SHOOTER_FRAME_MISSING`。
 
+### 独立自动射手识别
+
+以下命令同样要求 `project_root`，不会由 `start_analysis` 自动调用。
+
+| 命令 | 请求字段 | 响应 |
+|---|---|---|
+| `start_shooter_identification` | 可选 `video_id` | `shooter_review` 任务，checkpoint 含 `automatic_shooter:true` |
+| `set_shooter_reference` | `sample_id`；添加时还需 `generation`, `player_id`, `human_confirmed:true`；移除时 `remove:true` | `updated` |
+| `apply_shooter_suggestions` | 当前 `gallery_hash`；可选 `video_id`, `candidate_ids` | `accepted` 数量 |
+
+`list_shooter_review` 额外返回 `identity_gallery {ready,counts,hash,references}`。
+有效候选包含 `shooter_auto`：源指纹、generation、短时人物轨迹与 samples、
+选中的 track、默认画面时间、context_frames、独立 prediction 和 selection。
+samples 坐标属于代理画面；crop/context 路径由引擎生成，客户端不能提交任意文件路径。
+
+保存自动画面的人工选择仍使用 `set_candidate_shooter`，增加
+`automatic_evidence:true`、可选 `sample_id`，`generation` 使用自动观察代次。
+允许未框到人物时仅保存姓名，但此记录不能成为有框的参考图。
+批量采用仅处理未命名、未明确标为不确定的有效建议；提交事务内复查图库、
+代次、运行及并发人工修改。来源保存为 `accepted_suggestion`，与 `manual` 分开。
+参考图变化使旧自动建议失效，已保存的人工球员归属保持。
+
+任务复用已绑定源指纹及裁切偏移的代理和缓存；无代理时返回
+`PERSON_PROXY_REQUIRED`，不会退到原画质模型输入。原任务轮询和取消接口继续适用。
+人物画面就绪但参考图库不足时，任务以 completed 状态、`shooter_references` 阶段结束，
+客户端引导选参考；下次运行复用有效画面。模型缺失返回 `SHOOTER_MODEL_MISSING`，
+仍可继续半自动快标。
+
 ### `list_recent_projects`
 
 请求 payload：

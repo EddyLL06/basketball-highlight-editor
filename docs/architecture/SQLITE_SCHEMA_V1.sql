@@ -164,3 +164,24 @@ CREATE TABLE IF NOT EXISTS audit_events (
     payload_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL
 );
+
+-- Optional, independently requested shooter analysis. Manual reviews stay separate.
+CREATE TABLE IF NOT EXISTS shooter_auto_observations (
+    candidate_id TEXT PRIMARY KEY REFERENCES candidates(id) ON DELETE CASCADE,
+    generation TEXT NOT NULL, observation_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS shooter_identity_references (
+    sample_id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+    player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    generation TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS shooter_identity_predictions (
+    candidate_id TEXT PRIMARY KEY REFERENCES candidates(id) ON DELETE CASCADE,
+    generation TEXT NOT NULL, gallery_hash TEXT NOT NULL, run_id TEXT NOT NULL,
+    prediction_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS shooter_identity_selections (
+    candidate_id TEXT PRIMARY KEY REFERENCES candidates(id) ON DELETE CASCADE,
+    generation TEXT NOT NULL, selection_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);

@@ -166,6 +166,51 @@ def test_identity_job_is_opt_in_and_requires_proxy(auto_project):
     assert not store.list_jobs(store.project()['id'], job_type='shooter_review')
 
 
+def test_batch_adoption_only_uses_explicitly_selected_candidates(auto_project):
+    service, store, payload, players, _ = auto_project
+    view = service.list_shooter_review(payload)
+    predictions(store, players[0], view['identity_gallery']['hash'])
+    request = {**payload, 'gallery_hash': view['identity_gallery']['hash'], 'candidate_ids': ['6']}
+    assert service.apply_shooter_suggestions(request)['accepted'] == 1
+    assert store.list_candidates()[4]['player_id'] is None
+    assert store.list_candidates()[5]['player_id'] == players[0]
+    with pytest.raises(ProtocolError):
+        service.apply_shooter_suggestions({**request, 'candidate_ids': ['foreign-project-shot']})
+
+
+def test_cancelled_independent_job_keeps_original_observations(auto_project, monkeypatch):
+    import time
+    import basketball_engine.shooter_auto as implementation
+    import basketball_engine.person_candidates as people
+    from basketball_engine.adapters.analysis import PipelineCancelled
+    service, store, payload, _, source = auto_project
+    before = observations(store)
+    monkeypatch.setattr(implementation, 'cached_context', lambda *args: {
+        'proxy': store.root / 'artifacts/proxy.mp4', 'offset_ms': 0, 'coarse': {}})
+    monkeypatch.setattr(implementation, 'model_metadata', lambda: (source, {'sha256': 'a' * 64}))
+    monkeypatch.setattr(people, 'person_model_path', lambda: source)
+    monkeypatch.setattr(service, '_region_person_candidates', lambda: None)
+    monkeypatch.setattr(service, '_shooter_ball_path', lambda: source)
+    closed = []
+    class CancelledAnalyzer:
+        def __init__(self, *args, **kwargs):
+            pass
+        def analyze(self, candidate):
+            raise PipelineCancelled('JOB_CANCELLED')
+        def close(self):
+            closed.append(True)
+    monkeypatch.setattr(implementation, 'ProxyReleaseAnalyzer', CancelledAnalyzer)
+    result = service.start_shooter_identification(payload)
+    for _ in range(100):
+        job = store.get_job(result['job']['id'])
+        if job['state'] not in ('queued', 'running'):
+            break
+        time.sleep(.01)
+    assert job['state'] == 'cancelled'
+    assert closed and observations(store) == before
+    assert all(r['player_id'] is None for r in store.list_candidates())
+
+
 def test_cached_feature_association_never_promotes_names_to_references(auto_project, monkeypatch):
     service, store, payload, players, _ = auto_project
     rows = observations(store)
