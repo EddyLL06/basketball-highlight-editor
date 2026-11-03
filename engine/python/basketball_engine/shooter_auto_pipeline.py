@@ -12,7 +12,7 @@ from .protocol import ProtocolError
 from .release_preview import read_json, source_fingerprint
 from . import release_shooter
 
-PIPELINE_VERSION = "desktop_proxy_release_v1"
+PIPELINE_VERSION = "desktop_proxy_release_v2"
 
 
 def digest(value):
@@ -29,7 +29,7 @@ def atomic_json(path, value):
 
 class ProxyReleaseAnalyzer:
     def __init__(self, proxy, source, video, context, directory, person_detector,
-                 ball_factory, cancel, progress):
+                 ball_factory, cancel, progress, ball_fingerprint=None):
         import cv2
 
         self.cv2, self.source, self.video = cv2, Path(source), video
@@ -57,6 +57,7 @@ class ProxyReleaseAnalyzer:
             'method': PIPELINE_VERSION,
             'algorithm': hashlib.sha256(Path(release_shooter.__file__).read_bytes()).hexdigest(),
             'person_model': PERSON_MODEL_SHA256,
+            'ball_model': ball_fingerprint,
             'source': source_fingerprint(self.source),
             'proxy': source_fingerprint(self.proxy),
             'offset_ms': context['offset_ms'],
@@ -78,6 +79,13 @@ class ProxyReleaseAnalyzer:
         self.check()
         self.capture.set(self.cv2.CAP_PROP_POS_FRAMES, index)
         ok, frame = self.capture.read()
+        if not ok:
+            # Some decoders cannot seek back from EOF in a very short proxy.
+            self.capture.release()
+            self.capture = self.cv2.VideoCapture(str(self.proxy))
+            if index:
+                self.capture.set(self.cv2.CAP_PROP_POS_FRAMES, index)
+            ok, frame = self.capture.read()
         if not ok:
             raise ProtocolError("SHOOTER_FRAME_MISSING", "分析代理中的出手画面读取失败")
         if self.resize < 1:
@@ -115,8 +123,11 @@ class ProxyReleaseAnalyzer:
             for ball in sorted(balls, key=lambda p: -p['confidence']):
                 if not any(math.hypot(ball['x'] - old['x'], ball['y'] - old['y']) < 4 for old in kept):
                     kept.append(ball)
-            self.ball_records[str(index)] = {'frame_index': index,
-                'time': self.offset + index / self.fps, 'balls': kept, 'expanded': expanded}
+            if expanded:
+                self.ball_records[str(index)].update(expanded_balls=kept, expanded=True)
+            else:
+                self.ball_records[str(index)] = {'frame_index': index,
+                    'time': self.offset + index / self.fps, 'balls': kept, 'expanded': False}
             if ordinal % 10 == 0:
                 self.progress((ordinal + 1) / max(1, len(missing)), 'shooter_ball')
         if missing:
@@ -158,7 +169,9 @@ class ProxyReleaseAnalyzer:
 
     def _people(self, candidate, directory, generation, indices, expanded):
         event = candidate['event_time_ms'] / 1000
-        records = [self.ball_records[str(i)] for i in indices]
+        records = [{**self.ball_records[str(i)],
+            'balls': self.ball_records[str(i)].get('expanded_balls', self.ball_records[str(i)]['balls'])
+            if expanded else self.ball_records[str(i)]['balls']} for i in indices]
         rim = self.rim(candidate)
         flight = None
         if all(k in rim for k in ('center_x', 'rim_y', 'width')):

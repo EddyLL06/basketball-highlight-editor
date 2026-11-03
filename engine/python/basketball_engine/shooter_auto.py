@@ -92,9 +92,12 @@ def inputs(rows):
     return shots, samples
 
 
-def gallery(store, rows):
+def gallery(store, rows, connection=None):
     shots, samples = inputs(rows)
-    with store.connect() as connection:
+    if connection is None:
+        with store.connect() as con:
+            saved = [dict(r) for r in con.execute('SELECT * FROM shooter_identity_references ORDER BY sample_id')]
+    else:
         saved = [dict(r) for r in connection.execute('SELECT * FROM shooter_identity_references ORDER BY sample_id')]
     refs = [{**ref, 'human_confirmed': True} for ref in saved if ref['sample_id'] in samples
             and rows[ref['candidate_id']]['generation'] == ref['generation']
@@ -127,7 +130,8 @@ def augment_review(store, view):
             candidate['shooter_review_state'] = 'confirmed'
         candidate['shooter_auto'] = {**observation,
             'prediction': {**json.loads(prediction['prediction_json']), 'run_id': prediction['run_id']} if valid else None,
-            'selection': selected if selected and selected['generation'] == observation['generation'] else None}
+            'selection': selected if selected and selected['generation'] == observation['generation']
+                and selected.get('player_id') == candidate.get('player_id') else None}
     view['identity_gallery'] = {'ready': ready, 'counts': counts, 'hash': gallery_hash,
         'references': [{**ref, 'crop_path': samples[ref['sample_id']]['crop_path']} for ref in refs]}
     return view
@@ -143,12 +147,17 @@ class ShooterAutoMixin:
             self._appearance_cache = cached
         return cached[1], meta
 
-    def _shooter_ball_model(self):
-        from basketball_highlight.inference import load_detector, select_device, current_device
+    @staticmethod
+    def _shooter_ball_path():
         root = Path(os.environ.get('BHE_RUNTIME_ROOT') or Path(__file__).resolve().parents[3])
         path = root / 'models/bball_model.pt'
         if not path.is_file():
             path = root / 'third_party/basketball-shot-detection/bball_model.pt'
+        return path
+
+    def _shooter_ball_model(self):
+        from basketball_highlight.inference import load_detector, select_device, current_device
+        path = self._shooter_ball_path()
         model = load_detector(path, device=select_device('auto', path), imgsz=640)
         names = model.names
         classes = [int(i) for i, name in (names.items() if isinstance(names, dict) else enumerate(names))
@@ -210,7 +219,8 @@ class ShooterAutoMixin:
                     store.update_job(job_id, state='running', stage=stage, progress=.85 * (index + fraction) / len(videos))
                 analyzer = ProxyReleaseAnalyzer(context['proxy'], source, video, context,
                     store.root / 'artifacts/shooter_auto' / video['id'], detector,
-                    self._shooter_ball_model, cancel, progress)
+                    self._shooter_ball_model, cancel, progress,
+                    ball_fingerprint=hashlib.sha256(self._shooter_ball_path().read_bytes()).hexdigest())
                 try:
                     for ordinal, candidate in enumerate(subset):
                         generated.append(analyzer.analyze(candidate))
@@ -356,7 +366,11 @@ class ShooterAutoMixin:
         if payload.get('gallery_hash') != view['identity_gallery']['hash']:
             raise ProtocolError('SHOOTER_REFERENCES_CHANGED', '参考图已更新，请重新识别')
         accepted = 0
+        current_rows = observations(store)
         with store.connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            if gallery(store, current_rows, connection)[3] != payload.get('gallery_hash'):
+                raise ProtocolError('SHOOTER_REFERENCES_CHANGED', '参考图已更新，请重新识别')
             for candidate in view['candidates']:
                 if payload.get('video_id') and candidate['video_id'] != payload['video_id']:
                     continue
@@ -364,6 +378,24 @@ class ShooterAutoMixin:
                 prediction = auto.get('prediction') or {}
                 if candidate.get('player_id') or candidate['shooter_review_state'] != 'pending' or prediction.get('status') != 'suggested':
                     continue
+                current = connection.execute('SELECT player_id FROM candidate_reviews WHERE candidate_id=?',
+                                             (candidate['id'],)).fetchone()
+                selection = connection.execute('SELECT selection_json FROM shooter_identity_selections WHERE candidate_id=?',
+                                               (candidate['id'],)).fetchone()
+                prior = connection.execute('SELECT review_state FROM shooter_review_evidence WHERE candidate_id=?',
+                                           (candidate['id'],)).fetchone()
+                if (current and current['player_id']) or (selection and
+                        json.loads(selection['selection_json'])['review_state'] != 'pending') or (
+                        prior and prior['review_state'] in ('confirmed', 'uncertain')):
+                    continue
+                live = connection.execute('SELECT generation,run_id,gallery_hash FROM shooter_identity_predictions WHERE candidate_id=?',
+                                          (candidate['id'],)).fetchone()
+                observation = connection.execute('SELECT generation FROM shooter_auto_observations WHERE candidate_id=?',
+                                                 (candidate['id'],)).fetchone()
+                if (candidate['id'] not in current_rows or current_rows[candidate['id']]['generation'] != auto['generation']
+                        or not observation or observation['generation'] != auto['generation']
+                        or not live or live['run_id'] != prediction['run_id'] or live['gallery_hash'] != payload['gallery_hash']):
+                    raise ProtocolError('SHOOTER_EVIDENCE_CHANGED', '识别结果已更新，请刷新后重试')
                 track = next((t for t in auto['tracks'] if t['id'] == auto['selected_track_id']), None)
                 if not track or not track['samples']:
                     continue

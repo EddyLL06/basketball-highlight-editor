@@ -127,6 +127,36 @@ def test_references_require_explicit_confirmation_and_current_person(auto_projec
         service.apply_shooter_suggestions({**payload, 'gallery_hash': 'stale'})
 
 
+def test_batch_adoption_does_not_overwrite_a_concurrent_manual_save(auto_project, monkeypatch):
+    service, store, payload, players, _ = auto_project
+    view = service.list_shooter_review(payload)
+    predictions(store, players[0], view['identity_gallery']['hash'])
+    original = service.list_shooter_review
+    def concurrent_save(p):
+        snapshot = original(p)
+        service.set_candidate_shooter({**payload, 'candidate_id': '5', 'generation': 'generation-5',
+            'automatic_evidence': True, 'sample_id': 'sample-5', 'player_id': players[1]})
+        return snapshot
+    monkeypatch.setattr(service, 'list_shooter_review', concurrent_save)
+    assert service.apply_shooter_suggestions({**payload, 'gallery_hash': view['identity_gallery']['hash']})['accepted'] == 1
+    assert store.list_candidates()[4]['player_id'] == players[1]
+
+
+def test_batch_adoption_rechecks_reference_changes_inside_transaction(auto_project, monkeypatch):
+    service, store, payload, players, _ = auto_project
+    view = service.list_shooter_review(payload)
+    predictions(store, players[0], view['identity_gallery']['hash'])
+    original = service.list_shooter_review
+    def concurrent_reference_edit(p):
+        snapshot = original(p)
+        service.set_shooter_reference({**payload, 'sample_id': 'sample-1', 'remove': True})
+        return snapshot
+    monkeypatch.setattr(service, 'list_shooter_review', concurrent_reference_edit)
+    with pytest.raises(ProtocolError):
+        service.apply_shooter_suggestions({**payload, 'gallery_hash': view['identity_gallery']['hash']})
+    assert all(c['player_id'] is None for c in store.list_candidates())
+
+
 def test_identity_job_is_opt_in_and_requires_proxy(auto_project):
     service, store, payload, _, _ = auto_project
     assert 'start_shooter_identification' in service._handlers()
@@ -196,3 +226,26 @@ def test_proxy_pipeline_uses_trimmed_low_resolution_frames_and_reuses_cache(tmp_
     assert a.analyze(candidate) == result
     a.close()
     assert len(calls) == count
+
+
+def test_expanded_ball_cache_never_changes_first_pass_records(tmp_path):
+    source = tmp_path / 'source'
+    source.write_bytes(b'original')
+    proxy = tmp_path / 'proxy.avi'
+    writer = cv2.VideoWriter(str(proxy), cv2.VideoWriter_fourcc(*'MJPG'), 5, (160, 120))
+    writer.write(np.zeros((120, 160, 3), np.uint8))
+    writer.release()
+    class Ball:
+        def predict(self, frame, **kwargs):
+            box = type('Box', (), {'cls': np.array([0]), 'xyxy': np.array([[10, 10, 20, 20]]),
+                                   'conf': np.array([.9])})()
+            return [type('Result', (), {'boxes': [box]})()]
+    a = ProxyReleaseAnalyzer(proxy, source, {'width': 160, 'height': 120},
+        {'offset_ms': 0, 'coarse': {}}, tmp_path / 'cache', None,
+        lambda: (Ball(), 'cpu', [0]), threading.Event(), lambda *args: None)
+    a.ball_scan([0])
+    original = copy.deepcopy(a.ball_records['0']['balls'])
+    a.ball_scan([0], expanded=True)
+    assert a.ball_records['0']['balls'] == original
+    assert len(a.ball_records['0']['expanded_balls']) > len(original)
+    a.close()
