@@ -66,15 +66,20 @@ class TorchScriptAppearance:
 
 @dataclass(frozen=True)
 class IdentityPolicy:
-    min_similarity: float = 0.72
-    min_margin: float = 0.08
+    min_similarity: float = 0.65
+    min_margin: float = 0.03
     min_reference_shots: int = 2
     reference_guard_ms: int = 3000
+    close_match_margin: float = 0.05
+    strong_similarity: float = 0.72
+    strong_margin: float = 0.08
 
     def __post_init__(self):
         if not (0 <= self.min_similarity <= 1 and 0 < self.min_margin <= 1
                 and type(self.min_reference_shots) is int and self.min_reference_shots >= 1
-                and type(self.reference_guard_ms) is int and self.reference_guard_ms >= 0):
+                and type(self.reference_guard_ms) is int and self.reference_guard_ms >= 0
+                and 0 <= self.close_match_margin <= 1
+                and 0 <= self.strong_similarity <= 1 and 0 < self.strong_margin <= 1):
             raise ValueError("Invalid identity policy")
 
 
@@ -108,7 +113,8 @@ def reference_groups(references, samples, shots, policy=None):
 def associate_shot(shot, query_samples, references, samples, shots, features, policy=None):
     policy = policy or IdentityPolicy()
     result = {"status": "unknown", "player_id": None, "reason": "gallery_incomplete",
-              "score_kind": "cosine_similarity_not_probability", "rankings": []}
+              "score_kind": "cosine_similarity_not_probability", "rankings": [],
+              "confidence_band": "insufficient"}
     confirmed = [r for r in references if r.get("human_confirmed") is True]
     if any(reference_related(shot, shots[samples[r["sample_id"]]["shot_id"]], policy)
            for r in confirmed):
@@ -145,10 +151,15 @@ def associate_shot(shot, query_samples, references, samples, shots, features, po
     margin = best["similarity"] - second["similarity"]
     votes = sum(max(s, key=s.get) == best["player_id"] for s in per_frame)
     result.update(rankings=ranking, margin=round(margin, 5), frames=len(query), agreement=votes)
+    disagreement = votes / len(query) < 2 / 3
+    close_disagreement = margin < policy.close_match_margin and votes != len(query)
     reason = "below_similarity_threshold" if best["similarity"] < policy.min_similarity else (
         "similar_players" if margin < policy.min_margin else (
-            "frames_disagree" if votes / len(query) < 2 / 3 else "matched_confirmed_references"))
+            "frames_disagree" if disagreement else (
+                "close_match_frames_disagree" if close_disagreement else "matched_confirmed_references")))
     result["reason"] = reason
     if reason == "matched_confirmed_references":
-        result.update(status="suggested", player_id=best["player_id"])
+        band = "strong" if best["similarity"] >= policy.strong_similarity and margin >= policy.strong_margin else "tentative"
+        result.update(status="suggested", player_id=best["player_id"], confidence_band=band,
+                      reason=reason if band == "strong" else "supported_reference_suggestion")
     return result

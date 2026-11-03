@@ -100,6 +100,21 @@ def test_stale_revision_and_invalid_batch_leave_saved_records_unchanged(store):
     assert not store.state['reviews']
 
 
+def test_development_preview_is_separate_and_hidden_after_review_changes(store):
+    view = ready(store)
+    before = store.path.read_bytes()
+    preview = {'source_run_id': view['run_id'], 'source_revision': store.state['revision'],
+               'dataset_sha256': store.fingerprint, 'new_suggestions': []}
+    (store.root/'relaxation-preview.json').write_text(json.dumps(preview))
+    assert store.view()['relaxation_preview'] == preview
+    assert store.path.read_bytes() == before
+    action(store, action='review', run_id=view['run_id'], items=[{'shot_id': 'query', 'status': 'unknown'}])
+    assert store.view()['relaxation_preview'] is None
+    assert store.run()['id'] == view['run_id']
+    (store.root/'relaxation-preview.json').write_text('incomplete')
+    assert store.view()['relaxation_preview'] is None
+
+
 def test_loopback_http_serves_only_allowlisted_media_and_rejects_foreign_mutations(store):
     server = ThreadingHTTPServer(('127.0.0.1', 0), handler_for(store))
     thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()

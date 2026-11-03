@@ -45,3 +45,15 @@ unreviewed candidates are reported separately. Reference frames and adjacent cro
 are never counted as successful held-out predictions.
 
 This HTML flow must pass human accuracy review before desktop integration.
+
+The default suggestion gate now accepts similarity ≥0.65 and runner-up margin
+≥0.03 with a two-thirds frame majority. Margins below 0.05 additionally require
+unanimity. Suggestions meeting the original 0.72/0.08 gates remain `strong`;
+other supported suggestions are `tentative` and can be confirmed directly.
+Neither band becomes a human label or a reference automatically. Release inputs
+and reference-window exclusions remain unchanged.
+
+Reviewed cards show the human-confirmed name first. An optional, revision-bound
+`relaxation-preview.json` displays development comparisons without replacing the
+active frozen run or reassigning its human reviews. Such comparisons are
+calibration on already reviewed data, not independent validation.

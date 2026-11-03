@@ -23,6 +23,7 @@ def match(data, query="query"):
 def test_matches_named_references_and_keeps_unknown_people_unassigned():
     data = fixture_gallery()
     assert match(data)["player_id"] == "a"
+    assert match(data)["confidence_band"] == "strong"
     data[2]["query"] = [-1, -1]
     assert match(data)["status"] == "unknown"
     assert match(data)["reason"] == "below_similarity_threshold"
@@ -80,3 +81,31 @@ def test_features_and_policy_validate_inputs_and_cache_binds_model_and_pixels():
     assert feature_key(b"pixels", "a") != feature_key(b"other", "a")
     with pytest.raises(ValueError):
         IdentityPolicy(min_margin=0)
+
+
+def test_supported_lower_similarity_is_a_tentative_name_not_a_confirmed_label():
+    data = fixture_gallery()
+    data[2].update(a1=[1, 0, 0], a2=[1, 0, 0], b1=[0, 1, 0], b2=[0, 1, 0],
+                   query=[.68, .3, np.sqrt(1 - .68**2 - .3**2)])
+    result = match(data)
+    assert result["player_id"] == "a" and result["confidence_band"] == "tentative"
+    assert result["reason"] == "supported_reference_suggestion"
+    assert all(r["human_confirmed"] for r in data[3]) and len(data[3]) == 4
+    conservative = associate_shot(data[0]['query'], ['query'], data[3], data[1], data[0], data[2],
+                                 IdentityPolicy(min_similarity=.72, min_margin=.08))
+    assert conservative['status'] == 'unknown'
+
+
+def test_close_identity_match_needs_unanimity_across_available_frames():
+    data = fixture_gallery()
+    close = [.71, .675, np.sqrt(1 - .71**2 - .675**2)]
+    data[2].update(a1=[1, 0, 0], a2=[1, 0, 0], b1=[0, 1, 0], b2=[0, 1, 0], query=close)
+    for key in ('q2', 'q3'):
+        data[1][key] = {'shot_id': 'query', 'feature_key': key}
+        data[2][key] = close
+    def predict():
+        return associate_shot(data[0]['query'], ['query', 'q2', 'q3'], data[3], data[1], data[0], data[2])
+    assert predict()['player_id'] == 'a' and predict()['confidence_band'] == 'tentative'
+    data[2]['q3'] = [0, 1, 0]
+    result = predict()
+    assert result['status'] == 'unknown' and result['reason'] == 'close_match_frames_disagree'

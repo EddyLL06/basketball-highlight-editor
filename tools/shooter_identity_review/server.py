@@ -105,6 +105,18 @@ class ReviewStore:
     def run(self):
         return json.loads((self.root/'runs'/f"{self.state['run_id']}.json").read_text()) if self.state['run_id'] else None
 
+    def relaxation_preview(self):
+        """An optional reviewed-sample comparison never replaces a frozen run."""
+        try:
+            value = json.loads((self.root/'relaxation-preview.json').read_text())
+            if (value.get('source_run_id') == self.state['run_id']
+                    and value.get('source_revision') == self.state['revision']
+                    and value.get('dataset_sha256') == self.fingerprint):
+                return value
+        except (OSError, ValueError, AttributeError):
+            pass
+        return None
+
     def view(self):
         with self.lock:
             run = self.run()
@@ -112,6 +124,7 @@ class ReviewStore:
                     'reference_counts': {pid: len(groups) for pid, groups in reference_groups(
                         self.state['references'], self.samples, self.rows).items()},
                     'model': self.dataset['model'], 'run': run,
+                    'relaxation_preview': self.relaxation_preview(),
                     'stale': bool(run and run['gallery_revision'] != self.state['gallery_revision']),
                     'metrics': evaluate_run(self.rows.values(), self.state['reviews'], run) if run else None}
 
