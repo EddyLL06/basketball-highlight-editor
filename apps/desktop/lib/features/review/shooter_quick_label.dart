@@ -896,7 +896,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     final active = _activeId == id;
     final suggestion = _map(_auto(row)['prediction']);
     final suggestedName = suggestion['status'] == 'suggested'
-        ? _players.where((p) => p['id'] == suggestion['player_id']).firstOrNull?['name']
+        ? (_players.where((p) => p['id'] == suggestion['player_id']).firstOrNull?['name'])
         : null;
     return Card(
       key: ValueKey('shooter-card-$id'),

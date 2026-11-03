@@ -27,9 +27,13 @@ jobs:
         working-directory: apps/desktop
       - name: Format integration files
         run: |
+          set +e
           dart format apps/desktop/lib/features/review/shooter_quick_label.dart apps/desktop/lib/features/review/shooter_identity_panel.dart apps/desktop/test/shooter_quick_label_test.dart
+          status=$?
           git diff --binary > "$RUNNER_TEMP/shooter-format.patch"
+          exit "$status"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: shooter-format-${{ github.run_id }}
           path: ${{ runner.temp }}/shooter-format.patch
