@@ -117,7 +117,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
         final next = _maps(result['candidates']);
         for (final row in next) {
           final previous = _rows.where((r) => _id(r) == _id(row)).firstOrNull;
-          if (previous != null && _auto(previous)['generation'] != _auto(row)['generation']) {
+          if (previous != null &&
+              _auto(previous)['generation'] != _auto(row)['generation']) {
             _personChoices.remove(_id(row));
             _frameChoices.remove(_id(row));
           }
@@ -242,10 +243,16 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
       await widget.request('apply_shooter_suggestions', {
         'gallery_hash': _gallery['hash'],
         if (_videoId != null) 'video_id': _videoId,
-        'candidate_ids': _rows.where((r) =>
-            (_videoId == null || r['video_id'] == _videoId) &&
-            r['player_id'] == null && r['shooter_review_state'] == 'pending' &&
-            _suggestion(r)['status'] == 'suggested').map(_id).toList(),
+        'candidate_ids': _rows
+            .where(
+              (r) =>
+                  (_videoId == null || r['video_id'] == _videoId) &&
+                  r['player_id'] == null &&
+                  r['shooter_review_state'] == 'pending' &&
+                  _suggestion(r)['status'] == 'suggested',
+            )
+            .map(_id)
+            .toList(),
       });
       await _load();
     } catch (e) {
@@ -261,6 +268,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     if (choice != null && choice != auto['selected_track_id']) return {};
     return _map(auto['prediction']);
   }
+
   JsonMap _evidence(JsonMap row) =>
       _auto(row).isNotEmpty ? _auto(row) : _map(row['shooter_evidence']);
 
@@ -1146,54 +1154,55 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                   ),
                 ),
               ),
-              if (_auto(row).isEmpty) Wrap(
-                spacing: 4,
-                children: [
-                  TextButton(
-                    onPressed: canSave
-                        ? () => _save(row, null, 'uncertain')
-                        : null,
-                    style: TextButton.styleFrom(
-                      minimumSize: const Size(44, 32),
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      textStyle: const TextStyle(fontSize: 11),
+              if (_auto(row).isEmpty)
+                Wrap(
+                  spacing: 4,
+                  children: [
+                    TextButton(
+                      onPressed: canSave
+                          ? () => _save(row, null, 'uncertain')
+                          : null,
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(44, 32),
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        textStyle: const TextStyle(fontSize: 11),
+                      ),
+                      child: Text(t('不确定', 'Uncertain')),
                     ),
-                    child: Text(t('不确定', 'Uncertain')),
-                  ),
-                  TextButton(
-                    onPressed: canSave
-                        ? () => _save(row, null, 'pending')
-                        : null,
-                    style: TextButton.styleFrom(
-                      minimumSize: const Size(44, 32),
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      textStyle: const TextStyle(fontSize: 11),
+                    TextButton(
+                      onPressed: canSave
+                          ? () => _save(row, null, 'pending')
+                          : null,
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(44, 32),
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        textStyle: const TextStyle(fontSize: 11),
+                      ),
+                      child: Text(t('清除', 'Clear')),
                     ),
-                    child: Text(t('清除', 'Clear')),
-                  ),
-                  TextButton.icon(
-                    onPressed: _saving.isEmpty && !_addingPlayer && !draft
-                        ? () {
-                            if (widget.onWatchClip case final watch?) {
-                              watch(id);
-                            } else {
-                              Navigator.pop(context, id);
+                    TextButton.icon(
+                      onPressed: _saving.isEmpty && !_addingPlayer && !draft
+                          ? () {
+                              if (widget.onWatchClip case final watch?) {
+                                watch(id);
+                              } else {
+                                Navigator.pop(context, id);
+                              }
                             }
-                          }
-                        : null,
-                    icon: const Icon(Icons.play_circle_outline, size: 16),
-                    label: Text(t('看视频', 'Watch clip')),
-                    style: TextButton.styleFrom(
-                      minimumSize: const Size(44, 32),
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      textStyle: const TextStyle(fontSize: 11),
+                          : null,
+                      icon: const Icon(Icons.play_circle_outline, size: 16),
+                      label: Text(t('看视频', 'Watch clip')),
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(44, 32),
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        textStyle: const TextStyle(fontSize: 11),
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
               Text(
                 row['shooter_evidence_stale'] == true
                     ? t('源视频已变化，请刷新画面', 'Source changed; refresh stills')
@@ -1203,7 +1212,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                         'Excluded clip · shooter can still be labeled',
                       )
                     : _auto(row).isNotEmpty
-                    ? t('点图查看详情 · 人工选择优先', 'Open image for details · your choice comes first')
+                    ? t(
+                        '点图查看详情 · 人工选择优先',
+                        'Open image for details · your choice comes first',
+                      )
                     : t(
                         '出手区域为估计 · 射手独立保存',
                         'Approximate release area · shooter saved separately',

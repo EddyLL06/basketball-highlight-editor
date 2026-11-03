@@ -47,7 +47,9 @@ class _ReviewEngine {
               'selection_status': 'excluded',
               'player_id': adoptedIds.contains('c$i') ? 'red' : null,
               'player_name': adoptedIds.contains('c$i') ? 'Red' : null,
-              'shooter_review_state': adoptedIds.contains('c$i') ? 'confirmed' : 'pending',
+              'shooter_review_state': adoptedIds.contains('c$i')
+                  ? 'confirmed'
+                  : 'pending',
               if (automatic)
                 'shooter_auto': {
                   'generation': 'auto-g1',
@@ -60,10 +62,19 @@ class _ReviewEngine {
                   },
                   'context_frames': [],
                   'tracks': [
-                    if (secondPerson) {'id': 2, 'samples': [{
-                      'id': 'other-c$i', 'track_id': 2, 'time_ms': 1100,
-                      'crop_path': null, 'context_path': null,
-                    }]},
+                    if (secondPerson)
+                      {
+                        'id': 2,
+                        'samples': [
+                          {
+                            'id': 'other-c$i',
+                            'track_id': 2,
+                            'time_ms': 1100,
+                            'crop_path': null,
+                            'context_path': null,
+                          },
+                        ],
+                      },
                     {
                       'id': 1,
                       'samples': [
@@ -172,7 +183,9 @@ Future<void> _pump(
 }
 
 void main() {
-  testWidgets('batch adoption uses the displayed suggestions once', (tester) async {
+  testWidgets('batch adoption uses the displayed suggestions once', (
+    tester,
+  ) async {
     final engine = _ReviewEngine()..automatic = true;
     await _pump(tester, engine);
     await tester.tap(find.byKey(const Key('adopt-shooter-suggestions')));
@@ -184,23 +197,28 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('changing person hides the old name and excludes it from adoption', (tester) async {
-    final engine = _ReviewEngine()..automatic = true..secondPerson = true;
-    await _pump(tester, engine);
-    await tester.tap(find.byKey(const ValueKey('shooter-preview-c0-0')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(DropdownButton<dynamic>, 'P1'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('P2').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Done'));
-    await tester.pumpAndSettle();
-    expect(find.text('Suggested: Red'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('adopt-shooter-suggestions')));
-    await tester.pumpAndSettle();
-    expect(engine.adoptionRequests.single['candidate_ids'], ['c1']);
-    expect(tester.takeException(), isNull);
-  });
+  testWidgets(
+    'changing person hides the old name and excludes it from adoption',
+    (tester) async {
+      final engine = _ReviewEngine()
+        ..automatic = true
+        ..secondPerson = true;
+      await _pump(tester, engine);
+      await tester.tap(find.byKey(const ValueKey('shooter-preview-c0-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(DropdownButton<dynamic>, 'P1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('P2').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+      expect(find.text('Suggested: Red'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('adopt-shooter-suggestions')));
+      await tester.pumpAndSettle();
+      expect(engine.adoptionRequests.single['candidate_ids'], ['c1']);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('narrow cards with large text keep player actions usable', (
     tester,
