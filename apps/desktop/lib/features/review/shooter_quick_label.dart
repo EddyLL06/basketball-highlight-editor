@@ -188,7 +188,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
   }
 
   Future<void> _identify() async {
-    setState(() { _preparing = true; _error = null; });
+    setState(() {
+      _preparing = true;
+      _error = null;
+    });
     try {
       final result = await widget.request('start_shooter_identification', {
         if (_videoId != null) 'video_id': _videoId,
@@ -205,8 +208,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
 
   Future<void> _reference(JsonMap row, JsonMap sample, String playerId) async {
     await widget.request('set_shooter_reference', {
-      'sample_id': sample['id'], 'generation': _auto(row)['generation'],
-      'player_id': playerId, 'human_confirmed': true,
+      'sample_id': sample['id'],
+      'generation': _auto(row)['generation'],
+      'player_id': playerId,
+      'human_confirmed': true,
     });
     await _load();
   }
@@ -214,7 +219,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
   Future<void> _removeReference(JsonMap reference) async {
     try {
       await widget.request('set_shooter_reference', {
-        'sample_id': reference['sample_id'], 'remove': true,
+        'sample_id': reference['sample_id'],
+        'remove': true,
       });
       await _load();
     } catch (e) {
@@ -238,8 +244,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
   }
 
   JsonMap _auto(JsonMap row) => _map(row['shooter_auto']);
-  JsonMap _evidence(JsonMap row) => _auto(row).isNotEmpty
-      ? _auto(row) : _map(row['shooter_evidence']);
+  JsonMap _evidence(JsonMap row) =>
+      _auto(row).isNotEmpty ? _auto(row) : _map(row['shooter_evidence']);
 
   Future<void> _personDetail(JsonMap row) async {
     final auto = _auto(row);
@@ -249,8 +255,11 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     }
     final frames = _frames(row);
     final frame = frames.isEmpty ? null : frames[_frameIndex(row)];
-    final selected = await showShooterPersonDetail(context,
-      observation: auto, players: _players, selected: frame?['sample'] as JsonMap?,
+    final selected = await showShooterPersonDetail(
+      context,
+      observation: auto,
+      players: _players,
+      selected: frame?['sample'] as JsonMap?,
       busy: _running || _preparing,
       onReference: (sample, player) => _reference(row, sample, player),
     );
@@ -299,24 +308,36 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
   List<JsonMap> _frames(JsonMap row) {
     final auto = _auto(row);
     if (auto.isEmpty) return _maps(_map(row['shooter_evidence'])['frames']);
-    final trackId = _personChoices[_id(row)] ??
-        _map(auto['selection'])['track_id'] ?? auto['selected_track_id'];
-    final track = _maps(auto['tracks']).where((t) => t['id'] == trackId).firstOrNull;
-    final samples = _maps(track?['samples'])..sort((a, b) =>
-        (a['time_ms'] as num).compareTo(b['time_ms'] as num));
+    final trackId =
+        _personChoices[_id(row)] ??
+        _map(auto['selection'])['track_id'] ??
+        auto['selected_track_id'];
+    final track = _maps(
+      auto['tracks'],
+    ).where((t) => t['id'] == trackId).firstOrNull;
+    final samples = _maps(track?['samples'])
+      ..sort((a, b) => (a['time_ms'] as num).compareTo(b['time_ms'] as num));
     if (samples.isEmpty) return _maps(auto['context_frames']);
-    return samples.map((s) => <String, dynamic>{
-      'time_ms': s['time_ms'], 'context_path': s['context_path'], 'sample': s,
-      'focus_region': {'crop_path': s['crop_path'], 'kind': 'person'},
-    }).toList();
+    return samples
+        .map(
+          (s) => <String, dynamic>{
+            'time_ms': s['time_ms'],
+            'context_path': s['context_path'],
+            'sample': s,
+            'focus_region': {'crop_path': s['crop_path'], 'kind': 'person'},
+          },
+        )
+        .toList();
   }
+
   int _frameIndex(JsonMap row) {
     final frames = _frames(row);
     if (frames.isEmpty) return 0;
     final selected = _frameChoices[_id(row)];
     if (selected != null) return selected.clamp(0, frames.length - 1).toInt();
     final saved = _auto(row).isNotEmpty
-        ? _map(_auto(row)['selection']) : _map(row['shooter_selection']);
+        ? _map(_auto(row)['selection'])
+        : _map(row['shooter_selection']);
     final evidence = _evidence(row);
     final time =
         (saved['generation'] == evidence['generation']
@@ -343,9 +364,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     String state, {
     JsonMap? restore,
   }) async {
-    final id = _id(row),
-        frames = _frames(row),
-        evidence = _evidence(row);
+    final id = _id(row), frames = _frames(row), evidence = _evidence(row);
     if (_saving.isNotEmpty ||
         evidence.isEmpty ||
         frames.isEmpty ||
@@ -354,7 +373,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     }
     final frame = frames[_frameIndex(row)];
     final previous = _auto(row).isNotEmpty
-        ? _map(_auto(row)['selection']) : _map(row['shooter_selection']);
+        ? _map(_auto(row)['selection'])
+        : _map(row['shooter_selection']);
     final sameGeneration = previous['generation'] == evidence['generation'];
     final prior = <String, dynamic>{
       'candidate_id': id,
@@ -397,7 +417,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
             .where((p) => p['id'] == playerId)
             .firstOrNull?['name'];
         row['shooter_selection'] = result['selection'];
-        if (_auto(row).isNotEmpty) _auto(row)['selection'] = result['selection'];
+        if (_auto(row).isNotEmpty) {
+          _auto(row)['selection'] = result['selection'];
+        }
         row['shooter_review_state'] = result['review_state'];
         _frameChoices.remove(id);
         if (!_visible.any((r) => _id(r) == id)) {
@@ -418,8 +440,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     if (_undo.isEmpty || _saving.isNotEmpty) return;
     final value = _undo.last;
     final row = _rows.where((r) => _id(r) == value['candidate_id']).firstOrNull;
-    if (row == null ||
-        _evidence(row)['generation'] != value['generation']) {
+    if (row == null || _evidence(row)['generation'] != value['generation']) {
       setState(() {
         _undo.clear();
         _error = t(
@@ -560,31 +581,52 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                           ),
                         FilledButton.icon(
                           key: const Key('identify-shooters'),
-                          onPressed: _running || _preparing
-                              ? null
-                              : _identify,
-                          style: FilledButton.styleFrom(backgroundColor: c.orange,
-                              foregroundColor: Colors.black),
+                          onPressed: _running || _preparing ? null : _identify,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: c.orange,
+                            foregroundColor: Colors.black,
+                          ),
                           icon: const Icon(Icons.auto_awesome, size: 18),
                           label: Text(t('自动识别出手者', 'Identify shooters')),
                         ),
                         PopupMenuButton<String>(
                           tooltip: t('更多操作', 'More actions'),
                           onSelected: (value) {
-                            if (value == 'references') setState(() => _showReferences = !_showReferences);
-                            if (value == 'context') setState(() => _context = !_context);
+                            if (value == 'references') {
+                              setState(
+                                () => _showReferences = !_showReferences,
+                              );
+                            }
+                            if (value == 'context') {
+                              setState(() => _context = !_context);
+                            }
                             if (value == 'stills') unawaited(_prepare());
                             if (value == 'refresh') unawaited(_load());
                             if (value == 'undo') unawaited(_undoLast());
                           },
                           itemBuilder: (_) => [
-                            PopupMenuItem(value: 'references', child: Text(t('球员参考图', 'Player references'))),
-                            PopupMenuItem(value: 'context', child: Text(t('显示全景蓝框', 'Show full frame'))),
-                            PopupMenuItem(value: 'stills', enabled: !_running && !_preparing,
-                                child: Text(t('补齐/刷新画面', 'Refresh stills'))),
-                            PopupMenuItem(value: 'undo', enabled: _undo.isNotEmpty && _saving.isEmpty,
-                                child: Text(t('撤销', 'Undo'))),
-                            PopupMenuItem(value: 'refresh', child: Text(t('刷新', 'Refresh'))),
+                            PopupMenuItem(
+                              value: 'references',
+                              child: Text(t('球员参考图', 'Player references')),
+                            ),
+                            PopupMenuItem(
+                              value: 'context',
+                              child: Text(t('显示全景蓝框', 'Show full frame')),
+                            ),
+                            PopupMenuItem(
+                              value: 'stills',
+                              enabled: !_running && !_preparing,
+                              child: Text(t('补齐/刷新画面', 'Refresh stills')),
+                            ),
+                            PopupMenuItem(
+                              value: 'undo',
+                              enabled: _undo.isNotEmpty && _saving.isEmpty,
+                              child: Text(t('撤销', 'Undo')),
+                            ),
+                            PopupMenuItem(
+                              value: 'refresh',
+                              child: Text(t('刷新', 'Refresh')),
+                            ),
                           ],
                         ),
                       ],
@@ -598,21 +640,33 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                         context,
                       ).textTheme.bodySmall?.copyWith(color: c.textSecondary),
                     ),
-                    if (_showReferences || _maps(_gallery['references']).isNotEmpty)
+                    if (_showReferences ||
+                        _maps(_gallery['references']).isNotEmpty)
                       ShooterIdentityPanel(
-                        players: _players, gallery: _gallery,
-                        expanded: _showReferences, busy: _running || _preparing,
+                        players: _players,
+                        gallery: _gallery,
+                        expanded: _showReferences,
+                        busy: _running || _preparing,
                         onRemove: (r) => unawaited(_removeReference(r)),
                         onAddPlayer: () => unawaited(_addPlayer()),
                       ),
-                    if (_rows.any((r) => (_videoId == null || r['video_id'] == _videoId) && r['player_id'] == null &&
-                        r['shooter_review_state'] == 'pending' &&
-                        _map(_auto(r)['prediction'])['status'] == 'suggested'))
-                      Align(alignment: Alignment.centerRight, child: TextButton(
-                        key: const Key('adopt-shooter-suggestions'),
-                        onPressed: _running || _preparing ? null : _adoptSuggestions,
-                        child: Text(t('采用本次建议', 'Use suggestions')),
-                      )),
+                    if (_rows.any(
+                      (r) =>
+                          (_videoId == null || r['video_id'] == _videoId) &&
+                          r['player_id'] == null &&
+                          r['shooter_review_state'] == 'pending' &&
+                          _map(_auto(r)['prediction'])['status'] == 'suggested',
+                    ))
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          key: const Key('adopt-shooter-suggestions'),
+                          onPressed: _running || _preparing
+                              ? null
+                              : _adoptSuggestions,
+                          child: Text(t('采用本次建议', 'Use suggestions')),
+                        ),
+                      ),
                     if (_running || _preparing) ...[
                       const SizedBox(height: Spacing.sm),
                       LinearProgressIndicator(
@@ -689,8 +743,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                             gridDelegate:
                                 SliverGridDelegateWithFixedCrossAxisCount(
                                   crossAxisCount: columns,
-                                  mainAxisExtent:
-                                      imageHeight + 220 * scale,
+                                  mainAxisExtent: imageHeight + 220 * scale,
                                   mainAxisSpacing: 12,
                                   crossAxisSpacing: 12,
                                 ),
@@ -765,61 +818,70 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
       child: InkWell(
         onTap: () => unawaited(_personDetail(row)),
         child: Container(
-        key: ValueKey('shooter-preview-$id-$index'),
-        decoration: BoxDecoration(
-          color: Colors.black,
-          border: Border.all(color: c.borderStrong),
-          borderRadius: BorderRadius.circular(CsRadius.sm),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            ClipRect(
-              child: Transform.scale(
-                key: ValueKey('shooter-frame-zoom-$id-$index'),
-                scale: zoom,
-                child: SizedBox.expand(child: _image(path)),
-              ),
-            ),
-            Positioned(
-              left: 6,
-              top: 6,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(
-                  color: c.background.withValues(alpha: .82),
-                  borderRadius: BorderRadius.circular(4),
+          key: ValueKey('shooter-preview-$id-$index'),
+          decoration: BoxDecoration(
+            color: Colors.black,
+            border: Border.all(color: c.borderStrong),
+            borderRadius: BorderRadius.circular(CsRadius.sm),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              ClipRect(
+                child: Transform.scale(
+                  key: ValueKey('shooter-frame-zoom-$id-$index'),
+                  scale: zoom,
+                  child: SizedBox.expand(child: _image(path)),
                 ),
-                child: Text(
-                  hasRegion ? focus['kind'] == 'person'
-                      ? t('出手人物', 'Release person')
-                      : t('出手区域', 'Release area') : t('全景', 'Full frame'),
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: hasRegion ? c.data : c.textSecondary,
+              ),
+              Positioned(
+                left: 6,
+                top: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: c.background.withValues(alpha: .82),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    hasRegion
+                        ? focus['kind'] == 'person'
+                              ? t('出手人物', 'Release person')
+                              : t('出手区域', 'Release area')
+                        : t('全景', 'Full frame'),
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: hasRegion ? c.data : c.textSecondary,
+                    ),
                   ),
                 ),
               ),
-            ),
-            Positioned(
-              right: 6,
-              top: 6,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(
-                  color: c.background.withValues(alpha: .82),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  '${index + 1} / ${_frames(row).length}',
-                  style: TextStyle(fontSize: 10, color: c.textSecondary),
+              Positioned(
+                right: 6,
+                top: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: c.background.withValues(alpha: .82),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '${index + 1} / ${_frames(row).length}',
+                    style: TextStyle(fontSize: 10, color: c.textSecondary),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      )),
+      ),
     );
   }
 
@@ -879,9 +941,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
 
   Widget _card(JsonMap row, int number) {
     final c = AppColors.of(context);
-    final id = _id(row),
-        evidence = _evidence(row),
-        frames = _frames(row);
+    final id = _id(row), evidence = _evidence(row), frames = _frames(row);
     final frame = frames.isEmpty
         ? <String, dynamic>{}
         : frames[_frameIndex(row)];
@@ -896,7 +956,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     final active = _activeId == id;
     final suggestion = _map(_auto(row)['prediction']);
     final suggestedName = suggestion['status'] == 'suggested'
-        ? (_players.where((p) => p['id'] == suggestion['player_id']).firstOrNull?['name'])
+        ? (_players
+              .where((p) => p['id'] == suggestion['player_id'])
+              .firstOrNull?['name'])
         : null;
     return Card(
       key: ValueKey('shooter-card-$id'),
@@ -969,8 +1031,11 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                     child: Text(
                       row['player_name'] == null
                           ? suggestedName == null
-                              ? t('点击名字保存射手', 'Choose a name to save')
-                              : t('建议：$suggestedName', 'Suggested: $suggestedName')
+                                ? t('点击名字保存射手', 'Choose a name to save')
+                                : t(
+                                    '建议：$suggestedName',
+                                    'Suggested: $suggestedName',
+                                  )
                           : t(
                               '射手：${row['player_name']}',
                               'Shooter: ${row['player_name']}',
@@ -1019,11 +1084,13 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                               : null,
                           style: FilledButton.styleFrom(
                             backgroundColor:
-                                (row['player_id'] ?? suggestion['player_id']) == _players[i]['id']
+                                (row['player_id'] ?? suggestion['player_id']) ==
+                                    _players[i]['id']
                                 ? c.orange.withValues(alpha: .16)
                                 : c.surface2,
                             foregroundColor:
-                                (row['player_id'] ?? suggestion['player_id']) == _players[i]['id']
+                                (row['player_id'] ?? suggestion['player_id']) ==
+                                    _players[i]['id']
                                 ? c.orange
                                 : c.textPrimary,
                             minimumSize: const Size(44, 32),
