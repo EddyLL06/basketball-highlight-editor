@@ -46,6 +46,7 @@ from basketball_highlight.runtime_errors import is_runtime_failure
 from .protocol import ProtocolError
 from .storage import ProjectStore, new_id
 from .shooter_review import ShooterReviewMixin
+from .shooter_auto import ShooterAutoMixin
 from .release_preview import read_json, render_release_previews, source_fingerprint
 from .media_tools import resolve_media_tool
 from .diagnostics import folder_summary, log_diagnostic, video_summary
@@ -55,7 +56,7 @@ from basketball_highlight.tracking import link_ball_detections
 
 
 
-class EngineService(ShooterReviewMixin):
+class EngineService(ShooterReviewMixin, ShooterAutoMixin):
     _MIN_PROCESSING_SPACE_BYTES = 512 * 1024 * 1024
 
     def __init__(self) -> None:
@@ -145,6 +146,9 @@ class EngineService(ShooterReviewMixin):
             "list_shooter_review": self.list_shooter_review,
             "prepare_shooter_review": self.prepare_shooter_review,
             "set_candidate_shooter": self.set_candidate_shooter,
+            "start_shooter_identification": self.start_shooter_identification,
+            "set_shooter_reference": self.set_shooter_reference,
+            "apply_shooter_suggestions": self.apply_shooter_suggestions,
             "start_review": self.start_review,
             "review_candidate": self.review_candidate,
             "list_review_history": self.list_review_history,

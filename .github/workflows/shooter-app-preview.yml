@@ -1,0 +1,118 @@
+name: Shooter App preview
+
+on:
+  push:
+    branches: [codex/shooter-auto-app]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shooter-app-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    if: github.repository == 'EddyLL06/basketball-highlight-editor'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+        working-directory: apps/desktop
+      - name: Format integration files
+        run: |
+          dart format apps/desktop/lib/features/review/shooter_quick_label.dart apps/desktop/lib/features/review/shooter_identity_panel.dart apps/desktop/test/shooter_quick_label_test.dart
+          git diff --binary > "$RUNNER_TEMP/shooter-format.patch"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shooter-format-${{ github.run_id }}
+          path: ${{ runner.temp }}/shooter-format.patch
+      - name: Analyze desktop
+        run: flutter analyze
+        working-directory: apps/desktop
+      - name: Test desktop
+        run: flutter test --reporter expanded
+        working-directory: apps/desktop
+
+  macos-preview:
+    needs: checks
+    if: github.repository == 'EddyLL06/basketball-highlight-editor' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[package]'))
+    runs-on: macos-15
+    env:
+      PYTHON_VERSION: '3.11.16'
+      PYTHON_BUILD_STANDALONE_TAG: '20260814'
+      PYTHONDONTWRITEBYTECODE: '1'
+      YOLO_AUTOINSTALL: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+        working-directory: apps/desktop
+      - name: Prepare portable runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="cpython-${PYTHON_VERSION}%2B${PYTHON_BUILD_STANDALONE_TAG}-aarch64-apple-darwin-install_only.tar.gz"
+          mkdir -p "$RUNNER_TEMP/bhe-python"
+          curl --fail --location --retry 3 "https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_BUILD_STANDALONE_TAG}/${archive}" -o "$RUNNER_TEMP/python.tar.gz"
+          tar -xzf "$RUNNER_TEMP/python.tar.gz" -C "$RUNNER_TEMP/bhe-python"
+          python_root="$RUNNER_TEMP/bhe-python/python"
+          echo "PYTHON_ROOT=$python_root" >> "$GITHUB_ENV"
+          "$python_root/bin/python3" -m pip install --no-cache-dir -r requirements.txt
+          "$python_root/bin/python3" scripts/prepare_shooter_models.py
+      - name: Prepare optional CoreML acceleration
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$PYTHON_ROOT/bin/python3" -m pip install --no-cache-dir -r requirements-coreml.txt
+          "$PYTHON_ROOT/bin/python3" scripts/export_mobile_model.py --model models/bball_model.pt --output models/bball_model.static.onnx --imgsz 640 --batch 1
+          "$PYTHON_ROOT/bin/python3" -m pip uninstall -y onnx
+      - name: Download portable media tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bhe-ffmpeg" "$RUNNER_TEMP/bhe-ffprobe"
+          curl --fail --location --retry 3 https://www.osxexperts.net/ffmpeg81arm.zip -o "$RUNNER_TEMP/ffmpeg.zip"
+          curl --fail --location --retry 3 https://www.osxexperts.net/ffprobe81arm.zip -o "$RUNNER_TEMP/ffprobe.zip"
+          unzip -oq "$RUNNER_TEMP/ffmpeg.zip" -d "$RUNNER_TEMP/bhe-ffmpeg"
+          unzip -oq "$RUNNER_TEMP/ffprobe.zip" -d "$RUNNER_TEMP/bhe-ffprobe"
+          ffmpeg_path="$(find "$RUNNER_TEMP/bhe-ffmpeg" -type f -name ffmpeg -print -quit)"
+          ffprobe_path="$(find "$RUNNER_TEMP/bhe-ffprobe" -type f -name ffprobe -print -quit)"
+          chmod +x "$ffmpeg_path" "$ffprobe_path"
+          lipo "$ffmpeg_path" -verify_arch arm64
+          lipo "$ffprobe_path" -verify_arch arm64
+          echo "BHE_FFMPEG=$ffmpeg_path" >> "$GITHUB_ENV"
+          echo "BHE_FFPROBE=$ffprobe_path" >> "$GITHUB_ENV"
+      - name: Build test installer with existing release scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          export BHE_PYTHON_RUNTIME="$PYTHON_ROOT"
+          export FLUTTER_BIN="$(command -v flutter)"
+          export BHE_BUILD_NAME="0.1.0-shooter.${GITHUB_RUN_NUMBER}"
+          export BHE_BUILD_NUMBER="$GITHUB_RUN_NUMBER"
+          export BHE_DMG_OUT="$GITHUB_WORKSPACE/dist/BHE-shooter-auto-macos-arm64.dmg"
+          scripts/build_macos_release.sh
+          app="apps/desktop/build/macos/Build/Products/Release/BHE.app"
+          codesign --verify --deep --strict "$app"
+          export BHE_RUNTIME_ROOT="$GITHUB_WORKSPACE/$app/Contents/Resources/runtime"
+          export PYTHONPATH="$BHE_RUNTIME_ROOT/engine/python:$BHE_RUNTIME_ROOT/src"
+          "$BHE_RUNTIME_ROOT/python/bin/python3" -c 'from basketball_engine.person_candidates import person_model_path; from basketball_engine.shooter_auto import model_metadata; from basketball_engine.shooter_identity import TorchScriptAppearance; import numpy as np; path, meta = model_metadata(); model = TorchScriptAppearance(path, meta["sha256"]); assert len(model.encode([np.zeros((128,64,3), dtype=np.uint8)])[0]) == 512; assert person_model_path().is_file(); print("Bundled shooter models: OK")'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BHE-shooter-auto-macos-arm64
+          path: |
+            dist/BHE-shooter-auto-macos-arm64.dmg
+            dist/BHE-shooter-auto-macos-arm64.dmg.sha256
+          if-no-files-found: error

@@ -10,6 +10,7 @@ from pathlib import Path
 from .adapters.analysis import PipelineCancelled
 from .protocol import ProtocolError
 from .storage import now_iso
+from .shooter_auto import augment_review
 from .release_preview import (
     cached_context,
     read_json,
@@ -54,6 +55,18 @@ def persist_evidence(store, evidence, connection=None):
 
 
 class ShooterReviewMixin:
+    def _region_person_candidates(self):
+        from .person_candidates import person_model_path, RegionPersonCandidates, YoloPersonCropDetector
+
+        path = person_model_path()
+        stat = path.stat()
+        key = (str(path), stat.st_size, stat.st_mtime_ns)
+        cached = getattr(self, "_region_person_cache", None)
+        if cached is None or cached[0] != key:
+            cached = (key, RegionPersonCandidates(YoloPersonCropDetector(path)))
+            self._region_person_cache = cached
+        return cached[1]
+
     def list_shooter_review(self, payload):
         store = self._require_store(payload)
         with store.connect() as connection:
@@ -134,14 +147,16 @@ class ShooterReviewMixin:
                     {**row, "draft": True, "shooter_review_state": "pending"}
                     for row in draft.get("candidates", [])
                 )
-        return {
+        return augment_review(store, {
             "candidates": rows,
             "players": store.list_players(),
             "videos": store.list_videos(),
             "jobs": analyses[:1] or recent[:1],
-        }
+        })
 
     def prepare_shooter_review(self, payload):
+        if not isinstance(payload.get("person_detection", False), bool):
+            raise ProtocolError("INVALID_REQUEST", "人物候选选项必须为布尔值")
         if payload.get("predictions_path") is not None:
             raise ProtocolError("INVALID_REQUEST", "当前版本仅支持从视频生成出手画面")
         with self._job_lock:
@@ -174,7 +189,7 @@ class ShooterReviewMixin:
                     project["id"],
                     videos[0]["id"] if len(videos) == 1 else None,
                     "shooter_review",
-                    {"video_ids": [v["id"] for v in videos]},
+                    {"video_ids": [v["id"] for v in videos], "person_detection": payload.get("person_detection", False)},
                 )
             }
             job_id = result["job"]["id"]
@@ -206,6 +221,7 @@ class ShooterReviewMixin:
         cancel = self._job_cancel_events[job_id]
         directory = store.root / "artifacts/shooter_review" / job_id
         generated = []
+        person_detector = None
         try:
             directory.mkdir(parents=True, exist_ok=True)
             for index, video in enumerate(videos):
@@ -226,6 +242,11 @@ class ShooterReviewMixin:
 
                 progress(0.01)
                 context = cached_context(store, video, source)
+                if payload.get("person_detection"):
+                    if context["proxy"].resolve() == source.resolve():
+                        raise ProtocolError("PERSON_PROXY_REQUIRED", "人物候选仅使用分析代理，请先完成视频分析")
+                    if person_detector is None:
+                        person_detector = self._region_person_candidates()
                 generated.extend(
                     render_release_previews(
                         video,
@@ -238,6 +259,7 @@ class ShooterReviewMixin:
                         coarse=context["coarse"],
                         cancel=cancel,
                         progress=progress,
+                        person_detector=person_detector,
                     )
                 )
             if cancel.is_set():
@@ -269,6 +291,8 @@ class ShooterReviewMixin:
                 self._job_threads.pop(job_id, None)
 
     def set_candidate_shooter(self, payload):
+        if payload.get("automatic_evidence") is True:
+            return self.set_auto_shooter(payload)
         store = self._require_store(payload)
         candidate_id = payload.get("candidate_id")
         state = payload.get("review_state", "confirmed")
@@ -306,6 +330,14 @@ class ShooterReviewMixin:
                 f["time_ms"] == time_ms for f in evidence["frames"]
             ):
                 raise ProtocolError("INVALID_REQUEST", "出手画面时间不匹配")
+            person_id = payload.get("person_id")
+            if person_id is not None and (
+                not isinstance(person_id, str) or not any(
+                    frame["time_ms"] == time_ms and any(p.get("id") == person_id for p in frame.get("people", []))
+                    for frame in evidence["frames"]
+                )
+            ):
+                raise ProtocolError("INVALID_REQUEST", "人物候选与当前画面不匹配")
             if (
                 player_id
                 and not connection.execute(
@@ -325,6 +357,7 @@ class ShooterReviewMixin:
                 "generation": row["generation"],
                 "time_ms": time_ms,
                 "player_id": player_id,
+                **({"person_id": person_id} if person_id is not None else {}),
             }
             connection.execute(
                 "UPDATE shooter_review_evidence SET selection_json=?,review_state=?,updated_at=? WHERE candidate_id=?",

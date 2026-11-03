@@ -52,3 +52,6 @@ models/AGPL-3.0.txt
 /.codegraph/
 /.ruff_cache/
 /local-review-data/
+/models/shooter-appearance.pt
+/models/shooter-appearance.json
+/models/OSNet-LICENSE.txt

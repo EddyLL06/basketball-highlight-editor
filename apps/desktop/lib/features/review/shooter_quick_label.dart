@@ -8,6 +8,7 @@ import '../../core/engine_session.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/tokens.dart';
 import 'review_text_entry_dialog.dart';
+import 'shooter_identity_panel.dart';
 
 /// A project-scoped contact sheet. All persistence goes through the engine.
 class ShooterQuickLabel extends StatefulWidget {
@@ -35,6 +36,9 @@ class ShooterQuickLabel extends StatefulWidget {
 
 class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
   List<JsonMap> _rows = [], _players = [], _videos = [];
+  JsonMap _gallery = {};
+  final Map<String, dynamic> _personChoices = {};
+  bool _showReferences = false;
   final _frameChoices = <String, int>{};
   final _saving = <String>{};
   final _undo = <JsonMap>[];
@@ -64,6 +68,11 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     if (_filter == 'pending') return row['shooter_review_state'] == 'pending';
     if (_filter == 'uncertain') {
       if (row['shooter_review_state'] == 'confirmed') return false;
+      if (_auto(row).isNotEmpty) {
+        return row['shooter_review_state'] == 'uncertain' ||
+            _auto(row)['selected_track_id'] == null ||
+            _map(_auto(row)['prediction'])['status'] != 'suggested';
+      }
       return row['shooter_review_state'] == 'uncertain' ||
           _map(row['shooter_evidence'])['release_uncertain'] == true ||
           row['shooter_evidence'] == null;
@@ -108,6 +117,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
         _rows = _maps(result['candidates']);
         _players = _maps(result['players']);
         _videos = _maps(result['videos']);
+        _gallery = _map(result['identity_gallery']);
         if (!_videos.any((v) => v['id'] == _videoId)) _videoId = null;
         _job = _maps(result['jobs']).firstOrNull;
         _loading = false;
@@ -146,6 +156,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
           _watchingJob = null;
           _frameChoices.clear();
           await _load();
+          if (mounted && _job?['stage'] == 'shooter_references') {
+            setState(() => _showReferences = true);
+          }
           return;
         }
       }
@@ -172,6 +185,81 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     } finally {
       if (mounted) setState(() => _preparing = false);
     }
+  }
+
+  Future<void> _identify() async {
+    setState(() { _preparing = true; _error = null; });
+    try {
+      final result = await widget.request('start_shooter_identification', {
+        if (_videoId != null) 'video_id': _videoId,
+      });
+      if (!mounted) return;
+      setState(() => _job = _map(result['job']));
+      unawaited(_watch(_job!['id'].toString()));
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _preparing = false);
+    }
+  }
+
+  Future<void> _reference(JsonMap row, JsonMap sample, String playerId) async {
+    await widget.request('set_shooter_reference', {
+      'sample_id': sample['id'], 'generation': _auto(row)['generation'],
+      'player_id': playerId, 'human_confirmed': true,
+    });
+    await _load();
+  }
+
+  Future<void> _removeReference(JsonMap reference) async {
+    try {
+      await widget.request('set_shooter_reference', {
+        'sample_id': reference['sample_id'], 'remove': true,
+      });
+      await _load();
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _adoptSuggestions() async {
+    setState(() => _preparing = true);
+    try {
+      await widget.request('apply_shooter_suggestions', {
+        'gallery_hash': _gallery['hash'],
+        if (_videoId != null) 'video_id': _videoId,
+      });
+      await _load();
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _preparing = false);
+    }
+  }
+
+  JsonMap _auto(JsonMap row) => _map(row['shooter_auto']);
+  JsonMap _evidence(JsonMap row) => _auto(row).isNotEmpty
+      ? _auto(row) : _map(row['shooter_evidence']);
+
+  Future<void> _personDetail(JsonMap row) async {
+    final auto = _auto(row);
+    if (auto.isEmpty) {
+      setState(() => _context = !_context);
+      return;
+    }
+    final frames = _frames(row);
+    final frame = frames.isEmpty ? null : frames[_frameIndex(row)];
+    final selected = await showShooterPersonDetail(context,
+      observation: auto, players: _players, selected: frame?['sample'] as JsonMap?,
+      busy: _running || _preparing,
+      onReference: (sample, player) => _reference(row, sample, player),
+    );
+    if (!mounted || selected == null) return;
+    setState(() {
+      _personChoices[_id(row)] = selected['track_id'];
+      _activeId = _id(row);
+      _frameChoices.remove(_id(row));
+    });
   }
 
   Future<void> _cancel() async {
@@ -208,27 +296,41 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     }
   }
 
-  List<JsonMap> _frames(JsonMap row) =>
-      _maps(_map(row['shooter_evidence'])['frames']);
+  List<JsonMap> _frames(JsonMap row) {
+    final auto = _auto(row);
+    if (auto.isEmpty) return _maps(_map(row['shooter_evidence'])['frames']);
+    final trackId = _personChoices[_id(row)] ??
+        _map(auto['selection'])['track_id'] ?? auto['selected_track_id'];
+    final track = _maps(auto['tracks']).where((t) => t['id'] == trackId).firstOrNull;
+    final samples = _maps(track?['samples'])..sort((a, b) =>
+        (a['time_ms'] as num).compareTo(b['time_ms'] as num));
+    if (samples.isEmpty) return _maps(auto['context_frames']);
+    return samples.map((s) => <String, dynamic>{
+      'time_ms': s['time_ms'], 'context_path': s['context_path'], 'sample': s,
+      'focus_region': {'crop_path': s['crop_path'], 'kind': 'person'},
+    }).toList();
+  }
   int _frameIndex(JsonMap row) {
     final frames = _frames(row);
     if (frames.isEmpty) return 0;
     final selected = _frameChoices[_id(row)];
     if (selected != null) return selected.clamp(0, frames.length - 1).toInt();
-    final saved = _map(row['shooter_selection']);
-    final evidence = _map(row['shooter_evidence']);
+    final saved = _auto(row).isNotEmpty
+        ? _map(_auto(row)['selection']) : _map(row['shooter_selection']);
+    final evidence = _evidence(row);
     final time =
         (saved['generation'] == evidence['generation']
                 ? saved['time_ms']
                 : null)
             as num?;
-    if (time == null) {
+    final targetTime = time ?? _auto(row)['display_time_ms'] as num?;
+    if (targetTime == null) {
       return frames.length ~/ 2;
     }
     var best = 0;
     for (var i = 1; i < frames.length; i++) {
-      if (((frames[i]['time_ms'] as num) - time).abs() <
-          ((frames[best]['time_ms'] as num) - time).abs()) {
+      if (((frames[i]['time_ms'] as num) - targetTime).abs() <
+          ((frames[best]['time_ms'] as num) - targetTime).abs()) {
         best = i;
       }
     }
@@ -243,7 +345,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
   }) async {
     final id = _id(row),
         frames = _frames(row),
-        evidence = _map(row['shooter_evidence']);
+        evidence = _evidence(row);
     if (_saving.isNotEmpty ||
         evidence.isEmpty ||
         frames.isEmpty ||
@@ -251,7 +353,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
       return;
     }
     final frame = frames[_frameIndex(row)];
-    final previous = _map(row['shooter_selection']);
+    final previous = _auto(row).isNotEmpty
+        ? _map(_auto(row)['selection']) : _map(row['shooter_selection']);
     final sameGeneration = previous['generation'] == evidence['generation'];
     final prior = <String, dynamic>{
       'candidate_id': id,
@@ -259,6 +362,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
       'player_id': row['player_id'],
       'review_state': row['shooter_review_state'],
       'time_ms': sameGeneration ? previous['time_ms'] : null,
+      if (_auto(row).isNotEmpty) ...{
+        'automatic_evidence': true,
+        'sample_id': sameGeneration ? previous['sample_id'] : null,
+      },
     };
     // Ordinary review labels may predate these stills; undo can restore a name
     // without claiming that an evidence frame had already been selected.
@@ -276,6 +383,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
         'time_ms': frame['time_ms'],
         'player_id': playerId,
         'review_state': state,
+        if (_auto(row).isNotEmpty) ...{
+          'automatic_evidence': true,
+          'sample_id': _map(frame['sample'])['id'],
+        },
         ...?restore,
       });
       if (!mounted) return;
@@ -286,6 +397,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
             .where((p) => p['id'] == playerId)
             .firstOrNull?['name'];
         row['shooter_selection'] = result['selection'];
+        if (_auto(row).isNotEmpty) _auto(row)['selection'] = result['selection'];
         row['shooter_review_state'] = result['review_state'];
         _frameChoices.remove(id);
         if (!_visible.any((r) => _id(r) == id)) {
@@ -307,7 +419,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
     final value = _undo.last;
     final row = _rows.where((r) => _id(r) == value['candidate_id']).firstOrNull;
     if (row == null ||
-        _map(row['shooter_evidence'])['generation'] != value['generation']) {
+        _evidence(row)['generation'] != value['generation']) {
       setState(() {
         _undo.clear();
         _error = t(
@@ -446,58 +558,61 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                             ),
                             onSelected: (_) => setState(() => _filter = option),
                           ),
-                        FilterChip(
-                          label: Text(t('显示全景蓝框', 'Show full frame')),
-                          selected: _context,
-                          selectedColor: c.orange.withValues(alpha: .14),
-                          labelStyle: TextStyle(
-                            color: _context ? c.orange : c.textSecondary,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(CsRadius.sm),
-                          ),
-                          onSelected: (v) => setState(() => _context = v),
-                        ),
-                        OutlinedButton.icon(
+                        FilledButton.icon(
+                          key: const Key('identify-shooters'),
                           onPressed: _running || _preparing
                               ? null
-                              : () => _prepare(),
-                          icon: const Icon(
-                            Icons.photo_library_outlined,
-                            size: 18,
-                          ),
-                          label: Text(t('补齐/刷新画面', 'Refresh stills')),
+                              : _identify,
+                          style: FilledButton.styleFrom(backgroundColor: c.orange,
+                              foregroundColor: Colors.black),
+                          icon: const Icon(Icons.auto_awesome, size: 18),
+                          label: Text(t('自动识别出手者', 'Identify shooters')),
                         ),
-                        TextButton.icon(
-                          onPressed: _addingPlayer || _saving.isNotEmpty
-                              ? null
-                              : () => _addPlayer(),
-                          icon: const Icon(Icons.person_add_alt_1, size: 18),
-                          label: Text(t('添加球员', 'Add player')),
-                        ),
-                        TextButton.icon(
-                          onPressed: _undo.isEmpty || _saving.isNotEmpty
-                              ? null
-                              : _undoLast,
-                          icon: const Icon(Icons.undo, size: 18),
-                          label: Text(t('撤销', 'Undo')),
-                        ),
-                        IconButton(
-                          tooltip: t('刷新', 'Refresh'),
-                          onPressed: _load,
-                          icon: const Icon(Icons.refresh, size: 20),
+                        PopupMenuButton<String>(
+                          tooltip: t('更多操作', 'More actions'),
+                          onSelected: (value) {
+                            if (value == 'references') setState(() => _showReferences = !_showReferences);
+                            if (value == 'context') setState(() => _context = !_context);
+                            if (value == 'stills') unawaited(_prepare());
+                            if (value == 'refresh') unawaited(_load());
+                            if (value == 'undo') unawaited(_undoLast());
+                          },
+                          itemBuilder: (_) => [
+                            PopupMenuItem(value: 'references', child: Text(t('球员参考图', 'Player references'))),
+                            PopupMenuItem(value: 'context', child: Text(t('显示全景蓝框', 'Show full frame'))),
+                            PopupMenuItem(value: 'stills', enabled: !_running && !_preparing,
+                                child: Text(t('补齐/刷新画面', 'Refresh stills'))),
+                            PopupMenuItem(value: 'undo', enabled: _undo.isNotEmpty && _saving.isEmpty,
+                                child: Text(t('撤销', 'Undo'))),
+                            PopupMenuItem(value: 'refresh', child: Text(t('刷新', 'Refresh'))),
+                          ],
                         ),
                       ],
                     ),
                     Text(
                       t(
-                        '看中间帧认人，点击姓名保存；前后帧按需切换。数字 1–9 标记当前卡片。',
-                        'Choose a name using the middle frame; switch adjacent frames when needed. Keys 1–9 label the selected card.',
+                        '点击姓名保存；点击人物画面查看详情或设置参考图。数字 1–9 标记当前卡片。',
+                        'Choose a name to save. Open an image for details or references. Keys 1–9 label the selected card.',
                       ),
                       style: Theme.of(
                         context,
                       ).textTheme.bodySmall?.copyWith(color: c.textSecondary),
                     ),
+                    if (_showReferences || _maps(_gallery['references']).isNotEmpty)
+                      ShooterIdentityPanel(
+                        players: _players, gallery: _gallery,
+                        expanded: _showReferences, busy: _running || _preparing,
+                        onRemove: (r) => unawaited(_removeReference(r)),
+                        onAddPlayer: () => unawaited(_addPlayer()),
+                      ),
+                    if (_rows.any((r) => (_videoId == null || r['video_id'] == _videoId) && r['player_id'] == null &&
+                        r['shooter_review_state'] == 'pending' &&
+                        _map(_auto(r)['prediction'])['status'] == 'suggested'))
+                      Align(alignment: Alignment.centerRight, child: TextButton(
+                        key: const Key('adopt-shooter-suggestions'),
+                        onPressed: _running || _preparing ? null : _adoptSuggestions,
+                        child: Text(t('采用本次建议', 'Use suggestions')),
+                      )),
                     if (_running || _preparing) ...[
                       const SizedBox(height: Spacing.sm),
                       LinearProgressIndicator(
@@ -518,8 +633,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                                       'Analysis in progress: release stills appear here; label shooters after completion.',
                                     )
                                   : t(
-                                      '正在准备出手画面，原有标签保留。',
-                                      'Preparing frames; existing labels are preserved.',
+                                      '正在处理代理出手画面，原有标签保留。',
+                                      'Processing proxy release frames; existing labels are preserved.',
                                     ),
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
@@ -628,7 +743,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
 
   Widget _framePreview(JsonMap row, JsonMap frame, int index) {
     final c = AppColors.of(context);
-    final id = _id(row), evidence = _map(row['shooter_evidence']);
+    final id = _id(row), evidence = _evidence(row);
     final focus = _map(frame['focus_region']);
     final cropPath = focus['crop_path'];
     final path =
@@ -647,7 +762,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
         '第 ${index + 1} 帧，${_time(frame['time_ms'])}',
         'Frame ${index + 1}, ${_time(frame['time_ms'])}',
       ),
-      child: Container(
+      child: InkWell(
+        onTap: () => unawaited(_personDetail(row)),
+        child: Container(
         key: ValueKey('shooter-preview-$id-$index'),
         decoration: BoxDecoration(
           color: Colors.black,
@@ -675,7 +792,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  hasRegion ? t('出手区域', 'Release area') : t('全景', 'Full frame'),
+                  hasRegion ? focus['kind'] == 'person'
+                      ? t('出手人物', 'Release person')
+                      : t('出手区域', 'Release area') : t('全景', 'Full frame'),
                   style: TextStyle(
                     fontSize: 10,
                     color: hasRegion ? c.data : c.textSecondary,
@@ -700,7 +819,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 
@@ -761,7 +880,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
   Widget _card(JsonMap row, int number) {
     final c = AppColors.of(context);
     final id = _id(row),
-        evidence = _map(row['shooter_evidence']),
+        evidence = _evidence(row),
         frames = _frames(row);
     final frame = frames.isEmpty
         ? <String, dynamic>{}
@@ -775,6 +894,10 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
         _saving.isEmpty &&
         !_addingPlayer;
     final active = _activeId == id;
+    final suggestion = _map(_auto(row)['prediction']);
+    final suggestedName = suggestion['status'] == 'suggested'
+        ? _players.where((p) => p['id'] == suggestion['player_id']).firstOrNull?['name']
+        : null;
     return Card(
       key: ValueKey('shooter-card-$id'),
       margin: EdgeInsets.zero,
@@ -817,6 +940,8 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                         ? t('已保存', 'Saved')
                         : state == 'uncertain'
                         ? t('不确定', 'Uncertain')
+                        : suggestedName != null
+                        ? t('姓名建议', 'Suggested')
                         : t('待标注', 'Pending'),
                     style: TextStyle(
                       fontSize: 11,
@@ -833,7 +958,7 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                     ? _image(null)
                     : _framePreview(row, frame, _frameIndex(row)),
               ),
-              if (frames.isNotEmpty) ...[
+              if (frames.isNotEmpty && _auto(row).isEmpty) ...[
                 const SizedBox(height: 4),
                 _framePicker(row),
               ],
@@ -843,7 +968,9 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                   Expanded(
                     child: Text(
                       row['player_name'] == null
-                          ? t('点击名字保存射手', 'Choose a name to save')
+                          ? suggestedName == null
+                              ? t('点击名字保存射手', 'Choose a name to save')
+                              : t('建议：$suggestedName', 'Suggested: $suggestedName')
                           : t(
                               '射手：${row['player_name']}',
                               'Shooter: ${row['player_name']}',
@@ -892,11 +1019,11 @@ class _ShooterQuickLabelState extends State<ShooterQuickLabel> {
                               : null,
                           style: FilledButton.styleFrom(
                             backgroundColor:
-                                row['player_id'] == _players[i]['id']
+                                (row['player_id'] ?? suggestion['player_id']) == _players[i]['id']
                                 ? c.orange.withValues(alpha: .16)
                                 : c.surface2,
                             foregroundColor:
-                                row['player_id'] == _players[i]['id']
+                                (row['player_id'] ?? suggestion['player_id']) == _players[i]['id']
                                 ? c.orange
                                 : c.textPrimary,
                             minimumSize: const Size(44, 32),

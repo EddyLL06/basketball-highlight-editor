@@ -15,6 +15,9 @@ class _ReviewEngine {
     {'id': 'green', 'name': 'Green'},
   ];
   final createdNames = <String>[];
+  bool automatic = false;
+  int identifyRequests = 0;
+  final referenceRequests = <JsonMap>[];
 
   Future<JsonMap> request(String command, JsonMap payload) async {
     if (command == 'list_shooter_review') {
@@ -24,6 +27,7 @@ class _ReviewEngine {
           {'id': 'video'},
         ],
         'jobs': [],
+        'identity_gallery': {'ready': true, 'hash': 'gallery', 'counts': {}, 'references': []},
         'candidates': [
           for (var i = 0; i < rowCount; i++)
             {
@@ -35,6 +39,15 @@ class _ReviewEngine {
               'selection_status': 'excluded',
               'player_id': null,
               'shooter_review_state': 'pending',
+              if (automatic) 'shooter_auto': {
+                'generation': 'auto-g1', 'selected_track_id': 1, 'display_time_ms': 1100,
+                'prediction': {'status': 'suggested', 'player_id': 'red', 'confidence_band': 'tentative'},
+                'context_frames': [],
+                'tracks': [{'id': 1, 'samples': [{
+                  'id': 'sample-c$i', 'track_id': 1, 'time_ms': 1100,
+                  'crop_path': null, 'context_path': null,
+                }]}],
+              },
               'shooter_selection': <String, dynamic>{
                 if (savedTimeMs != null) ...{
                   'generation': 'g1',
@@ -79,6 +92,15 @@ class _ReviewEngine {
       };
       players.add(player);
       return {'player': player};
+    }
+    if (command == 'start_shooter_identification') {
+      identifyRequests++;
+      return {'job': {'id': 'auto-job', 'state': 'completed'}};
+    }
+    if (command == 'get_job') return {'job': {'id': 'auto-job', 'state': 'completed'}};
+    if (command == 'set_shooter_reference') {
+      referenceRequests.add(Map.of(payload));
+      return {'updated': true};
     }
     throw StateError('Unexpected command: $command');
   }
@@ -286,7 +308,9 @@ void main() {
       expect(tester.widget<FilledButton>(name).onPressed, isNull);
       expect(find.text('Analysis preview'), findsNWidgets(2));
       engine.draft = false;
-      await tester.tap(find.byTooltip('Refresh'));
+      await tester.tap(find.byTooltip('More actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Refresh'));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ChoiceChip, 'Uncertain'));
       await tester.pumpAndSettle();
@@ -333,6 +357,8 @@ void main() {
       engine.rejectSave = false;
       await tester.tap(name);
       await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('More actions'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Undo'));
       await tester.pumpAndSettle();
       expect(engine.saves.last['review_state'], 'pending');
@@ -365,4 +391,36 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('automatic identification starts only from the independent button', (tester) async {
+    final engine = _ReviewEngine();
+    await _pump(tester, engine);
+    expect(engine.identifyRequests, 0);
+    expect(find.text('Refresh stills'), findsNothing);
+    await tester.tap(find.byKey(const Key('identify-shooters')));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(engine.identifyRequests, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tentative name can be confirmed and references need an explicit action', (tester) async {
+    final engine = _ReviewEngine()..automatic = true;
+    await _pump(tester, engine);
+    expect(find.text('Suggested: Red'), findsNWidgets(2));
+    expect(engine.referenceRequests, isEmpty);
+    await tester.tap(find.byKey(const ValueKey('shooter-name-c0-red')));
+    await tester.pumpAndSettle();
+    expect(engine.saves.single['automatic_evidence'], isTrue);
+    expect(engine.saves.single['sample_id'], 'sample-c0');
+    expect(engine.saves.single.containsKey('outcome'), isFalse);
+    expect(engine.referenceRequests, isEmpty);
+    await tester.tap(find.byKey(const ValueKey('shooter-preview-c0-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Set reference'));
+    await tester.pumpAndSettle();
+    expect(engine.referenceRequests.single['human_confirmed'], isTrue);
+    expect(engine.referenceRequests.single['sample_id'], 'sample-c0');
+    expect(tester.takeException(), isNull);
+  });
 }
